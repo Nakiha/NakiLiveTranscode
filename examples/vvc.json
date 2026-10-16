@@ -3,6 +3,7 @@
   "output": "/data/output-vvc.ts",
   "output_format": "mpegts",
   "encoder": "libvvenc",
+  "encoder_profile": "live_3b_2s",
   "encoder_preset": "faster",
   "encoder_threads": 2,
   "width": 640,

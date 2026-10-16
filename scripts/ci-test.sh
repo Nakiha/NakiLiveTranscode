@@ -5,6 +5,7 @@ mkdir -p out
 python3 tests/decoder_integration.py
 python3 tests/service_integration.py
 python3 tests/vvenc_integration.py
+python3 tests/vvenc_latency.py --repeats 1
 python3 tests/observability_integration.py
 python3 tests/process_integration.py
 python3 tests/crash_integration.py

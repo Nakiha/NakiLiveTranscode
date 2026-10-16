@@ -73,7 +73,7 @@ static yyjson_mut_val *metric_json(yyjson_mut_doc *doc, const Metric *metric) {
 }
 static void add_latencies(yyjson_mut_doc *doc, yyjson_mut_val *obj, const Latencies *m) {
 #define ADD(name) yyjson_mut_obj_add_val(doc,obj,#name,metric_json(doc,&m->name))
-    ADD(demux_read); ADD(input_queue); ADD(decode); ADD(setup); ADD(filter); ADD(encode); ADD(mux);
+    ADD(demux_read); ADD(input_queue); ADD(decode); ADD(setup); ADD(filter); ADD(encode); ADD(encode_submit); ADD(encode_wait); ADD(mux);
     ADD(ingress_to_mux); ADD(scheduled_to_mux); ADD(interleave_call); ADD(avio_flush);
 #undef ADD
 }
@@ -102,6 +102,11 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     yyjson_mut_obj_add_str(doc,startup,"boundary","complete_http_request_handler_to_mux_flush");
     yyjson_mut_obj_add_bool(doc,startup,"prewarmed",job->prewarmed);
     yyjson_mut_obj_add_sint(doc,startup,"request_monotonic_us",job->started_us);
+#define CHECKPOINT(name) do { if(job->name##_us) yyjson_mut_obj_add_real(doc,startup,#name "_ms",(job->name##_us-job->started_us)/1000.0); else yyjson_mut_obj_add_null(doc,startup,#name "_ms"); } while(0)
+    CHECKPOINT(input_open_started); CHECKPOINT(input_open_done); CHECKPOINT(input_probe_done); CHECKPOINT(decoder_ready);
+    CHECKPOINT(first_packet); CHECKPOINT(first_decoded); CHECKPOINT(encoder_open_started); CHECKPOINT(encoder_open_done);
+    CHECKPOINT(output_header_done); CHECKPOINT(first_encoder_submit);
+#undef CHECKPOINT
     yyjson_mut_obj_add_real(doc,startup,"request_to_dispatch_ms",(job->assigned_us-job->started_us)/1000.0);
     yyjson_mut_obj_add_real(doc,startup,"dispatch_to_worker_ms",(job->worker_received_us-job->assigned_us)/1000.0);
     yyjson_mut_obj_add_real(doc,startup,"worker_boot_ms",(job->worker_ready_us-job->worker_spawned_us)/1000.0);
@@ -113,6 +118,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_int(doc,"frame_log",job->config.frame_log);
     json_str(doc,"encoder",job->config.encoder);
     json_str(doc,"encoder_preset",job->config.encoder_preset);
+    json_str(doc,"encoder_profile",job->config.encoder_profile);
     json_int(doc,"crash_collector_pid",crash_collector_pid());
     json_int(doc,"slow_frame_ms",job->config.slow_frame_ms);
     int64_t current=now_us(), end=job->ended_us ? job->ended_us : current;
@@ -128,6 +134,8 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     yyjson_mut_val *i_stages=yyjson_mut_obj(doc);
     add_latencies(doc,i_stages,&job->i_lifetime);
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"i_frame_stages",i_stages);
+    yyjson_mut_val *key_stages=yyjson_mut_obj(doc); add_latencies(doc,key_stages,&job->key_lifetime);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"output_key_stages",key_stages);
     yyjson_mut_val *window=yyjson_mut_obj(doc);
     double seconds=(end-job->window_start_us)/1000000.0;
     yyjson_mut_obj_add_real(doc,window,"duration_s",seconds>0 ? seconds : 0);
@@ -137,10 +145,13 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     yyjson_mut_obj_add_val(doc,window,"frame_types",group_json(doc,&job->window_groups));
     i_stages=yyjson_mut_obj(doc); add_latencies(doc,i_stages,&job->i_window);
     yyjson_mut_obj_add_val(doc,window,"i_frame_stages",i_stages);
+    key_stages=yyjson_mut_obj(doc); add_latencies(doc,key_stages,&job->key_window);
+    yyjson_mut_obj_add_val(doc,window,"output_key_stages",key_stages);
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"window",window);
     if(report) {
         memset(&job->window,0,sizeof(job->window)); memset(&job->window_groups,0,sizeof(job->window_groups));
         memset(&job->i_window,0,sizeof(job->i_window));
+        memset(&job->key_window,0,sizeof(job->key_window));
         job->window_start_us=end; job->window_start_input=job->packets_in; job->window_start_output=job->packets_out;
     }
     yyjson_mut_val *a = yyjson_mut_obj(doc);
@@ -198,6 +209,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         else if (!strcmp(name,"output_format")) { dest=c.output_format; len=sizeof(c.output_format); }
         else if (!strcmp(name,"encoder")) { dest=c.encoder; len=sizeof(c.encoder); }
         else if (!strcmp(name,"encoder_preset")) { dest=c.encoder_preset; len=sizeof(c.encoder_preset); }
+        else if (!strcmp(name,"encoder_profile")) { dest=c.encoder_profile; len=sizeof(c.encoder_profile); }
         if (dest) {
             if (!yyjson_is_str(val) || !yyjson_get_len(val) || yyjson_get_len(val)>=len ||
                 strlen(yyjson_get_str(val)) != yyjson_get_len(val)) { bad(error,cap,"Invalid string field"); goto end; }
@@ -227,6 +239,9 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if (!*c.input || !*c.output) {bad(error,cap,"input and output are required"); goto end;}
     int vvc=!strcmp(c.encoder,"libvvenc");
     if (!vvc && strcmp(c.encoder,"libx264")) {bad(error,cap,"encoder must be libx264 or libvvenc"); goto end;}
+    if(!*c.encoder_profile) strcpy(c.encoder_profile,vvc ? "live_3b_2s" : "default");
+    if ((vvc && strcmp(c.encoder_profile,"reference") && strcmp(c.encoder_profile,"live_3b_2s") && strcmp(c.encoder_profile,"live_3b_2s_no_mctf")) ||
+        (!vvc && strcmp(c.encoder_profile,"default"))) {bad(error,cap,"Invalid encoder_profile for selected encoder"); goto end;}
     if (!*c.encoder_preset) strcpy(c.encoder_preset,vvc ? "faster" : "veryfast");
     const char *presets=vvc ? "|faster|fast|medium|slow|slower|" : "|ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|";
     char preset_key[20]; snprintf(preset_key,sizeof(preset_key),"|%s|",c.encoder_preset);

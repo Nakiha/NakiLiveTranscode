@@ -23,7 +23,7 @@
 
 typedef struct Stamp {
     int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
-    int64_t encoder_submit_us, scheduled_us, filter_started_us;
+    int64_t encoder_submit_us, encoder_accepted_us, scheduled_us, filter_started_us;
     int picture_type, decoded_key, input_key, first_i;
 } Stamp;
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; } Interrupt;
@@ -48,7 +48,20 @@ typedef struct Pipeline {
     pthread_t reader;
     Ledger ledger[LEDGER_CAPACITY];
     int64_t last_pts, synthetic_pts, next_stats_us;
+    int64_t encoder_api_us;
 } Pipeline;
+
+static void checkpoint(Pipeline *p, int64_t *field) {
+    pthread_mutex_lock(&p->job->mutex); if(!*field)*field=now_us(); pthread_mutex_unlock(&p->job->mutex);
+}
+static int encoder_send(Pipeline *p, const AVFrame *frame) {
+    int64_t began=now_us(); int ret=avcodec_send_frame(p->encoder,frame);
+    p->encoder_api_us+=now_us()-began; return ret;
+}
+static int encoder_receive(Pipeline *p, AVPacket *packet) {
+    int64_t began=now_us(); int ret=avcodec_receive_packet(p->encoder,packet);
+    p->encoder_api_us+=now_us()-began; return ret;
+}
 
 static int interrupted(void *opaque) {
     Interrupt *io=opaque;
@@ -104,6 +117,7 @@ static void *reader_main(void *opaque) {
         Stamp *stamp=(Stamp *)packet->opaque_ref->data;
         stamp->sequence=seq++; stamp->read_us=finished-began;
         stamp->ingress_us=now_us(); stamp->scheduled_us=due;
+        checkpoint(p,&job->first_packet_us);
         stamp->input_key=!!(packet->flags&AV_PKT_FLAG_KEY);
         pthread_mutex_lock(&p->ring_mutex);
         while (p->count==READER_CAPACITY && !atomic_load(&job->cancel)) pthread_cond_wait(&p->ring_space,&p->ring_mutex);
@@ -177,6 +191,7 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     p->input_width=frame->width; p->input_height=frame->height; p->input_format=frame->format;
 
     p->stage="encoder initialization";
+    checkpoint(p,&p->job->encoder_open_started_us);
     const AVCodec *codec=avcodec_find_encoder_by_name(cfg->encoder);
     if (!codec) return AVERROR_ENCODER_NOT_FOUND;
     p->encoder=avcodec_alloc_context3(codec);
@@ -201,10 +216,34 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     if (p->output->oformat->flags&AVFMT_GLOBALHEADER) p->encoder->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
     AVDictionary *options=NULL;
     av_dict_set(&options,"preset",cfg->encoder_preset,0);
-    if (vvc) av_dict_set(&options,"period","2",0);
+    char vvenc_params[2048]="";
+    int intra_frames=0;
+    if (vvc && strcmp(cfg->encoder_profile,"reference")) {
+        int temporal_filter=strcmp(cfg->encoder_profile,"live_3b_2s_no_mctf")!=0;
+        intra_frames=(int)av_rescale_q(2,(AVRational){1,1},av_inv_q(p->frame_rate));
+        if (intra_frames<4) return AVERROR(EINVAL);
+        p->encoder->gop_size=intra_frames; p->encoder->max_b_frames=3;
+        /* Display order I B B B P ... ; coding order P4 B2 B1 B3. Explicit
+           frame period avoids VVenC's seconds-to-GOP rounding (50 -> 48).
+           Frame-parallel=0 keeps intra-frame threading and avoids the extra
+           stage queue. LookAhead stays enabled for single-pass bitrate RC.
+           BIM=1 with this P-anchor layout + MCTF reproducibly aborts v1.14
+           on the 320x180 10-bit regression; keep BIM off independently. */
+        snprintf(vvenc_params,sizeof(vvenc_params),
+            "GOPSize=4:IntraPeriod=%d:POC0IDR=1:STA=0:MaxParallelFrames=0:"
+            "MCTF=%d:BIM=0:MCTFFutureReference=0:"
+            "Frame1=P 4 0 0 0 0 0 1.0 0 0 0 0 0 0 0 1 1 4 0 0:"
+            "Frame2=B 2 1 0 0 0 0 1.0 0 0 0 0 0 0 1 1 1 2 1 1 -2:"
+            "Frame3=B 1 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1:"
+            "Frame4=B 3 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1",
+            intra_frames,temporal_filter);
+        av_dict_set(&options,"vvenc-params",vvenc_params,0);
+    }
+    else if (vvc) av_dict_set(&options,"period","2",0);
     else av_dict_set(&options,"tune","zerolatency",0);
     ret=avcodec_open2(p->encoder,codec,&options); av_dict_free(&options);
     if (ret<0) return ret;
+    checkpoint(p,&p->job->encoder_open_done_us);
     p->video=avformat_new_stream(p->output,NULL);
     if (!p->video) return AVERROR(ENOMEM);
     ret=avcodec_parameters_from_context(p->video->codecpar,p->encoder);
@@ -231,10 +270,13 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     atomic_store(&p->write_interrupt.deadline,0);
     if (ret<0) return ret;
     p->header_written=1;
+    checkpoint(p,&p->job->output_header_done_us);
     yyjson_mut_doc *doc=new_event("pipeline_ready",p->job);
     json_int(doc,"input_width",frame->width); json_int(doc,"input_height",frame->height);
     json_int(doc,"output_width",p->encoder->width); json_int(doc,"output_height",p->encoder->height);
     json_str(doc,"encoder",cfg->encoder); json_str(doc,"encoder_preset",cfg->encoder_preset);
+    json_str(doc,"encoder_profile",cfg->encoder_profile);
+    if (vvc) {json_str(doc,"vvenc_params",vvenc_params); json_int(doc,"intra_period_frames",intra_frames);}
     json_str(doc,"pixel_format",pixel_format); json_str(doc,"filter",chain);
     json_int(doc,"encoder_time_base_num",p->encoder->time_base.num);
     json_int(doc,"encoder_time_base_den",p->encoder->time_base.den);
@@ -248,6 +290,7 @@ static void sample_latencies(Latencies *m, const Stamp *s, int64_t encoded, int6
     SAMPLE(demux_read,s->read_us); SAMPLE(input_queue,s->submitted_us-s->ingress_us);
     SAMPLE(decode,s->decoded_us-s->submitted_us); SAMPLE(setup,s->filter_started_us-s->decoded_us);
     SAMPLE(filter,s->filtered_us-s->filter_started_us); SAMPLE(encode,encoded-s->encoder_submit_us);
+    SAMPLE(encode_submit,s->encoder_accepted_us-s->encoder_submit_us); SAMPLE(encode_wait,encoded-s->encoder_accepted_us);
     SAMPLE(mux,written-begin); SAMPLE(ingress_to_mux,written-s->ingress_us);
     SAMPLE(interleave_call,interleaved-begin); SAMPLE(avio_flush,written-interleaved);
     if(s->scheduled_us) {SAMPLE(scheduled_to_mux,written-s->scheduled_us);}
@@ -265,7 +308,7 @@ static void sample_groups(FrameGroups *g, const Stamp *s, int output_key, int fi
 static int receive_encoded(Pipeline *p) {
     int ret; AVPacket *packet=av_packet_alloc();
     if (!packet) return AVERROR(ENOMEM);
-    while ((ret=avcodec_receive_packet(p->encoder,packet))>=0) {
+    while ((ret=encoder_receive(p,packet))>=0) {
         int64_t encoded=now_us(); int slot=-1;
         for (int i=0;i<LEDGER_CAPACITY;i++) if(p->ledger[i].used && p->ledger[i].pts==packet->pts) {slot=i; break;}
         if (slot<0) {ret=AVERROR_INVALIDDATA; break;}
@@ -310,6 +353,10 @@ static int receive_encoded(Pipeline *p) {
         sample_latencies(&p->job->window,&stamp,encoded,mux_start,interleaved,written,slow);
         sample_groups(&p->job->groups,&stamp,output_key,first_i,total,slow);
         sample_groups(&p->job->window_groups,&stamp,output_key,first_i,total,slow);
+        if(output_key) {
+            sample_latencies(&p->job->key_lifetime,&stamp,encoded,mux_start,interleaved,written,slow);
+            sample_latencies(&p->job->key_window,&stamp,encoded,mux_start,interleaved,written,slow);
+        }
         if(stamp.picture_type==AV_PICTURE_TYPE_I) {
             sample_latencies(&p->job->i_lifetime,&stamp,encoded,mux_start,interleaved,written,slow);
             sample_latencies(&p->job->i_window,&stamp,encoded,mux_start,interleaved,written,slow);
@@ -317,6 +364,7 @@ static int receive_encoded(Pipeline *p) {
         }
         p->job->last_output_us=written;
         uint64_t ordinal=p->job->packets_out;
+        uint64_t submitted=p->job->frames_filtered;
         pthread_mutex_unlock(&p->job->mutex);
         int trace=p->job->config.frame_log && (!((ordinal-1)%p->job->config.frame_log_every) ||
            stamp.picture_type==AV_PICTURE_TYPE_I || output_key || total>=slow);
@@ -333,6 +381,8 @@ static int receive_encoded(Pipeline *p) {
         json_num(doc,"decode_ms",decode); json_num(doc,"filter_ms",filter);
         json_num(doc,"setup_or_dispatch_ms",(stamp.filter_started_us-stamp.decoded_us)/1000.0);
         json_num(doc,"encode_ms",encode); json_num(doc,"mux_ms",mux);
+        json_num(doc,"encode_submit_ms",(stamp.encoder_accepted_us-stamp.encoder_submit_us)/1000.0);
+        json_num(doc,"encode_wait_ms",(encoded-stamp.encoder_accepted_us)/1000.0);
         json_num(doc,"interleave_call_ms",(interleaved-mux_start)/1000.0);
         json_num(doc,"avio_flush_ms",(written-interleaved)/1000.0);
         json_num(doc,"ingress_to_mux_ms",total);
@@ -360,6 +410,12 @@ static int receive_encoded(Pipeline *p) {
             json_num(first,"dispatch_to_worker_ms",(p->job->worker_received_us-p->job->assigned_us)/1000.0);
             json_num(first,"worker_to_packet_ingress_ms",(stamp.ingress_us-p->job->worker_received_us)/1000.0);
             json_num(first,"request_to_mux_ms",(written-p->job->started_us)/1000.0);
+            json_num(first,"encoder_api_wall_to_output_ms",p->encoder_api_us/1000.0);
+            json_int(first,"encoder_submitted_frames_at_output",submitted);
+            yyjson_mut_doc *status=job_snapshot(p->job);
+            yyjson_mut_val *startup=yyjson_mut_obj_get(yyjson_mut_doc_get_root(status),"startup");
+            if(startup) yyjson_mut_obj_add_val(first,yyjson_mut_doc_get_root(first),"startup",yyjson_mut_val_mut_copy(first,startup));
+            yyjson_mut_doc_free(status);
             pthread_mutex_lock(&p->job->mutex);
             int checkpoint=first_output ? 0 : 1;
             p->job->first_chain[checkpoint]=yyjson_mut_doc_mut_copy(first,NULL);
@@ -383,16 +439,23 @@ static int encode_frame(Pipeline *p, AVFrame *frame) {
     /* Input picture type is trace metadata, not a forced output GOP decision. */
     frame->pict_type=AV_PICTURE_TYPE_NONE;
     if (p->last_pts!=AV_NOPTS_VALUE && frame->pts<=p->last_pts) return AVERROR_INVALIDDATA;
+    if (!strcmp(p->job->config.encoder,"libvvenc") && strcmp(p->job->config.encoder_profile,"reference") &&
+        p->last_pts!=AV_NOPTS_VALUE && frame->pts!=p->last_pts+1) {
+        p->stage="non-CFR VVC input; frame-rate conversion required";
+        return AVERROR_INVALIDDATA;
+    }
     int slot=-1;
     for (int i=0;i<LEDGER_CAPACITY;i++) if(!p->ledger[i].used) {slot=i; break;}
     if (slot<0) return AVERROR(ENOBUFS);
     p->stage="encode";
     int ret;
     stamp.encoder_submit_us=now_us();
-    while ((ret=avcodec_send_frame(p->encoder,frame))==AVERROR(EAGAIN)) {
+    checkpoint(p,&p->job->first_encoder_submit_us);
+    while ((ret=encoder_send(p,frame))==AVERROR(EAGAIN)) {
         if ((ret=receive_encoded(p))<0) return ret;
     }
     if (ret<0) return ret;
+    stamp.encoder_accepted_us=now_us();
     p->ledger[slot]=(Ledger){.used=1,.pts=frame->pts,.stamp=stamp}; p->last_pts=frame->pts;
     pthread_mutex_lock(&p->job->mutex); p->job->frames_filtered++; pthread_mutex_unlock(&p->job->mutex);
     return receive_encoded(p);
@@ -415,6 +478,7 @@ static int process_frame(Pipeline *p, AVFrame *frame) {
     if (ret<0) return ret;
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
     stamp->decoded_us=now_us();
+    checkpoint(p,&p->job->first_decoded_us);
     stamp->picture_type=frame->pict_type;
     stamp->first_i=frame->pict_type==AV_PICTURE_TYPE_I && !p->seen_input_i;
     if (frame->pict_type==AV_PICTURE_TYPE_I) p->seen_input_i=1;
@@ -442,11 +506,14 @@ static int initialize_decoder(Pipeline *p) {
     p->input->interrupt_callback=(AVIOInterruptCB){interrupted,&p->read_interrupt};
     p->input->probesize=1024*1024; p->input->max_analyze_duration=1000000;
     atomic_store(&p->read_interrupt.deadline,now_us()+IO_TIMEOUT_US);
+    checkpoint(p,&p->job->input_open_started_us);
     int ret=avformat_open_input(&p->input,p->job->config.input,NULL,NULL);
     if (ret<0) return ret;
+    checkpoint(p,&p->job->input_open_done_us);
     ret=avformat_find_stream_info(p->input,NULL);
     atomic_store(&p->read_interrupt.deadline,0);
     if (ret<0) return ret;
+    checkpoint(p,&p->job->input_probe_done_us);
     ret=av_find_best_stream(p->input,AVMEDIA_TYPE_VIDEO,-1,-1,NULL,0);
     if (ret<0) return ret;
     p->stream_index=ret;
@@ -472,6 +539,7 @@ static int initialize_decoder(Pipeline *p) {
     avcodec_async_budget_free(&budget);
     if (ret<0) return ret;
     refresh_auto(p);
+    checkpoint(p,&p->job->decoder_ready_us);
     pthread_mutex_lock(&p->job->mutex); strcpy(p->job->state,"running"); pthread_mutex_unlock(&p->job->mutex);
     return event_log(p,"decoder_ready");
 }
@@ -533,7 +601,7 @@ void *pipeline_main(void *opaque) {
         ret=av_buffersrc_add_frame_flags(p.source,NULL,0);
         if (ret<0 || (ret=filter_output(&p))<0) goto cleanup;
         p.stage="encoder drain";
-        ret=avcodec_send_frame(p.encoder,NULL);
+        ret=encoder_send(&p,NULL);
         if (ret<0 || (ret=receive_encoded(&p))<0) goto cleanup;
         for (int i=0;i<LEDGER_CAPACITY;i++) if(p.ledger[i].used) {ret=AVERROR_INVALIDDATA; goto cleanup;}
     } else if (!atomic_load(&job->cancel)) {p.stage="empty video"; ret=AVERROR(ENODATA);}

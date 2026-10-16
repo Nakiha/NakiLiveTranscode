@@ -50,7 +50,7 @@ bash scripts/build-service.sh
 
 `width`、`height` 同时为正偶数时缩放；同时省略则保持输入尺寸，但转换为 YUV420P。`bitrate` 默认 1.5 Mbps；`encoder_threads` 默认 2。`max_threads` 默认 12，自动模式 `min_threads` 默认 2，`budget_slots` 默认 12；预算只约束解码任务，不含 filter 和编码器。`queue_capacity` 默认 4，此外有 8 个包的输入队列。`fps` 是缺失帧率时的回退值；不做帧率转换。`pace=true` 仅用于本地文件按 DTS 实时回放。
 
-本版只处理第一条可用视频流：原生 H.264/HEVC 软解 → null/scale + format filter → 编码 → 输出。默认 `encoder=libx264`，`encoder_preset=veryfast`，YUV420P、zerolatency、无输出 B 帧，支持 MPEG-TS / MP4 / FLV。选择 `encoder=libvvenc` 时默认 `encoder_preset=faster`，强制 YUV420P10LE，支持 MPEG-TS / MP4，保留 VVenC 的前瞻与重排。其 preset 可用 faster/fast/medium/slow/slower，其他组合返回 400。详见 [VVenC](vvenc.md)。音频、字幕不处理。配置不接受未知或重复字段；请求体上限 16 KiB。
+本版只处理第一条可用视频流：原生 H.264/HEVC 软解 → null/scale + format filter → 编码 → 输出。默认 `encoder=libx264`，`encoder_preset=veryfast`，YUV420P、zerolatency、无输出 B 帧，支持 MPEG-TS / MP4 / FLV。选择 `encoder=libvvenc` 时默认 `encoder_preset=faster`、`encoder_profile=live_3b_2s`，强制 YUV420P10LE，支持 MPEG-TS / MP4；输出 PTS 顺序为 I BBB P…，关键帧周期取最接近 2 秒的整数帧数，保留短窗口单遍码控前瞻与必要重排。其 preset 可用 faster/fast/medium/slow/slower，非法组合返回 400。详见 [VVenC](vvenc.md)。音频、字幕不处理。配置不接受未知或重复字段；请求体上限 16 KiB。
 
 当前构建包含 file、UDP、TCP、RTP、HTTP、RTMP 和 RTSP 相关能力，不包含 HTTPS、SRT 或硬件编解码。协议编译可用不等于均已实流验收，检查下方验证记录。输入尺寸或像素格式变化时明确失败，暂不进行在线 filter/编码器重建。
 

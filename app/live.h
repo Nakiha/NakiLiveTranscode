@@ -12,6 +12,7 @@
 typedef struct Config {
     char input[2048], output[2048], output_format[16];
     char encoder[16], encoder_preset[16];
+    char encoder_profile[24];
     int width, height, bitrate, max_threads, min_threads, budget_slots;
     int queue_capacity, encoder_threads, fps, pace;
     int frame_log, frame_log_every, slow_frame_ms;
@@ -22,7 +23,7 @@ typedef struct Metric {
     uint64_t bins[256], slow_count;
 } Metric;
 typedef struct Latencies {
-    Metric demux_read, input_queue, decode, setup, filter, encode, mux;
+    Metric demux_read, input_queue, decode, setup, filter, encode, encode_submit, encode_wait, mux;
     Metric ingress_to_mux, scheduled_to_mux, interleave_call, avio_flush;
 } Latencies;
 typedef struct FrameGroups {
@@ -41,11 +42,15 @@ typedef struct Job {
     int64_t started_us, ended_us;
     int64_t assigned_us, worker_received_us, worker_spawned_us, worker_ready_us;
     int64_t first_video_output_us, first_key_output_us;
+    int64_t input_open_started_us, input_open_done_us, input_probe_done_us, decoder_ready_us;
+    int64_t first_packet_us, first_decoded_us, encoder_open_started_us, encoder_open_done_us;
+    int64_t output_header_done_us, first_encoder_submit_us;
     int prewarmed;
     yyjson_mut_doc *first_chain[2]; /* Bounded checkpoints for replay after controller loss. */
     uint64_t packets_in, frames_decoded, frames_filtered, packets_out, bytes_out;
     Latencies lifetime, window;
     Latencies i_lifetime, i_window;
+    Latencies key_lifetime, key_window;
     FrameGroups groups, window_groups;
     int64_t window_start_us, last_output_us, write_started_us, last_i_output_us;
     int64_t auto_updated_us;

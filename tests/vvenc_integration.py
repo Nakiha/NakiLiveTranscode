@@ -11,6 +11,7 @@ import threading
 import time
 
 import service_integration as service
+from vvc_structure import decode_frames, check_structure
 
 ROOT, BIN = service.ROOT, service.BIN
 RUN = pathlib.Path(tempfile.mkdtemp(prefix="vvenc-test-", dir=ROOT / "out"))
@@ -42,6 +43,8 @@ def run():
             raise AssertionError("server did not start")
         for invalid in ({"encoder": "bad"}, {"encoder": "libvvenc", "encoder_preset": "veryfast"},
                         {"encoder": "libvvenc", "encoder_preset": "fast|medium"},
+                        {"encoder": "libvvenc", "encoder_profile": "invalid"},
+                        {"encoder": "libx264", "encoder_profile": "live_3b_2s"},
                         {"encoder": "libvvenc", "output_format": "flv"}):
             service.http(data={"input": "unused", "output": "unused", **invalid}, code=400)
         # Both decoder bit depths, resize and no resize, MPEG-TS and MP4, and short EOF.
@@ -102,17 +105,28 @@ def run():
                 if receiver:
                     receiver.join(timeout=2); sock.close()
             decoded = probe(output)
+            display_frames=decode_frames(PROBE,output)
+            assert len(display_frames)==count
+            structure=check_structure(display_frames,60 if index==2 else 50)
+            (RUN/f"structure-{index}.json").write_text(json.dumps(structure,indent=2))
             stream = decoded["streams"][0]
             assert stream == {"codec_name": "vvc", "width": 256 if resize else 320,
                               "height": 144 if resize else 180, "pix_fmt": "yuv420p10le", "nb_read_frames": str(count)}, stream
             assert state["encoder"] == "libvvenc" and state["encoder_preset"] == "faster"
+            assert state["encoder_profile"] == "live_3b_2s"
+            assert state["output_key_stages"]["encode"]["count"]==state["frame_types"]["output_key"]["count"]==len(structure["key_frame_indices"])
             assert state["frames_decoded"] == state["frames_filtered"] == state["packets_out"] == count, state
             for name in ("demux_read", "input_queue", "decode", "setup", "filter", "encode", "mux",
                          "interleave_call", "avio_flush", "ingress_to_mux"):
                 assert state[name]["count"] == count, (name, state[name])
             assert state["startup"]["request_to_first_video_mux_ms"] > 0
+            assert 0 < state["startup"]["input_open_started_ms"] <= state["startup"]["input_open_done_ms"] <= state["startup"]["input_probe_done_ms"] <= state["startup"]["decoder_ready_ms"] <= state["startup"]["first_encoder_submit_ms"] <= state["startup"]["request_to_first_video_mux_ms"]
             if count > 1:
                 frames = service.check_trace(state, count, source, reordered=True)
+                for row in frames:
+                    assert abs(row["encode_submit_ms"]+row["encode_wait_ms"]-row["encode_ms"])<1e-6
+                key_encode=[row["encode_ms"] for row in frames if row["output_key"]]
+                assert abs(state["output_key_stages"]["encode"]["mean_ms"]-sum(key_encode)/len(key_encode))<1e-6
                 assert any(a["pts_us"] > b["pts_us"] for a, b in zip(frames, frames[1:])), "reordering not exercised"
                 first_i = [row for row in frames if row["first_i"]]
                 assert len(first_i) == 1 and first_i[0]["pts_us"] == min(row["pts_us"] for row in frames if row["decoded_picture_type"] == "I")
@@ -129,6 +143,14 @@ def run():
                               "i_frame_stages": state["i_frame_stages"]})
             (RUN / f"state-{index}.json").write_text(json.dumps(state, indent=2))
             print(f"PASS {codec}/{depth}-bit -> VVC/10-bit {fmt}, {count} frames, resize={resize}", flush=True)
+        # Reject timestamp gaps explicitly instead of violating the 2s contract.
+        gapped=RUN/"gapped.mp4"
+        subprocess.run(["ffmpeg","-v","error","-i",str(RUN/"input-0.mp4"),"-frames:v","30",
+                        "-vf",r"setpts=PTS+gte(N\,12)*0.2/TB","-fps_mode","passthrough",
+                        "-c:v","libx264","-preset","ultrafast","-threads","2",str(gapped)],check=True,timeout=30)
+        service.start({"input":str(gapped),"output":str(RUN/"gapped-output.ts"),"encoder":"libvvenc"})
+        rejected=service.finished("failed")
+        assert "non-CFR VVC input" in rejected["error"],rejected
         # Includes first-frame checkpoints even when per-frame logging is disabled.
         time.sleep(.1)
     finally:
@@ -138,7 +160,7 @@ def run():
     assert server.returncode == 0
     events = [json.loads(line) for line in (RUN / "server.jsonl").read_text().splitlines()]
     ready = [event for event in events if event["event"] == "pipeline_ready"]
-    assert len(ready) == len(cases) and all("yuv420p10le" in event["filter"] for event in ready)
+    assert len(ready) == len(cases)+1 and all("yuv420p10le" in event["filter"] for event in ready)
     for summary in summaries:
         state = json.loads((RUN / f"state-{summary['case']}.json").read_text())
         assert any(e["event"] == "first_frame" and e["job_id"] == state["job_id"] for e in events)
