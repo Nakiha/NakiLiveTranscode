@@ -2,7 +2,7 @@
 set -euo pipefail
 [[ $(uname -s) == Linux ]] || { echo 'Linux / WSL is required.' >&2; exit 1; }
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-cache=${NAKI_BUILD_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/naki-live-transcode}
+cache=${NAKI_BUILD_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/naki-live-transcode-n9}
 prefix="$cache/install"
 pkg-config --exists x264 libevent libcurl
 mkdir -p "$root/out/bin"

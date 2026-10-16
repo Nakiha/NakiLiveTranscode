@@ -38,6 +38,10 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/ scripts/
 COPY tests/ tests/
+COPY experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/async_probe.c \
+     experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_probe.c \
+     experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_lifetime_test.c \
+     experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/
 RUN mkdir -p out
 FROM scratch AS symbols
 COPY --from=build /symbols/ /

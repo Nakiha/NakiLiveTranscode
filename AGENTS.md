@@ -11,6 +11,7 @@
 - TCP/UDP observation is a fork-only lifecycle API in libavformat/network_observer.h. Its callbacks may run on network background threads: no allocation, blocking, logging or FFmpeg reentry. Socket timing is not wire time or frame correlation.
 - FFmpeg lives in the pinned submodule `experiments/decoder-20261016/ffmpeg-7.0.3`. Preserve its independent Git history. Commit intentional changes there before updating the parent gitlink.
 - Read the submodule's `doc/live-async-guide-zh.txt` and `doc/live-async-auto-zh.txt` before changing decoder integration.
+- The historical submodule directory name is retained, but the active fork is based on FFmpeg n9.0.2. Also read `doc/live-n9-port-zh.txt`; never reuse the frozen n7.0.3 performance evidence as measurements of n9.
 - Historical baseline media, hashes, timings and reports are frozen evidence. Write new runs to unique directories under `out/`; never overwrite frozen results.
 - Use `scripts/build-decoder.sh` and `scripts/test-decoder.sh` as the new decoder entry points. Archived root-level export/capture scripts contain obsolete paths.
 - Keep generated libraries, objects, media, logs, virtual environments and offline bundles out of Git. Do not delete local archived experiments without a user request.

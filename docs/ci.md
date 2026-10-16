@@ -54,6 +54,8 @@ docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt --target symbols \
 
 仓库引用完整、固定版本的 FFmpeg fork，保留异步解码与 TCP/UDP 观测修改；服务构建通过 `--disable-everything` 按需启用组件，不是重新实现 FFmpeg：
 
+当前基于 n9.0.2，历史目录名暂时保留。迁移和本地源码开发见 [FFmpeg 开发](ffmpeg-development.md)。libvvenc 封装已存在于上游，但本服务当前构建仍未启用 VVenC 库/编码器。
+
 - H.264/HEVC decoder/parser，libx264 encoder；GPL 构建。
 - mov/mpegts/h264/hevc/flv/rtsp demuxer；mpegts/mp4/flv muxer。
 - file/pipe/udp/tcp/rtp/http/rtmp protocol，network/pthreads。

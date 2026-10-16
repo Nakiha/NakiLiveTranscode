@@ -2,6 +2,7 @@
 set -euo pipefail
 mkdir -p out
 # These tests generate media and exercise real sockets/processes; no archived test clips are needed.
+python3 tests/decoder_integration.py
 python3 tests/service_integration.py
 python3 tests/observability_integration.py
 python3 tests/process_integration.py

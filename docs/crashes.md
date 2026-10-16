@@ -114,7 +114,7 @@ python3 scripts/archive-symbols.py --output out/symbols-unique/app \
   --source-revision "$(git rev-parse HEAD)" out/bin
 python3 scripts/archive-symbols.py --output out/symbols-unique/ffmpeg \
   --source-revision "$(git rev-parse HEAD:experiments/decoder-20261016/ffmpeg-7.0.3)" \
-  "${NAKI_BUILD_ROOT:-$HOME/.cache/naki-live-transcode}"/ffmpeg/lib*/*.so.*
+  "${NAKI_BUILD_ROOT:-$HOME/.cache/naki-live-transcode-n9}"/ffmpeg/lib*/*.so.*
 ```
 
 为 C 服务、worker、自定义 FFmpeg 和 x264 保留相同构建的 ELF/调试符号、Build ID、源码提交/修改记录、编译选项、镜像 digest 与依赖版本。`RelWithDebInfo` 为应用保留调试信息；FFmpeg 的构建缓存中有未剥离的共享库，但安装/发布产物是否保留符号要逐一核对，不能用系统 FFmpeg 的符号分析自定义 fork。

@@ -2,12 +2,14 @@
 
 实验性的 CPU 直播转码项目，起点为 FFmpeg 7.0.3 的异步提前出帧和自动并行度调度实验。
 
+当前底座为 **FFmpeg n9.0.2 + 异步解码 API 2 / 网络观测 API 1**；保留原 7.0.3 分支与历史验证结果。历史子模块目录名 `ffmpeg-7.0.3` 暂不改名。源码修改与本地构建见 [FFmpeg 开发](docs/ffmpeg-development.md)。
+
 **当前状态：Linux 单路、纯视频 C 实验服务。** 已实现输入 → 异步自动调度解码 → filter → H.264 编码 → 输出，以及 HTTP 控制和 JSONL 逐帧指标。完整用法和测量边界见 [服务说明](docs/service.md)。
 
 ## 运行服务（Linux / WSL）
 
 ```sh
-sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev
+sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev libunwind-dev python3
 git submodule update --init --recursive
 bash scripts/build-service.sh
 ./out/bin/naki-live
@@ -49,7 +51,7 @@ git clone --recurse-submodules https://github.com/Nakiha/NakiLiveTranscode.git
 cd NakiLiveTranscode
 ```
 
-FFmpeg 固定在 `cbf2341520725a4f8b217052f864aa7dd3028a8d`（异步解码 API 2 + TCP/UDP 观测 API 1），来自 [Nakiha/FFmpeg](https://github.com/Nakiha/FFmpeg/tree/live/n7.0.3-async-early-output)。不要使用 `git submodule update --remote` 无意升级已测版本。
+FFmpeg 子模块固定到 [Nakiha/FFmpeg 的 n9.0.2 live 分支](https://github.com/Nakiha/FFmpeg/tree/live/n9.0.2-async-early-output) 的确切提交，以上游 `n9.0.2`（`946fcce07b6dcd0331c8cc609192aeff5e1924f8`）为基线。使用 `git submodule status` 查看当前 pin；不要使用 `git submodule update --remote` 无意升级已测版本。原 `cbf2341520725a4f8b217052f864aa7dd3028a8d` 仍保存在 n7.0.3 live 分支。
 
 ## 原解码专项验证构建
 
@@ -83,6 +85,7 @@ bash scripts/test-decoder.sh windows
 
 - [异步接入与移植指导](experiments/decoder-20261016/ffmpeg-7.0.3/doc/live-async-guide-zh.txt)
 - [自动模式接入](experiments/decoder-20261016/ffmpeg-7.0.3/doc/live-async-auto-zh.txt)
+- [n9.0.2 移植说明](experiments/decoder-20261016/ffmpeg-7.0.3/doc/live-n9-port-zh.txt)
 - [冻结测试与报告](experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/validation/README.txt)
 - [整理记录及后续工作](docs/workspace.md)
 
