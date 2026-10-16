@@ -97,6 +97,14 @@ def run():
                        any(t["fault_thread"] and t["frames"] for t in r["threads"]) for r in reports)
                    for pid,role in ((victim,"worker"),(original_controller,"http"))),reports
         command(COMPOSE+["cp",f"transcode:{crash_dir}",str(RUN/"crashes")])
+        if symbols_dir:=os.environ.get("NAKI_SYMBOLS_DIR"):
+            for report_file in (RUN/"crashes").glob("crash-*.json"):
+                report_data=json.loads(report_file.read_text())
+                required="naki-live-worker" if report_data["role"]=="worker" else "naki-live"
+                command(["python3",str(ROOT/"scripts/symbolize-crash.py"),str(report_file),
+                         "--symbols",str(pathlib.Path(symbols_dir)/"app"),
+                         "--symbols",str(pathlib.Path(symbols_dir)/"ffmpeg"),
+                         "--require-module",required,"--output",str(report_file.with_suffix(".symbolized.txt"))])
         time.sleep(.2)
         command(COMPOSE+["run","--rm","--no-deps","log-maintenance","--directory","/var/log/naki","--min-age-seconds","0"])
         count=int(command(COMPOSE+["exec","-T","transcode","python3","-c",

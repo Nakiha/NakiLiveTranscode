@@ -1,6 +1,7 @@
 .git
 **/.git
-out
+out/*
+!out/ffmpeg-sdk
 experiments/decoder-20261016/*
 !experiments/decoder-20261016/ffmpeg-7.0.3
 **/__pycache__

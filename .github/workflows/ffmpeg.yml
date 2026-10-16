@@ -1,0 +1,63 @@
+name: FFmpeg dependency
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      tag:
+        description: Immutable SDK release tag
+        value: ${{ jobs.sdk.outputs.tag }}
+permissions:
+  contents: write
+jobs:
+  sdk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    concurrency:
+      group: ffmpeg-sdk-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: false
+    outputs:
+      tag: ${{ steps.key.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - id: key
+        name: Find matching dependency release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          key=$(bash scripts/ffmpeg-key.sh)
+          tag=ffmpeg-linux-amd64-$key
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -qx ffmpeg-sdk.tar.gz; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.key.outputs.missing == 'true'
+        name: Build and archive dependency once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          TAG: ${{ steps.key.outputs.tag }}
+          KEY: ${{ steps.key.outputs.key }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            echo 'Dependency recipe changed: a maintainer must dispatch FFmpeg dependency on the trusted branch first.' >&2
+            exit 1
+          fi
+          revision=$(git rev-parse HEAD:experiments/decoder-20261016/ffmpeg-7.0.3)
+          docker build -f Dockerfile.ffmpeg --target sdk \
+            --build-arg FFMPEG_REVISION="$revision" --build-arg DEPENDENCY_KEY="$KEY" \
+            --output type=local,dest=out/ffmpeg-sdk .
+          tar -C out/ffmpeg-sdk -czf out/ffmpeg-sdk.tar.gz .
+          sha256sum out/ffmpeg-sdk.tar.gz > out/ffmpeg-sdk.tar.gz.sha256
+          gh release create "$TAG" out/ffmpeg-sdk.tar.gz out/ffmpeg-sdk.tar.gz.sha256 \
+            --target "$GITHUB_SHA" --prerelease --title "FFmpeg SDK linux/amd64 $KEY" \
+            --notes "Pinned FFmpeg $revision; recipe key $KEY. Includes installed SDK, Build ID debug files, configure options and build package versions. Preserve this release for deployed builds."
+      - name: Dependency summary
+        env:
+          TAG: ${{ steps.key.outputs.tag }}
+        run: echo "FFmpeg SDK release $TAG (reused when already present)." >> "$GITHUB_STEP_SUMMARY"

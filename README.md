@@ -27,6 +27,8 @@ JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 li
 
 0.4.0 默认启用独立 C 崩溃收集器：信号处理函数只传固定现场，外部进程限时抓栈、记录模块 Build ID 并生成限额 JSON 报告，不依赖完整 core。见 [崩溃诊断](docs/crashes.md)。
 
+Linux amd64 CI 将 FFmpeg SDK 构建与应用构建分开复用；main 每次构建分别保存镜像包和按 Build ID 索引的独立符号，并验证真实崩溃报告到源码行的离线解析。见 [CI 与构建产物](docs/ci.md)。
+
 ## 目录
 
 | 路径 | 用途 |

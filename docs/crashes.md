@@ -89,6 +89,34 @@ Docker 的 core_pattern 由内核/宿主机环境决定；容器 ulimits 只是�
 
 ## 每次发布保留匹配的分析材料
 
+现已接入按 Build ID 归档和离线解析，CI 构建方式见 [CI 与构建产物](ci.md)。下载与部署镜像配套的 `symbols-linux-amd64.tar.gz`，在 Linux/WSL 安装 Python 3.11+ 和 binutils 后：
+
+```sh
+mkdir -p symbols
+tar -C symbols -xzf symbols-linux-amd64.tar.gz
+python3 scripts/symbolize-crash.py crash-123-456-789.json \
+  --symbols symbols/app --symbols symbols/ffmpeg
+# 也可以保留原始报告并输出附加解析字段的 JSON：
+python3 scripts/symbolize-crash.py crash-123-456-789.json \
+  --symbols symbols/app --symbols symbols/ffmpeg --format json --output resolved.json
+```
+
+只需传回轻量 JSON 报告。脚本根据每个模块的 GNU Build ID 查找 `.build-id/xx/rest.debug`，再核验 debug ELF 的 Build ID，通过 `addr2line -f -C -i` 输出函数、内联调用链、源码路径和行号；不联网获取符号，也不需要现网完整 core。报告的 `elf_address` 已去除加载偏移，不能再次减 load bias。脚本保留精确 PC，不统一做 PC-1：返回地址的行号可能落在调用后的语句，信号帧不适合盲目减一。源码路径来自构建时 DWARF，容器构建通常显示 `/src/app/...`。
+
+缺少符号、模块 Build ID 或 ELF 地址时明确标记 unresolved 原因；发现归档文件 Build ID 不匹配直接失败，不按文件名猜测。`--require-module naki-live-worker` 可要求至少有 worker 的帧定位到源码行，否则非零退出。保留原报告中的超时、截断、缺线程/栈、unwind 错误标记：离线解析只能补充已捕获地址的符号，不能恢复被截断的帧、局部变量或原始内存。
+
+自有包覆盖服务、worker、客户端、collector 及自定义 FFmpeg；发行版库的调试包需要另外按 Build ID 获取。`missing_symbols` 不表示这些模块没有崩溃；若故障发生在 libc/x264 内部，应补齐其匹配符号。可重复 `--symbols` 添加其他 Build ID 归档根目录。解析器不读取源码内容；拿到准确行号后，用 manifest 的源码提交检出对应文件查看。
+
+本地自定义构建可手动导出（目标目录必须是新目录，输入必须还保留 DWARF）：
+
+```sh
+python3 scripts/archive-symbols.py --output out/symbols-unique/app \
+  --source-revision "$(git rev-parse HEAD)" out/bin
+python3 scripts/archive-symbols.py --output out/symbols-unique/ffmpeg \
+  --source-revision "$(git rev-parse HEAD:experiments/decoder-20261016/ffmpeg-7.0.3)" \
+  "${NAKI_BUILD_ROOT:-$HOME/.cache/naki-live-transcode}"/ffmpeg/lib*/*.so.*
+```
+
 为 C 服务、worker、自定义 FFmpeg 和 x264 保留相同构建的 ELF/调试符号、Build ID、源码提交/修改记录、编译选项、镜像 digest 与依赖版本。`RelWithDebInfo` 为应用保留调试信息；FFmpeg 的构建缓存中有未剥离的共享库，但安装/发布产物是否保留符号要逐一核对，不能用系统 FFmpeg 的符号分析自定义 fork。
 
 ```sh
