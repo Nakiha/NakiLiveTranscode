@@ -1,15 +1,17 @@
 # Build once per pinned source/config/toolchain recipe; application CI downloads its SDK.
 FROM ubuntu:24.04 AS build
 RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    build-essential pkg-config nasm libx264-dev python3 \
+    build-essential cmake pkg-config nasm libx264-dev python3 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 ENV NAKI_BUILD_ROOT=/opt/naki-build
-COPY scripts/build-ffmpeg.sh scripts/archive-symbols.py scripts/
+COPY scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/archive-symbols.py scripts/
+COPY third_party/vvenc/ third_party/vvenc/
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/ experiments/decoder-20261016/ffmpeg-7.0.3/
-RUN bash scripts/build-ffmpeg.sh
 ARG FFMPEG_REVISION=unknown
+ARG VVENC_REVISION=unknown
 ARG DEPENDENCY_KEY=local
+RUN NAKI_VVENC_SYMBOLS=/opt/naki-build/vvenc-symbols bash scripts/build-ffmpeg.sh
 RUN python3 scripts/archive-symbols.py --output /opt/naki-build/ffmpeg-symbols \
     --label ffmpeg --source-revision "$FFMPEG_REVISION" --dependency-key "$DEPENDENCY_KEY" \
     /opt/naki-build/ffmpeg/lib*/*.so.* \
@@ -19,3 +21,4 @@ RUN python3 scripts/archive-symbols.py --output /opt/naki-build/ffmpeg-symbols \
 FROM scratch AS sdk
 COPY --from=build /opt/naki-build/install/ /install/
 COPY --from=build /opt/naki-build/ffmpeg-symbols/ /ffmpeg-symbols/
+COPY --from=build /opt/naki-build/vvenc-symbols/ /vvenc-symbols/

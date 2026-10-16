@@ -111,6 +111,8 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     else yyjson_mut_obj_add_null(doc,startup,"request_to_first_key_mux_ms");
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"startup",startup);
     json_int(doc,"frame_log",job->config.frame_log);
+    json_str(doc,"encoder",job->config.encoder);
+    json_str(doc,"encoder_preset",job->config.encoder_preset);
     json_int(doc,"crash_collector_pid",crash_collector_pid());
     json_int(doc,"slow_frame_ms",job->config.slow_frame_ms);
     int64_t current=now_us(), end=job->ended_us ? job->ended_us : current;
@@ -177,6 +179,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     Config c = {.bitrate=1500000, .max_threads=12, .min_threads=2, .budget_slots=12,
                 .queue_capacity=4, .encoder_threads=2, .fps=25, .frame_log_every=1, .slow_frame_ms=200};
     strcpy(c.output_format, "mpegts");
+    strcpy(c.encoder, "libx264");
     int ret = -1;
     if (!yyjson_is_obj(root)) { bad(error, cap, "Expected a JSON object"); goto end; }
     const char *seen[32]; size_t count = 0;
@@ -193,6 +196,8 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         if (!strcmp(name,"input")) { dest=c.input; len=sizeof(c.input); }
         else if (!strcmp(name,"output")) { dest=c.output; len=sizeof(c.output); }
         else if (!strcmp(name,"output_format")) { dest=c.output_format; len=sizeof(c.output_format); }
+        else if (!strcmp(name,"encoder")) { dest=c.encoder; len=sizeof(c.encoder); }
+        else if (!strcmp(name,"encoder_preset")) { dest=c.encoder_preset; len=sizeof(c.encoder_preset); }
         if (dest) {
             if (!yyjson_is_str(val) || !yyjson_get_len(val) || yyjson_get_len(val)>=len ||
                 strlen(yyjson_get_str(val)) != yyjson_get_len(val)) { bad(error,cap,"Invalid string field"); goto end; }
@@ -220,6 +225,13 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         *field=(int)yyjson_get_sint(val);
     }
     if (!*c.input || !*c.output) {bad(error,cap,"input and output are required"); goto end;}
+    int vvc=!strcmp(c.encoder,"libvvenc");
+    if (!vvc && strcmp(c.encoder,"libx264")) {bad(error,cap,"encoder must be libx264 or libvvenc"); goto end;}
+    if (!*c.encoder_preset) strcpy(c.encoder_preset,vvc ? "faster" : "veryfast");
+    const char *presets=vvc ? "|faster|fast|medium|slow|slower|" : "|ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|";
+    char preset_key[20]; snprintf(preset_key,sizeof(preset_key),"|%s|",c.encoder_preset);
+    if (!strstr(presets,preset_key)) {bad(error,cap,"Invalid preset for selected encoder"); goto end;}
+    if (vvc && !strcmp(c.output_format,"flv")) {bad(error,cap,"libvvenc output requires mpegts or mp4"); goto end;}
     if (c.min_threads>c.max_threads || (!!c.width != !!c.height) || c.width%2 || c.height%2) {bad(error,cap,"Invalid thread limits or dimensions (use two even dimensions)"); goto end;}
     if (strcmp(c.output_format,"mpegts") && strcmp(c.output_format,"mp4") && strcmp(c.output_format,"flv")) {bad(error,cap,"output_format must be mpegts, mp4 or flv"); goto end;}
     if (strchr(c.output,':') && strncmp(c.output,"udp://",6) && strncmp(c.output,"tcp://",6) &&

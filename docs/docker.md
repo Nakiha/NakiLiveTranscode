@@ -10,7 +10,7 @@ docker compose exec transcode naki-live-ctl health
 docker compose logs -f transcode
 ```
 
-多阶段构建 Ubuntu 24.04 + libx264 + 自定义 FFmpeg，运行时 UID/GID 10001，前台运行，不在容器中启动 cron。`init: true` 处理信号和孤儿子进程回收；退出重启采用 unless-stopped，停止宽限 30 秒。API 映射到宿主机 `127.0.0.1:8090`，UDP 15000 同样只在本机发布。访问其他机器时应自行配置鉴权/访问边界。
+多阶段构建 Ubuntu 24.04 + libx264 + VVenC + 自定义 FFmpeg，VVenC 共享库与 libstdc++ 一并装入运行层。运行时 UID/GID 10001，前台运行，不在容器中启动 cron。`init: true` 处理信号和孤儿子进程回收；退出重启采用 unless-stopped，停止宽限 30 秒。API 映射到宿主机 `127.0.0.1:8090`，UDP 15000 同样只在本机发布。访问其他机器时应自行配置鉴权/访问边界。
 
 镜像入口是前台轻量监管程序 `service-launcher.py`，由它启动 C HTTP 控制进程。控制进程异常退出后按 0.25 秒起、最高 10 秒的退避重启，容器保持运行，原 worker 继续转码并由新控制进程接管。worker 的媒体和追踪文件 I/O 不经过监管入口。容器收到 SIGTERM 时会转交控制进程，明确停止全部 worker；监管入口最多等待 20 秒。整个容器重启、OOM 或主机重启仍可能结束转码；不能把此机制当成跨容器无缝恢复。
 

@@ -101,7 +101,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", type=pathlib.Path)
     parser.add_argument("--symbols", action="append", type=pathlib.Path, required=True,
-                        help="Archive root containing .build-id; repeat for application and FFmpeg")
+                        help="Archive root containing .build-id; repeat for application, FFmpeg and VVenC")
     parser.add_argument("--format", choices=("text", "json"), default="text")
     parser.add_argument("--output", type=pathlib.Path)
     parser.add_argument("--require-module", action="append", default=[],

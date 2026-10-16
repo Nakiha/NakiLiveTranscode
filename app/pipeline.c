@@ -24,7 +24,7 @@
 typedef struct Stamp {
     int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
     int64_t encoder_submit_us, scheduled_us, filter_started_us;
-    int picture_type, decoded_key, input_key;
+    int picture_type, decoded_key, input_key, first_i;
 } Stamp;
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; } Interrupt;
 typedef struct Ledger { int used; int64_t pts; Stamp stamp; } Ledger;
@@ -38,7 +38,7 @@ typedef struct Pipeline {
     AVFilterContext *source, *sink;
     AVStream *video;
     int stream_index, reader_started, header_written, custom_output_fd;
-    int input_width, input_height, input_format;
+    int input_width, input_height, input_format, seen_input_i;
     AVRational input_tb, frame_rate;
     Interrupt read_interrupt, write_interrupt;
     AVPacket *ring[READER_CAPACITY];
@@ -148,6 +148,8 @@ static int64_t local_seek(void *opaque, int64_t offset, int whence) {
 }
 static int open_output(Pipeline *p, AVFrame *frame) {
     const Config *cfg=&p->job->config;
+    int vvc=!strcmp(cfg->encoder,"libvvenc");
+    const char *pixel_format=vvc ? "yuv420p10le" : "yuv420p";
     int ret;
     p->stage="filter initialization";
     p->graph=avfilter_graph_alloc();
@@ -163,8 +165,8 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     if (ret<0) return ret;
     ret=avfilter_graph_create_filter(&p->sink,avfilter_get_by_name("buffersink"),"out",NULL,NULL,p->graph);
     if (ret<0) return ret;
-    if (cfg->width) snprintf(chain,sizeof(chain),"scale=%d:%d:flags=bilinear,format=pix_fmts=yuv420p",cfg->width,cfg->height);
-    else strcpy(chain,"null,format=pix_fmts=yuv420p");
+    if (cfg->width) snprintf(chain,sizeof(chain),"scale=%d:%d:flags=bilinear,format=pix_fmts=%s",cfg->width,cfg->height,pixel_format);
+    else snprintf(chain,sizeof(chain),"null,format=pix_fmts=%s",pixel_format);
     AVFilterInOut *outputs=avfilter_inout_alloc(), *inputs=avfilter_inout_alloc();
     if (!outputs || !inputs) {avfilter_inout_free(&outputs); avfilter_inout_free(&inputs); return AVERROR(ENOMEM);}
     outputs->name=av_strdup("in"); outputs->filter_ctx=p->source; outputs->pad_idx=0;
@@ -175,15 +177,17 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     p->input_width=frame->width; p->input_height=frame->height; p->input_format=frame->format;
 
     p->stage="encoder initialization";
-    const AVCodec *codec=avcodec_find_encoder_by_name("libx264");
+    const AVCodec *codec=avcodec_find_encoder_by_name(cfg->encoder);
     if (!codec) return AVERROR_ENCODER_NOT_FOUND;
     p->encoder=avcodec_alloc_context3(codec);
     if (!p->encoder) return AVERROR(ENOMEM);
     p->encoder->width=av_buffersink_get_w(p->sink);
     p->encoder->height=av_buffersink_get_h(p->sink);
     p->encoder->sample_aspect_ratio=av_buffersink_get_sample_aspect_ratio(p->sink);
-    p->encoder->pix_fmt=AV_PIX_FMT_YUV420P;
-    p->encoder->time_base=(AVRational){1,90000};
+    p->encoder->pix_fmt=vvc ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
+    /* libvvenc generates DTS in one-tick-per-picture mode. CTS and DTS must
+       share that time base, including fractional nominal frame rates. */
+    p->encoder->time_base=vvc ? av_inv_q(p->frame_rate) : (AVRational){1,90000};
     p->encoder->framerate=p->frame_rate;
     p->encoder->bit_rate=cfg->bitrate;
     p->encoder->thread_count=cfg->encoder_threads;
@@ -196,7 +200,9 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     if (ret<0) return ret;
     if (p->output->oformat->flags&AVFMT_GLOBALHEADER) p->encoder->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
     AVDictionary *options=NULL;
-    av_dict_set(&options,"preset","veryfast",0); av_dict_set(&options,"tune","zerolatency",0);
+    av_dict_set(&options,"preset",cfg->encoder_preset,0);
+    if (vvc) av_dict_set(&options,"period","2",0);
+    else av_dict_set(&options,"tune","zerolatency",0);
     ret=avcodec_open2(p->encoder,codec,&options); av_dict_free(&options);
     if (ret<0) return ret;
     p->video=avformat_new_stream(p->output,NULL);
@@ -228,7 +234,11 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     yyjson_mut_doc *doc=new_event("pipeline_ready",p->job);
     json_int(doc,"input_width",frame->width); json_int(doc,"input_height",frame->height);
     json_int(doc,"output_width",p->encoder->width); json_int(doc,"output_height",p->encoder->height);
-    json_str(doc,"encoder","libx264"); json_str(doc,"filter",chain);
+    json_str(doc,"encoder",cfg->encoder); json_str(doc,"encoder_preset",cfg->encoder_preset);
+    json_str(doc,"pixel_format",pixel_format); json_str(doc,"filter",chain);
+    json_int(doc,"encoder_time_base_num",p->encoder->time_base.num);
+    json_int(doc,"encoder_time_base_den",p->encoder->time_base.den);
+    json_int(doc,"trace_ledger_capacity",LEDGER_CAPACITY);
     json_num(doc,"startup_ms",(now_us()-p->job->started_us)/1000.0);
     logger_submit(p->job->logger,NULL,doc); return 0;
 }
@@ -294,7 +304,7 @@ static int receive_encoded(Pipeline *p) {
         int first_output_key=output_key && !p->job->first_key_output_us;
         if(first_output)p->job->first_video_output_us=written;
         if(first_output_key)p->job->first_key_output_us=written;
-        int first_i=!p->job->i_frames;
+        int first_i=stamp.first_i;
         double slow=p->job->config.slow_frame_ms;
         sample_latencies(&p->job->lifetime,&stamp,encoded,mux_start,interleaved,written,slow);
         sample_latencies(&p->job->window,&stamp,encoded,mux_start,interleaved,written,slow);
@@ -406,6 +416,7 @@ static int process_frame(Pipeline *p, AVFrame *frame) {
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
     stamp->decoded_us=now_us();
     stamp->picture_type=frame->pict_type;
+    stamp->first_i=frame->pict_type==AV_PICTURE_TYPE_I && !p->seen_input_i++;
     stamp->decoded_key=!!(frame->flags&AV_FRAME_FLAG_KEY);
     if (frame->best_effort_timestamp!=AV_NOPTS_VALUE) frame->pts=frame->best_effort_timestamp;
     if (frame->pts==AV_NOPTS_VALUE) frame->pts=p->synthetic_pts;

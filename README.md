@@ -4,7 +4,7 @@
 
 当前底座为 **FFmpeg n9.0.2 + 异步解码 API 2 / 网络观测 API 1**；保留原 7.0.3 分支与历史验证结果。历史子模块目录名 `ffmpeg-7.0.3` 暂不改名。源码修改与本地构建见 [FFmpeg 开发](docs/ffmpeg-development.md)。
 
-**当前状态：Linux 单路、纯视频 C 实验服务。** 已实现输入 → 异步自动调度解码 → filter → H.264 编码 → 输出，以及 HTTP 控制和 JSONL 逐帧指标。完整用法和测量边界见 [服务说明](docs/service.md)。
+**当前状态：Linux 单路、纯视频 C 实验服务。** 已实现 H.264/HEVC 输入 → 异步自动调度解码 → 8/10-bit filter → H.264 或 VVC 编码 → 输出，以及 HTTP 控制和 JSONL 指标。VVC 请求示例见 [examples/vvc.json](examples/vvc.json)，编码器开发与时延边界见 [VVenC 接入](docs/vvenc.md)。完整用法见 [服务说明](docs/service.md)。
 
 ## 运行服务（Linux / WSL）
 
@@ -38,6 +38,7 @@ Linux amd64 CI 将 FFmpeg SDK 构建与应用构建分开复用；main 每次构
 | `app/` | Linux C 服务与 HTTP 客户端 |
 | `scripts/` | 服务及解码专项的构建与回归入口 |
 | `third_party/yyjson/` | 固定版本 JSON 库子模块 |
+| `third_party/vvenc/` | Nakiha/vvenc fork，固定 v1.14.0，可独立修改 |
 | `examples/`、`tests/` | 请求示例与完整链路集成测试 |
 | `docs/` | 项目现状和整理说明 |
 | `experiments/decoder-20261016/ffmpeg-7.0.3/` | 固定版本的 FFmpeg 子模块；底层代码保留独立历史 |

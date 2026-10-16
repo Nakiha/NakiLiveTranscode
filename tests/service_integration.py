@@ -68,7 +68,7 @@ def check_duration(path, expected):
     assert abs(actual - expected) < 0.05, (path, actual, expected)
 
 
-def check_trace(state, count, source=None):
+def check_trace(state, count, source=None, reordered=False):
     prefix=pathlib.Path(state["log_path"])
     deadline=time.monotonic()+5
     lines=[]
@@ -82,7 +82,8 @@ def check_trace(state, count, source=None):
     frames = [event for event in events if event["event"] == "frame"]
     assert len(frames) == count, (count, len(frames))
     assert len({row["input_sequence"] for row in frames}) == count
-    assert [row["pts_us"] for row in frames] == sorted(row["pts_us"] for row in frames)
+    if not reordered:
+        assert [row["pts_us"] for row in frames] == sorted(row["pts_us"] for row in frames)
     assert state["frames_decoded"] == state["frames_filtered"] == state["packets_out"] == count
     assert state["auto"]["maximum"] == 12 and state["auto"]["minimum"] == 2
     assert state["logging"]["dropped_frames"]==0

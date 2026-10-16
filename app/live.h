@@ -11,6 +11,7 @@
 
 typedef struct Config {
     char input[2048], output[2048], output_format[16];
+    char encoder[16], encoder_preset[16];
     int width, height, bitrate, max_threads, min_threads, budget_slots;
     int queue_capacity, encoder_threads, fps, pace;
     int frame_log, frame_log_every, slow_frame_ms;

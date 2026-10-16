@@ -8,9 +8,10 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
 WORKDIR /src
 ENV NAKI_BUILD_ROOT=/opt/naki-build
 FROM toolchain AS ffmpeg-local
-COPY scripts/build-ffmpeg.sh scripts/archive-symbols.py scripts/
+COPY scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/archive-symbols.py scripts/
+COPY third_party/vvenc/ third_party/vvenc/
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/ experiments/decoder-20261016/ffmpeg-7.0.3/
-RUN bash scripts/build-ffmpeg.sh && python3 scripts/archive-symbols.py \
+RUN NAKI_VVENC_SYMBOLS=/opt/naki-build/vvenc-symbols bash scripts/build-ffmpeg.sh && python3 scripts/archive-symbols.py \
     --output /opt/naki-build/ffmpeg-symbols --label ffmpeg-local /opt/naki-build/ffmpeg/lib*/*.so.*
 FROM scratch AS ffmpeg-prebuilt
 # Extract inside Linux so Windows clients do not have to transmit Linux symlinks.
@@ -19,6 +20,7 @@ FROM ${FFMPEG_STAGE} AS ffmpeg
 FROM toolchain AS build
 COPY --from=ffmpeg /opt/naki-build/install/ /opt/naki-build/install/
 COPY --from=ffmpeg /opt/naki-build/ffmpeg-symbols/ /symbols/ffmpeg/
+COPY --from=ffmpeg /opt/naki-build/vvenc-symbols/ /symbols/vvenc/
 COPY scripts/build-service.sh scripts/archive-symbols.py scripts/
 COPY CMakeLists.txt ./
 COPY app/ app/
@@ -48,7 +50,7 @@ COPY --from=build /symbols/ /
 
 FROM ubuntu:24.04 AS runtime
 RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    libevent-2.1-7t64 libcurl4t64 libx264-164 libunwind8 ca-certificates python3 \
+    libevent-2.1-7t64 libcurl4t64 libx264-164 libunwind8 libstdc++6 ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 naki && useradd --uid 10001 --gid 10001 --no-create-home naki \
     && mkdir -p /data /var/log/naki && chown 10001:10001 /data /var/log/naki
@@ -61,6 +63,7 @@ COPY --from=build /opt/naki-build/install/lib/ /opt/naki-build/install/lib/
 COPY scripts/maintain-logs.py /usr/local/lib/naki/maintain-logs.py
 COPY scripts/service-launcher.py /usr/local/lib/naki/service-launcher.py
 COPY third_party/yyjson/LICENSE /usr/share/doc/naki/yyjson-LICENSE
+COPY third_party/vvenc/LICENSE.txt /usr/share/doc/naki/vvenc-LICENSE
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/COPYING* /usr/share/doc/naki/
 USER 10001:10001
 WORKDIR /data

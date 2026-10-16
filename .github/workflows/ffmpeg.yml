@@ -49,14 +49,16 @@ jobs:
             exit 1
           fi
           revision=$(git rev-parse HEAD:experiments/decoder-20261016/ffmpeg-7.0.3)
+          vvenc_revision=$(git rev-parse HEAD:third_party/vvenc)
           docker build -f Dockerfile.ffmpeg --target sdk \
             --build-arg FFMPEG_REVISION="$revision" --build-arg DEPENDENCY_KEY="$KEY" \
+            --build-arg VVENC_REVISION="$vvenc_revision" \
             --output type=local,dest=out/ffmpeg-sdk .
           tar -C out/ffmpeg-sdk -czf out/ffmpeg-sdk.tar.gz .
           sha256sum out/ffmpeg-sdk.tar.gz > out/ffmpeg-sdk.tar.gz.sha256
           gh release create "$TAG" out/ffmpeg-sdk.tar.gz out/ffmpeg-sdk.tar.gz.sha256 \
             --target "$GITHUB_SHA" --prerelease --title "FFmpeg SDK linux/amd64 $KEY" \
-            --notes "Pinned FFmpeg $revision; recipe key $KEY. Includes installed SDK, Build ID debug files, configure options and build package versions. Preserve this release for deployed builds."
+            --notes "Pinned FFmpeg $revision and VVenC $vvenc_revision; recipe key $KEY. Includes installed SDK, separate FFmpeg/VVenC Build ID debug files, configure options and build package versions. Preserve this release for deployed builds."
       - name: Dependency summary
         env:
           TAG: ${{ steps.key.outputs.tag }}

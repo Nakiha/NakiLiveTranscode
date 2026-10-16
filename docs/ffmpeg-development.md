@@ -39,6 +39,6 @@ FFmpeg 仍保留独立 Git 历史，不能只提交父仓库：
 
 截至本次核实，最新稳定版为 n9.0.2；n9.1-dev 是开发 tag。n9.0.2 原生包含 libvvenc 封装，configure 要求 `libvvenc >= 1.6.1`。VVenC 官方说明 FFmpeg 从 7.1 起支持它。[FFmpeg 发布页](https://ffmpeg.org/download.html)、[VVenC 接入说明](https://github.com/fraunhoferhhi/vvenc/wiki/FFmpeg-Integration)。
 
-这轮先升级 FFmpeg 底座并迁移既有扩展。**当前服务构建仍只启用 libx264 编码，没有编译/接入 VVenC。** 后续接入需固定 VVenC 自身源码版本、编译依赖，将该 pin 加入 SDK 依赖键、导出 VVenC 的 Build ID 符号，并启用 `--enable-libvvenc --enable-encoder=libvvenc`。
+服务现已接入 VVenC v1.14.0：独立 fork 子模块、`--enable-libvvenc`、10-bit filter、PTS 关联、排空与 VVC 输出验证；两个源码 pin 均进入 SDK 键，VVenC 单独归档 Build ID 符号。修改入口与验证见 [VVenC 接入](vvenc.md)。
 
-服务目前固定输出 yuv420p，且使用 x264 的参数约定；libvvenc 的 FFmpeg 封装需要 yuv420p10le 输入，必须一起调整 filter、编码参数、PTS/延迟帧关联、排空以及 VVC 输出容器验证，不能只把编码器名字替换掉。VVenC 内部前瞻、帧重排、线程调度与首帧/I 帧等待需要单独测量，不沿用 x264 的 zerolatency 假设。[n9.0.2 libvvenc 源码](https://github.com/FFmpeg/FFmpeg/blob/n9.0.2/libavcodec/libvvenc.c)。
+选择 libvvenc 时 filter 输出 yuv420p10le，编码参数不再使用 x264 的 tune。VVenC 内部前瞻、帧重排、线程调度与首帧/I 帧等待计入新任务的测量，不沿用 x264 的 zerolatency 假设。[n9.0.2 libvvenc 源码](https://github.com/FFmpeg/FFmpeg/blob/n9.0.2/libavcodec/libvvenc.c)。

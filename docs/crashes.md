@@ -95,10 +95,10 @@ Docker 的 core_pattern 由内核/宿主机环境决定；容器 ulimits 只是�
 mkdir -p symbols
 tar -C symbols -xzf symbols-linux-amd64.tar.gz
 python3 scripts/symbolize-crash.py crash-123-456-789.json \
-  --symbols symbols/app --symbols symbols/ffmpeg
+  --symbols symbols/app --symbols symbols/ffmpeg --symbols symbols/vvenc
 # 也可以保留原始报告并输出附加解析字段的 JSON：
 python3 scripts/symbolize-crash.py crash-123-456-789.json \
-  --symbols symbols/app --symbols symbols/ffmpeg --format json --output resolved.json
+  --symbols symbols/app --symbols symbols/ffmpeg --symbols symbols/vvenc --format json --output resolved.json
 ```
 
 只需传回轻量 JSON 报告。脚本根据每个模块的 GNU Build ID 查找 `.build-id/xx/rest.debug`，再核验 debug ELF 的 Build ID，通过 `addr2line -f -C -i` 输出函数、内联调用链、源码路径和行号；不联网获取符号，也不需要现网完整 core。报告的 `elf_address` 已去除加载偏移，不能再次减 load bias。脚本保留精确 PC，不统一做 PC-1：返回地址的行号可能落在调用后的语句，信号帧不适合盲目减一。源码路径来自构建时 DWARF，容器构建通常显示 `/src/app/...`。

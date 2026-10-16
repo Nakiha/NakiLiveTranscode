@@ -7,7 +7,7 @@
 - JSON：[yyjson 0.13.0](https://github.com/ibireme/yyjson/releases/tag/0.13.0)，固定子模块，MIT。
 - HTTP 服务端：[libevent evhttp](https://libevent.org/)，系统开发包，BSD 系许可。使用发行版安全更新，不按上游版本号单独判断是否包含回补。
 - HTTP 客户端：[libcurl](https://curl.se/libcurl/)，系统开发包，curl 许可。
-- 媒体：已有 FFmpeg fork API 2，链接自定义共享库；H.264 编码使用 libx264。
+- 媒体：FFmpeg fork API 2，链接自定义共享库；H.264 编码使用 libx264，VVC 编码使用独立子模块 VVenC v1.14.0（内部为 C++，通过 FFmpeg 的 C API 调用）。
 - 外部崩溃抓栈：系统 libunwind-ptrace；主服务、worker 和 collector 均为 C。
 
 Ubuntu / WSL：
@@ -19,7 +19,7 @@ git submodule update --init --recursive
 bash scripts/build-service.sh
 ```
 
-构建目录默认在 Linux 文件系统 `$HOME/.cache/naki-live-transcode/`，可用 `NAKI_BUILD_ROOT` 指定另一目录。二进制在项目 `out/bin/`，RPATH 指向该构建前缀的 FFmpeg 库，不混用系统 FFmpeg。迁移部署时需在目标系统重建。
+构建目录默认在 Linux 文件系统 `$HOME/.cache/naki-live-transcode-n9/`，可用 `NAKI_BUILD_ROOT` 指定另一目录。构建先安装 VVenC 共享库，再构建 FFmpeg 和服务。二进制在项目 `out/bin/`，RPATH 指向该构建前缀，不混用系统 FFmpeg。迁移部署时需在目标系统重建。
 
 `naki-live`、`naki-live-worker` 和 `naki-crash-collector` 必须放在同一目录。0.4.0 为控制进程和每个 worker 各预启动一个独立 collector；故障发生时才临时派生抓栈进程。默认不生成完整 core，报告位置由 `/health.crash_report_dir` 给出，限时与配额参数见 [崩溃诊断](crashes.md)。
 
@@ -50,7 +50,7 @@ bash scripts/build-service.sh
 
 `width`、`height` 同时为正偶数时缩放；同时省略则保持输入尺寸，但转换为 YUV420P。`bitrate` 默认 1.5 Mbps；`encoder_threads` 默认 2。`max_threads` 默认 12，自动模式 `min_threads` 默认 2，`budget_slots` 默认 12；预算只约束解码任务，不含 filter 和编码器。`queue_capacity` 默认 4，此外有 8 个包的输入队列。`fps` 是缺失帧率时的回退值；不做帧率转换。`pace=true` 仅用于本地文件按 DTS 实时回放。
 
-本版只处理第一条可用视频流：原生 H.264/HEVC 软解 → null/scale + format filter → libx264（veryfast / zerolatency，无输出 B 帧）→ MPEG-TS / MP4 / FLV。音频、字幕不处理。配置不接受未知或重复字段；请求体上限 16 KiB。
+本版只处理第一条可用视频流：原生 H.264/HEVC 软解 → null/scale + format filter → 编码 → 输出。默认 `encoder=libx264`，`encoder_preset=veryfast`，YUV420P、zerolatency、无输出 B 帧，支持 MPEG-TS / MP4 / FLV。选择 `encoder=libvvenc` 时默认 `encoder_preset=faster`，强制 YUV420P10LE，支持 MPEG-TS / MP4，保留 VVenC 的前瞻与重排。其 preset 可用 faster/fast/medium/slow/slower，其他组合返回 400。详见 [VVenC](vvenc.md)。音频、字幕不处理。配置不接受未知或重复字段；请求体上限 16 KiB。
 
 当前构建包含 file、UDP、TCP、RTP、HTTP、RTMP 和 RTSP 相关能力，不包含 HTTPS、SRT 或硬件编解码。协议编译可用不等于均已实流验收，检查下方验证记录。输入尺寸或像素格式变化时明确失败，暂不进行在线 filter/编码器重建。
 

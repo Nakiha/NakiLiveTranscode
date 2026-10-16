@@ -1,0 +1,12 @@
+{
+  "input": "/data/input.mp4",
+  "output": "/data/output-vvc.ts",
+  "output_format": "mpegts",
+  "encoder": "libvvenc",
+  "encoder_preset": "faster",
+  "encoder_threads": 2,
+  "width": 640,
+  "height": 360,
+  "bitrate": 1500000,
+  "frame_log": false
+}

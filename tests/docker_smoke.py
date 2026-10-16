@@ -50,6 +50,22 @@ def run():
                         "stream=width,height,nb_read_frames","-of","json",str(RUN/"output.ts")])
         stream=json.loads(result)["streams"][0]
         assert stream["width"]==640 and stream["height"]==360 and stream["nb_read_frames"]=="75"
+        vvc_config={"input":"/data/input.mp4","output":"/data/output-vvc.mp4","output_format":"mp4",
+                    "width":256,"height":144,"encoder":"libvvenc"}
+        (RUN/"vvc.json").write_text(json.dumps(vvc_config))
+        command(COMPOSE+["cp",str(RUN/"vvc.json"),"transcode:/data/vvc.json"])
+        control("start","/data/vvc.json")
+        deadline=time.monotonic()+60
+        while time.monotonic()<deadline:
+            vvc_state=control("status")
+            if vvc_state["state"] in ("completed","failed"):break
+            time.sleep(.1)
+        assert vvc_state["state"]=="completed" and vvc_state["packets_out"]==75,vvc_state
+        assert vvc_state["encoder"]=="libvvenc" and vvc_state["startup"]["request_to_first_key_mux_ms"]>0
+        command(COMPOSE+["cp","transcode:/data/output-vvc.mp4",str(RUN/"output-vvc.mp4")])
+        (RUN/"vvc-state.json").write_text(json.dumps(vvc_state,indent=2))
+        # Full independent VVC decode uses the SDK's n9 ffprobe in vvenc_integration;
+        # the host distro ffprobe may predate VVC support.
         fault_config={"input":"udp://127.0.0.1:15999","output":"/data/worker-fault.ts"}
         (RUN/"worker-fault.json").write_text(json.dumps(fault_config))
         command(COMPOSE+["cp",str(RUN/"worker-fault.json"),"transcode:/data/worker-fault.json"])
@@ -104,6 +120,7 @@ def run():
                 command(["python3",str(ROOT/"scripts/symbolize-crash.py"),str(report_file),
                          "--symbols",str(pathlib.Path(symbols_dir)/"app"),
                          "--symbols",str(pathlib.Path(symbols_dir)/"ffmpeg"),
+                         "--symbols",str(pathlib.Path(symbols_dir)/"vvenc"),
                          "--require-module",required,"--output",str(report_file.with_suffix(".symbolized.txt"))])
         time.sleep(.2)
         command(COMPOSE+["run","--rm","--no-deps","log-maintenance","--directory","/var/log/naki","--min-age-seconds","0"])

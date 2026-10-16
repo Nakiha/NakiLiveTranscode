@@ -21,7 +21,7 @@ def load(name):
     return module
 
 
-def run(ffmpeg_symbols):
+def run(ffmpeg_symbols, vvenc_symbols):
     archiver = load("archive-symbols")
     resolver = load("symbolize-crash")
     (ROOT / "out").mkdir(exist_ok=True)
@@ -93,10 +93,25 @@ def run(ffmpeg_symbols):
         resolved = resolver.symbolize(sample, [ffmpeg_symbols])
         frame = resolved["threads"][0]["frames"][0]["symbolization"]
         assert frame["status"] == "resolved" and any("version.c:" in item["location"] for item in frame["inline_chain"]), frame
-    print("PASS exact Build ID, stripped runtime, real PIE fault/source line, missing/mismatched symbols and invalid input; FFmpeg DWARF checked:", bool(ffmpeg_symbols), "; artifacts:", evidence)
+    if vvenc_symbols:
+        manifest = json.loads((vvenc_symbols / "manifest.json").read_text())
+        module = next(module for module in manifest["modules"] if module["name"].startswith("libvvenc.so"))
+        prefix = pathlib.Path(os.environ.get("NAKI_BUILD_ROOT", "/opt/naki-build")) / "install/lib/libvvenc.so"
+        assert archiver.build_id(prefix) == module["build_id"]
+        symbols = archiver.command("nm", "-D", "--defined-only", str(prefix))
+        location = next(line.split()[0] for line in symbols.splitlines() if line.split()[-1] == "vvenc_get_version")
+        sample = dict(original, modules=[dict(module, id=0)], threads=[{
+            "tid": 1, "frames": [{"module": 0, "elf_address": "0x" + location}]}])
+        resolved = resolver.symbolize(sample, [vvenc_symbols])
+        frame = resolved["threads"][0]["frames"][0]["symbolization"]
+        assert frame["status"] == "resolved" and any("vvenc.cpp:" in item["location"] for item in frame["inline_chain"]), frame
+        (evidence / "vvenc-symbolized.json").write_text(json.dumps(resolved, indent=2))
+    print("PASS exact Build ID, stripped runtime, real PIE fault/source line, missing/mismatched symbols and invalid input; FFmpeg/VVenC DWARF checked:", bool(ffmpeg_symbols), bool(vvenc_symbols), "; artifacts:", evidence)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--ffmpeg-symbols", type=pathlib.Path)
-    run(parser.parse_args().ffmpeg_symbols)
+    parser.add_argument("--vvenc-symbols", type=pathlib.Path)
+    args = parser.parse_args()
+    run(args.ffmpeg_symbols, args.vvenc_symbols)

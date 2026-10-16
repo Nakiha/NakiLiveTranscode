@@ -4,10 +4,10 @@
 
 ## 两条构建流程
 
-- **FFmpeg dependency**：独立、可手动执行的可复用 workflow。服务 CI 先调用它查找 SDK，只有缺少匹配产物时才编译。键包含固定的 FFmpeg gitlink、Ubuntu/架构标识、`Dockerfile.ffmpeg`、FFmpeg 构建脚本和符号导出脚本的哈希。
+- **FFmpeg dependency**：独立、可手动执行的可复用 workflow。服务 CI 先调用它查找 SDK，只有缺少匹配产物时才编译。键包含固定的 FFmpeg/VVenC gitlink、Ubuntu/架构标识、`Dockerfile.ffmpeg`、两者构建脚本和符号导出脚本的哈希。
 - **Service CI**：main push、PR、手动触发。下载确切 SDK，校验 SHA256，构建 C 服务、运行镜像、导出独立符号，并运行完整链路、观测、进程接管、轻量崩溃、离线解析和 Compose 镜像测试。应用源码变化不会重新编译 FFmpeg。
 
-FFmpeg SDK 保存为公共仓库的 prerelease `ffmpeg-linux-amd64-<recipe-key>`。SDK 的安装前缀固定为 `/opt/naki-build/install`，包括共享库、头文件、pkg-config、FFmpeg 独立调试符号、configure 配置和构建包版本。应用的 Docker build 使用 `FFMPEG_STAGE=ffmpeg-prebuilt`，不会执行本地 FFmpeg 构建阶段。没有匹配 SDK 的 PR 会要求维护者在可信分支手动运行依赖 workflow；不从 PR 发布依赖。
+FFmpeg/VVenC SDK 保存为公共仓库的 prerelease `ffmpeg-linux-amd64-<recipe-key>`。SDK 的安装前缀固定为 `/opt/naki-build/install`，包括共享库、头文件、pkg-config、FFmpeg/VVenC 独立调试符号、configure/CMake 配置和构建包版本。应用的 Docker build 使用 `FFMPEG_STAGE=ffmpeg-prebuilt`，不会执行本地依赖构建阶段。没有匹配 SDK 的 PR 会要求维护者在可信分支手动运行依赖 workflow；不从 PR 发布依赖。
 
 依赖 release 发布后复用原文件。键标识源码和构建配方；Ubuntu 镜像标签和 apt 仓库本身会更新，因此**不声称位级可重现**。更新工具链时应修改依赖 Dockerfile（建议固定所需镜像 digest/包版本），产生新键。`packages.txt` 记录实际使用的包版本；排查时以 ELF Build ID 为准。
 
@@ -18,7 +18,7 @@ FFmpeg SDK 保存为公共仓库的 prerelease `ffmpeg-linux-amd64-<recipe-key>`
 | 文件 | 内容 |
 | --- | --- |
 | `image-linux-amd64.tar.gz` | 测试过的运行镜像，`docker load` 导入 |
-| `symbols-linux-amd64.tar.gz` | `app/` 和 `ffmpeg/` 两套 `.build-id/xx/rest.debug`、manifest 和包版本 |
+| `symbols-linux-amd64.tar.gz` | `app/`、`ffmpeg/`、`vvenc/` 各自的 `.build-id/xx/rest.debug`、manifest 和构建配置 |
 | `image.json` | 镜像 ID、架构、源码与 FFmpeg 依赖键标签 |
 | `source-revision.txt`、`ffmpeg-dependency-key.txt` | 源码与依赖索引 |
 | `symbolize-crash.py` | 配套离线解析入口 |
@@ -54,9 +54,9 @@ docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt --target symbols \
 
 仓库引用完整、固定版本的 FFmpeg fork，保留异步解码与 TCP/UDP 观测修改；服务构建通过 `--disable-everything` 按需启用组件，不是重新实现 FFmpeg：
 
-当前基于 n9.0.2，历史目录名暂时保留。迁移和本地源码开发见 [FFmpeg 开发](ffmpeg-development.md)。libvvenc 封装已存在于上游，但本服务当前构建仍未启用 VVenC 库/编码器。
+当前基于 n9.0.2，历史目录名暂时保留。迁移和本地源码开发见 [FFmpeg 开发](ffmpeg-development.md)。已启用独立 pin 的 VVenC v1.14.0 和 libvvenc 封装，见 [VVenC 接入](vvenc.md)。SDK 键同时包含 VVenC gitlink 与构建脚本；VVenC 改动会触发依赖重建，单纯应用改动继续复用 SDK。
 
-- H.264/HEVC decoder/parser，libx264 encoder；GPL 构建。
+- H.264/HEVC/VVC decoder/parser，libx264/libvvenc encoder；GPL 构建。VVC decoder 用于独立验收输出，服务入口仍只接受 H.264/HEVC。
 - mov/mpegts/h264/hevc/flv/rtsp demuxer；mpegts/mp4/flv muxer。
 - file/pipe/udp/tcp/rtp/http/rtmp protocol，network/pthreads。
 - buffer/buffersink/null/scale/format filter，以及 FFmpeg 自动选择的必需依赖。
