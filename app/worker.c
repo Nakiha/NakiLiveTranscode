@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "live.h"
 #include "ipc.h"
+#include "crash.h"
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -48,6 +49,7 @@ static int start_job(Job *job, yyjson_doc *doc) {
     free(config);
     if(!valid)return -1;
     strcpy(job->id,id); strcpy(job->request_id,request_id); strcpy(job->log_path,path); strcpy(job->state,"starting");
+    crash_set_job(job->id);
     job->started_us=yyjson_get_sint(yyjson_obj_get(root,"request_us"));
     job->assigned_us=yyjson_get_sint(yyjson_obj_get(root,"assigned_us"));
     job->worker_received_us=now_us(); job->window_start_us=job->started_us;
@@ -59,6 +61,8 @@ static int start_job(Job *job, yyjson_doc *doc) {
 /* Private executable: fd 3 is the first controller; the private endpoint permits later takeover. */
 int main(int argc,char **argv) {
     if(argc!=7)return 2;
+    CrashOptions crash;
+    if(crash_options_env(&crash) || crash_client_start(&crash,"worker"))return 1;
     char endpoint[108];
     if(snprintf(endpoint,sizeof(endpoint),"%s/w-%d.sock",argv[1],getpid())>=(int)sizeof(endpoint))return 2;
     int listener=ipc_listen(endpoint);

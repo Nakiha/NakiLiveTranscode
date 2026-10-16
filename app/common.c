@@ -1,4 +1,5 @@
 #include "live.h"
+#include "crash.h"
 #include <errno.h>
 #include <math.h>
 #include <stdlib.h>
@@ -110,6 +111,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     else yyjson_mut_obj_add_null(doc,startup,"request_to_first_key_mux_ms");
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"startup",startup);
     json_int(doc,"frame_log",job->config.frame_log);
+    json_int(doc,"crash_collector_pid",crash_collector_pid());
     json_int(doc,"slow_frame_ms",job->config.slow_frame_ms);
     int64_t current=now_us(), end=job->ended_us ? job->ended_us : current;
     if(job->last_output_us) json_num(doc,"last_output_age_ms",(current-job->last_output_us)/1000.0);

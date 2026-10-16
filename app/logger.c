@@ -1,4 +1,5 @@
 #include "logger.h"
+#include "crash.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -75,6 +76,7 @@ static void maintenance(Logger *l, int shutdown) {
     }
 }
 static void *writer_main(void *opaque) {
+    (void)crash_thread_init();
     Logger *l=opaque;
     for (;;) {
         pthread_mutex_lock(&l->mutex);

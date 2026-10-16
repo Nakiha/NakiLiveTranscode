@@ -14,6 +14,10 @@ docker compose logs -f transcode
 
 默认保留 1 个待命 worker。可在 Compose 覆盖服务 command，保留原 bind/run-dir 参数并追加 `--spare-workers 1`、`--worker-timeout 5`、`--worker-stop-timeout 3`。监管入口会将全部参数转发给 C 程序。私有接管端点位于按 run-dir 派生的容器 `/tmp` 目录；同一个容器里的控制进程重启会复用它。端点不放在日志维护卷内，维护容器不会接触它。
 
+0.4.0 在每个 HTTP/worker 旁预启动独立 C 崩溃收集器，运行库增加 libunwind8。默认报告目录 `/var/log/naki/crashes`（0700，文件 0600）在 logs 卷内，单份 256 KiB、最多 32 份且合计不超过 16 MiB。外部 trace 日志维护脚本不会处理该子目录；崩溃收集器自行按配额保留报告。可用 `docker compose cp transcode:/var/log/naki/crashes ./crashes` 导出小型 JSON，无需搬运完整 core。
+
+collector 通过指定 PID 的 PR_SET_PTRACER 和同 UID 访问抓栈，不使用 PR_SET_PTRACER_ANY，也不默认添加 SYS_PTRACE capability 或关闭 seccomp。实际内核/LSM/seccomp 策略仍可能拒绝，报告会保留寄存器并标记 attach 错误和 complete=false；应在目标环境验收。本轮不对简单监管入口本身做崩溃采集和故障注入。
+
 `media` 卷挂到 `/data`，`logs` 卷挂到 `/var/log/naki`。任务配置中的路径指容器内路径；输出仍使用排他创建。可通过 `docker compose cp` 将输入和配置放入容器：
 
 ```sh

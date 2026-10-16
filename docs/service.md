@@ -8,17 +8,20 @@
 - HTTP 服务端：[libevent evhttp](https://libevent.org/)，系统开发包，BSD 系许可。使用发行版安全更新，不按上游版本号单独判断是否包含回补。
 - HTTP 客户端：[libcurl](https://curl.se/libcurl/)，系统开发包，curl 许可。
 - 媒体：已有 FFmpeg fork API 2，链接自定义共享库；H.264 编码使用 libx264。
+- 外部崩溃抓栈：系统 libunwind-ptrace；主服务、worker 和 collector 均为 C。
 
 Ubuntu / WSL：
 
 ```sh
 sudo apt-get update
-sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev
+sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev libunwind-dev
 git submodule update --init --recursive
 bash scripts/build-service.sh
 ```
 
 构建目录默认在 Linux 文件系统 `$HOME/.cache/naki-live-transcode/`，可用 `NAKI_BUILD_ROOT` 指定另一目录。二进制在项目 `out/bin/`，RPATH 指向该构建前缀的 FFmpeg 库，不混用系统 FFmpeg。迁移部署时需在目标系统重建。
+
+`naki-live`、`naki-live-worker` 和 `naki-crash-collector` 必须放在同一目录。0.4.0 为控制进程和每个 worker 各预启动一个独立 collector；故障发生时才临时派生抓栈进程。默认不生成完整 core，报告位置由 `/health.crash_report_dir` 给出，限时与配额参数见 [崩溃诊断](crashes.md)。
 
 此构建启用 GPL 的 libx264，生成的 FFmpeg 库按 GPL 条件处理；分发整体程序前应按实际链接方式确认适用许可。保留各依赖的原始许可文件。HTTP 客户端不参与媒体转码，FFmpeg 处理媒体协议。
 
@@ -90,5 +93,7 @@ worker 默认每 10 秒生成 status，经其日志线程和非阻塞 IPC 交给
 新增日志/网络测试：`python3 tests/observability_integration.py`，覆盖 10 秒默认定时器、窗口计数、I 帧、轮转、压缩清理、队列饱和、阻塞输出期间心跳以及 TCP/UDP 收发。
 
 新增进程测试：`python3 tests/process_integration.py`，覆盖待命补位、原生崩溃隔离、超时回收、控制失联期间继续转码、同 PID 接管、离线完成接管和首帧链路。结果见 [进程版本验证记录](validation-processes-20261016.md)。
+
+轻量崩溃测试：`python3 tests/crash_integration.py`，覆盖真实非法访问、线程/栈溢出、持锁故障、超时与权限降级、限额、worker/HTTP 崩溃报告和接管。见 [崩溃采集验证记录](validation-crashes-20261016.md)。
 
 [新增验证记录](validation-observability-20261016.md)；容器测试为 `python3 tests/docker_smoke.py`（先构建镜像）。

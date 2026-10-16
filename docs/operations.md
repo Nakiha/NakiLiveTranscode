@@ -90,6 +90,8 @@ worker 崩溃会令任务失败，保留诊断，不自动重播或重建媒体�
 
 还需要多路 admission、控制/观测通道分离、可确认的动态变更协议、媒体进度 watchdog、CPU/内存/FD 限额、网络重连、任务持久化及长时间 soak test。当前单路进程池不证明几百路容量或 7×24 小时可用性。
 
+0.4.0 默认启用轻量外部崩溃采集，信号处理函数只发送固定现场；collector 限时抓栈并维护有大小/数量上限的私有 JSON 报告目录，不依赖完整 core。查看 [崩溃诊断](crashes.md) 的路径、权限、限额、导出和不完整报告语义。
+
 Compose 的 healthcheck 检查控制 API 存活，不代表正在持续出流；普通 Compose 不会仅因 unhealthy 自动重启。容器内监管入口目前只检测控制进程退出，不检测它还活着但卡死的情况。
 
 参考：[Docker 进程与 init](https://docs.docker.com/engine/containers/multi-service_container/)、[重启策略](https://docs.docker.com/engine/containers/start-containers-automatically/)、[local 日志驱动](https://docs.docker.com/engine/logging/drivers/local/)。

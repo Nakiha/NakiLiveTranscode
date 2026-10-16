@@ -7,19 +7,21 @@ ENV NAKI_BUILD_ROOT=/opt/naki-build
 COPY scripts/build-service.sh scripts/build-service.sh
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/ experiments/decoder-20261016/ffmpeg-7.0.3/
 RUN NAKI_FFMPEG_ONLY=1 bash scripts/build-service.sh
+RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends libunwind-dev \
+    && rm -rf /var/lib/apt/lists/*
 COPY CMakeLists.txt ./
 COPY app/ app/
 COPY third_party/yyjson/src/ third_party/yyjson/src/
-COPY tests/logger_test.c tests/network_probe.c tests/
+COPY tests/logger_test.c tests/network_probe.c tests/crash_fixture.c tests/crash_unwind_stall.c tests/
 RUN bash scripts/build-service.sh
 
 FROM ubuntu:24.04 AS runtime
 RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    libevent-2.1-7t64 libcurl4t64 libx264-164 ca-certificates python3 \
+    libevent-2.1-7t64 libcurl4t64 libx264-164 libunwind8 ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 naki && useradd --uid 10001 --gid 10001 --no-create-home naki \
     && mkdir -p /data /var/log/naki && chown 10001:10001 /data /var/log/naki
-COPY --from=build /src/out/bin/naki-live /src/out/bin/naki-live-worker /src/out/bin/naki-live-ctl /usr/local/bin/
+COPY --from=build /src/out/bin/naki-live /src/out/bin/naki-live-worker /src/out/bin/naki-live-ctl /src/out/bin/naki-crash-collector /usr/local/bin/
 COPY --from=build /opt/naki-build/install/lib/ /opt/naki-build/install/lib/
 COPY scripts/maintain-logs.py /usr/local/lib/naki/maintain-logs.py
 COPY scripts/service-launcher.py /usr/local/lib/naki/service-launcher.py

@@ -50,6 +50,19 @@ def run():
                         "stream=width,height,nb_read_frames","-of","json",str(RUN/"output.ts")])
         stream=json.loads(result)["streams"][0]
         assert stream["width"]==640 and stream["height"]==360 and stream["nb_read_frames"]=="75"
+        fault_config={"input":"udp://127.0.0.1:15999","output":"/data/worker-fault.ts"}
+        (RUN/"worker-fault.json").write_text(json.dumps(fault_config))
+        command(COMPOSE+["cp",str(RUN/"worker-fault.json"),"transcode:/data/worker-fault.json"])
+        victim=control("start","/data/worker-fault.json")["supervisor"]["worker_pid"]
+        command(COMPOSE+["exec","-T","transcode","python3","-c",
+                         "import os,signal,sys; os.kill(int(sys.argv[1]),signal.SIGSEGV)",str(victim)])
+        deadline=time.monotonic()+10
+        while time.monotonic()<deadline:
+            failed=control("status")
+            if failed["state"]=="failed":break
+            time.sleep(.1)
+        assert failed["state"]=="failed" and failed["supervisor"]["exit_signal"]==11,failed
+        assert failed["supervisor"]["core_dumped"] is False
         # The container launcher restarts only the failed controller; the same worker survives.
         recovery={"input":"/data/input.mp4","output":"/data/recovery.ts","width":640,"height":360,"pace":True}
         (RUN/"recovery.json").write_text(json.dumps(recovery))
@@ -58,7 +71,7 @@ def run():
         original_worker=accepted["supervisor"]["worker_pid"]
         original_controller=control("health")["supervisor_pid"]
         command(COMPOSE+["exec","-T","transcode","python3","-c",
-                         "import os,signal,sys; os.kill(int(sys.argv[1]),signal.SIGKILL)",str(original_controller)])
+                         "import os,signal,sys; os.kill(int(sys.argv[1]),signal.SIGSEGV)",str(original_controller)])
         deadline=time.monotonic()+15
         recovered=None
         while time.monotonic()<deadline:
@@ -77,6 +90,13 @@ def run():
         recovered_stream=json.loads(command(["ffprobe","-v","error","-select_streams","v:0","-count_frames",
                                              "-show_entries","stream=nb_read_frames","-of","json",str(RUN/"recovery.ts")]))["streams"][0]
         assert recovered_stream["nb_read_frames"]=="75"
+        crash_dir=control("health")["crash_report_dir"]
+        reports=json.loads(command(COMPOSE+["exec","-T","transcode","python3","-c",
+                       "import json,pathlib,sys; print(json.dumps([json.loads(p.read_text()) for p in pathlib.Path(sys.argv[1]).glob('crash-*.json')]))",crash_dir]))
+        assert all(any(r["pid"]==pid and r["role"]==role and r["capture_result"]=="captured" and
+                       any(t["fault_thread"] and t["frames"] for t in r["threads"]) for r in reports)
+                   for pid,role in ((victim,"worker"),(original_controller,"http"))),reports
+        command(COMPOSE+["cp",f"transcode:{crash_dir}",str(RUN/"crashes")])
         time.sleep(.2)
         command(COMPOSE+["run","--rm","--no-deps","log-maintenance","--directory","/var/log/naki","--min-age-seconds","0"])
         count=int(command(COMPOSE+["exec","-T","transcode","python3","-c",
@@ -100,7 +120,7 @@ def run():
         (RUN/"COMPLETE.json").write_text(json.dumps({"project":PROJECT,"status":"passed","frames":75,
                                                     "compressed_segments":count,"exit_code":0},indent=2))
         assert any(event["event"]=="control_restarting" for event in events)
-        print("PASS Compose image, full transcode, controller crash/restart with same worker, health, maintenance and SIGTERM:",RUN,flush=True)
+        print("PASS Compose, worker/HTTP SIGSEGV stack reports without core, same-worker recovery, media, maintenance and SIGTERM:",RUN,flush=True)
     finally:
         # This project name is newly generated above; no pre-existing resources are targeted.
         if started:command(COMPOSE+["down","--volumes","--remove-orphans"])

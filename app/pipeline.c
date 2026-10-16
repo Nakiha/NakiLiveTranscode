@@ -1,4 +1,5 @@
 #include "live.h"
+#include "crash.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -66,6 +67,7 @@ static int event_log(Pipeline *p, const char *event) {
     logger_submit(p->job->logger,NULL,new_event(event,p->job)); return 0;
 }
 static void *reader_main(void *opaque) {
+    (void)crash_thread_init();
     Pipeline *p=opaque; Job *job=p->job;
     int ret=0; int64_t seq=0, first_ts=AV_NOPTS_VALUE, epoch=0;
     while (!atomic_load(&job->cancel)) {
@@ -462,6 +464,7 @@ static int initialize_decoder(Pipeline *p) {
     return event_log(p,"decoder_ready");
 }
 void *pipeline_main(void *opaque) {
+    (void)crash_thread_init();
     Job *job=opaque;
     Pipeline p={.job=job,.custom_output_fd=-1,.last_pts=AV_NOPTS_VALUE,.stage="initialization"};
     p.read_interrupt.job=job; p.write_interrupt.job=job;
