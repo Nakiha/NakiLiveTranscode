@@ -1,0 +1,46 @@
+#ifndef NAKI_LIVE_H
+#define NAKI_LIVE_H
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <yyjson.h>
+#include <libavcodec/async.h>
+
+typedef struct Config {
+    char input[2048], output[2048], output_format[16];
+    int width, height, bitrate, max_threads, min_threads, budget_slots;
+    int queue_capacity, encoder_threads, fps, pace;
+} Config;
+typedef struct Metric {
+    uint64_t count;
+    double sum_ms, max_ms;
+} Metric;
+typedef struct Job {
+    Config config;
+    char id[64], log_path[4096], error[256], state[24];
+    pthread_t thread;
+    pthread_mutex_t mutex;
+    atomic_int cancel, done;
+    int wake_fd;
+    FILE *log;
+    int64_t started_us, ended_us;
+    uint64_t packets_in, frames_decoded, frames_filtered, packets_out, bytes_out;
+    Metric decode, filter, encode, mux, ingress_to_mux;
+    AVCodecAsyncAutoStats auto_stats;
+} Job;
+
+int64_t now_us(void);
+void wake_job(void *opaque);
+void request_stop(Job *job);
+int log_json(FILE *file, yyjson_mut_doc *doc);
+yyjson_mut_doc *new_event(const char *event, const Job *job);
+void json_num(yyjson_mut_doc *doc, const char *name, double value);
+void json_int(yyjson_mut_doc *doc, const char *name, int64_t value);
+void json_str(yyjson_mut_doc *doc, const char *name, const char *value);
+void metric_add(Metric *metric, double ms);
+yyjson_mut_doc *job_snapshot(Job *job);
+void *pipeline_main(void *opaque);
+int config_parse(const char *body, size_t size, Config *out, char *error, size_t cap);
+int mkdir_tree(const char *path);
+#endif

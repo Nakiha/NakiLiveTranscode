@@ -1,0 +1,15 @@
+{
+  "input": "out/sample-input.mp4",
+  "output": "out/sample-output.ts",
+  "output_format": "mpegts",
+  "width": 640,
+  "height": 360,
+  "bitrate": 1500000,
+  "max_threads": 12,
+  "min_threads": 2,
+  "budget_slots": 12,
+  "queue_capacity": 4,
+  "encoder_threads": 2,
+  "fps": 25,
+  "pace": true
+}

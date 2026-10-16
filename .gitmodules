@@ -1,3 +1,6 @@
 [submodule "experiments/decoder-20261016/ffmpeg-7.0.3"]
 	path = experiments/decoder-20261016/ffmpeg-7.0.3
 	url = https://github.com/Nakiha/FFmpeg.git
+[submodule "third_party/yyjson"]
+	path = third_party/yyjson
+	url = https://github.com/ibireme/yyjson.git

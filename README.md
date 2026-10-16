@@ -2,14 +2,31 @@
 
 实验性的 CPU 直播转码项目，起点为 FFmpeg 7.0.3 的异步提前出帧和自动并行度调度实验。
 
-**当前状态：解码改造及验证工具已存在，完整直播转码应用尚未实现。** 现有构建关闭网络、缩放及大部分编码功能，不能直接用于完整转码。
+**当前状态：Linux 单路、纯视频 C 实验服务。** 已实现输入 → 异步自动调度解码 → filter → H.264 编码 → 输出，以及 HTTP 控制和 JSONL 逐帧指标。完整用法和测量边界见 [服务说明](docs/service.md)。
+
+## 运行服务（Linux / WSL）
+
+```sh
+sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev
+git submodule update --init --recursive
+bash scripts/build-service.sh
+./out/bin/naki-live
+# 在另一终端中；先把 examples/file.json 的输入/输出改成实际路径：
+./out/bin/naki-live-ctl start examples/file.json
+./out/bin/naki-live-ctl status
+./out/bin/naki-live-ctl stop
+```
+
+JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 libcurl。服务默认监听 `127.0.0.1:8090`。当前无音频、无在线规格切换；“端到端”指标指服务收到解封装包到转码包写出，不含采集端和播放器。
 
 ## 目录
 
 | 路径 | 用途 |
 | --- | --- |
-| `app/` | 后续转码程序 |
-| `scripts/` | 整理后的构建与回归入口 |
+| `app/` | Linux C 服务与 HTTP 客户端 |
+| `scripts/` | 服务及解码专项的构建与回归入口 |
+| `third_party/yyjson/` | 固定版本 JSON 库子模块 |
+| `examples/`、`tests/` | 请求示例与完整链路集成测试 |
 | `docs/` | 项目现状和整理说明 |
 | `experiments/decoder-20261016/ffmpeg-7.0.3/` | 固定版本的 FFmpeg 子模块；底层代码保留独立历史 |
 | `experiments/decoder-20261016/` | 本地历史媒体、基线、报告、安装目录和交付包，均不上传 |
@@ -24,7 +41,9 @@ cd NakiLiveTranscode
 
 FFmpeg 固定在 `382492970c62d0c77ce0110d731d5ad78973b2b4`，来自 [Nakiha/FFmpeg](https://github.com/Nakiha/FFmpeg/tree/live/n7.0.3-async-early-output)。不要使用 `git submodule update --remote` 无意升级已测版本。
 
-## 解码验证构建
+## 原解码专项验证构建
+
+以下是保留的精简解码专项工具。服务使用上面的独立构建配置，启用网络、filter 和 libx264。
 
 Linux / WSL（安装 GCC、Make、NASM、pkg-config、Python 3）：
 
