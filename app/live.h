@@ -29,7 +29,7 @@ typedef struct FrameGroups {
 } FrameGroups;
 typedef struct Job {
     Config config;
-    char id[64], log_path[4096], error[256], state[24];
+    char id[64], request_id[129], log_path[4096], error[256], state[24];
     pthread_t thread;
     pthread_mutex_t mutex;
     atomic_int cancel, done;
@@ -38,6 +38,10 @@ typedef struct Job {
     NetworkStats *network;
     TraceSink *trace;
     int64_t started_us, ended_us;
+    int64_t assigned_us, worker_received_us, worker_spawned_us, worker_ready_us;
+    int64_t first_video_output_us, first_key_output_us;
+    int prewarmed;
+    yyjson_mut_doc *first_chain[2]; /* Bounded checkpoints for replay after controller loss. */
     uint64_t packets_in, frames_decoded, frames_filtered, packets_out, bytes_out;
     Latencies lifetime, window;
     Latencies i_lifetime, i_window;

@@ -8,6 +8,9 @@ typedef struct TraceSink TraceSink;
 typedef struct LoggerOptions {
     unsigned queue_capacity, rotate_seconds;
     uint64_t rotate_bytes;
+    /* Optional nonblocking transport for stdout records; called only by logger thread. */
+    int (*stdout_write)(void *opaque,const char *text,size_t size);
+    void *stdout_opaque;
 } LoggerOptions;
 typedef struct LoggerStats {
     uint64_t dropped_frames, dropped_status, io_errors, written, rotations;

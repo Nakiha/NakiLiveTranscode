@@ -101,8 +101,10 @@ static void *writer_main(void *opaque) {
             if (!s->file && open_segment(l,s)) file=NULL;
             else file=s->file;
         }
-        int failed=!file || fwrite(record.text,1,record.size,file)!=record.size || fputc('\n',file)==EOF;
-        if (!s && file && fflush(file)) failed=1;
+        int custom=!s && l->options.stdout_write;
+        int failed=custom ? l->options.stdout_write(l->options.stdout_opaque,record.text,record.size)!=0 :
+            !file || fwrite(record.text,1,record.size,file)!=record.size || fputc('\n',file)==EOF;
+        if (!s && !custom && file && fflush(file)) failed=1;
         if (failed) {if(s)s->failed=1; io_error(l);}
         else if(s) s->bytes+=record.size+1;
         free(record.text);

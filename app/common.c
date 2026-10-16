@@ -24,7 +24,8 @@ yyjson_mut_doc *new_event(const char *event, const Job *job) {
     json_str(doc, "event", event);
     json_int(doc, "unix_us", av_gettime());
     json_int(doc, "monotonic_us", now_us());
-    if (job) json_str(doc, "job_id", job->id);
+    json_int(doc,"process_id",getpid());
+    if (job) {json_str(doc, "job_id", job->id); json_str(doc,"request_id",job->request_id);}
     return doc;
 }
 void json_num(yyjson_mut_doc *doc, const char *name, double value) {
@@ -96,6 +97,18 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_int(doc, "packets_out", job->packets_out);
     json_int(doc, "bytes_out", job->bytes_out);
     json_num(doc, "elapsed_ms", ((job->ended_us ? job->ended_us : now_us()) - job->started_us) / 1000.0);
+    yyjson_mut_val *startup=yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_str(doc,startup,"boundary","complete_http_request_handler_to_mux_flush");
+    yyjson_mut_obj_add_bool(doc,startup,"prewarmed",job->prewarmed);
+    yyjson_mut_obj_add_sint(doc,startup,"request_monotonic_us",job->started_us);
+    yyjson_mut_obj_add_real(doc,startup,"request_to_dispatch_ms",(job->assigned_us-job->started_us)/1000.0);
+    yyjson_mut_obj_add_real(doc,startup,"dispatch_to_worker_ms",(job->worker_received_us-job->assigned_us)/1000.0);
+    yyjson_mut_obj_add_real(doc,startup,"worker_boot_ms",(job->worker_ready_us-job->worker_spawned_us)/1000.0);
+    if(job->first_video_output_us)yyjson_mut_obj_add_real(doc,startup,"request_to_first_video_mux_ms",(job->first_video_output_us-job->started_us)/1000.0);
+    else yyjson_mut_obj_add_null(doc,startup,"request_to_first_video_mux_ms");
+    if(job->first_key_output_us)yyjson_mut_obj_add_real(doc,startup,"request_to_first_key_mux_ms",(job->first_key_output_us-job->started_us)/1000.0);
+    else yyjson_mut_obj_add_null(doc,startup,"request_to_first_key_mux_ms");
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"startup",startup);
     json_int(doc,"frame_log",job->config.frame_log);
     json_int(doc,"slow_frame_ms",job->config.slow_frame_ms);
     int64_t current=now_us(), end=job->ended_us ? job->ended_us : current;

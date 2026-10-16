@@ -23,6 +23,8 @@ JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 li
 
 容器运行：`docker compose up -d --build transcode`，见 [Docker 部署](docs/docker.md)。
 
+0.3.0 使用独立转码进程，默认保留 1 个待命 worker；控制进程异常退出时转码继续，新控制进程可接管原任务。每个任务额外输出首帧链路日志。容器内轻量监管入口负责重启控制进程，详情见 [进程池与接管](docs/processes.md)。仍只允许一路任务，尚未实现多路容量和运行中动态改配置。
+
 ## 目录
 
 | 路径 | 用途 |

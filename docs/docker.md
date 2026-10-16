@@ -10,6 +10,10 @@ docker compose logs -f transcode
 
 多阶段构建 Ubuntu 24.04 + libx264 + 自定义 FFmpeg，运行时 UID/GID 10001，前台运行，不在容器中启动 cron。`init: true` 处理信号和孤儿子进程回收；退出重启采用 unless-stopped，停止宽限 30 秒。API 映射到宿主机 `127.0.0.1:8090`，UDP 15000 同样只在本机发布。访问其他机器时应自行配置鉴权/访问边界。
 
+镜像入口是前台轻量监管程序 `service-launcher.py`，由它启动 C HTTP 控制进程。控制进程异常退出后按 0.25 秒起、最高 10 秒的退避重启，容器保持运行，原 worker 继续转码并由新控制进程接管。worker 的媒体和追踪文件 I/O 不经过监管入口。容器收到 SIGTERM 时会转交控制进程，明确停止全部 worker；监管入口最多等待 20 秒。整个容器重启、OOM 或主机重启仍可能结束转码；不能把此机制当成跨容器无缝恢复。
+
+默认保留 1 个待命 worker。可在 Compose 覆盖服务 command，保留原 bind/run-dir 参数并追加 `--spare-workers 1`、`--worker-timeout 5`、`--worker-stop-timeout 3`。监管入口会将全部参数转发给 C 程序。私有接管端点位于按 run-dir 派生的容器 `/tmp` 目录；同一个容器里的控制进程重启会复用它。端点不放在日志维护卷内，维护容器不会接触它。
+
 `media` 卷挂到 `/data`，`logs` 卷挂到 `/var/log/naki`。任务配置中的路径指容器内路径；输出仍使用排他创建。可通过 `docker compose cp` 将输入和配置放入容器：
 
 ```sh
@@ -38,4 +42,4 @@ docker compose run --rm log-maintenance
 
 该镜像使用启用 GPL/libx264 的 FFmpeg 构建；分发时应同时满足所用源代码、许可和修改版本的对应源码提供要求。源码以本仓库子模块提交为准。
 
-实际容器验证见 [验证记录](validation-observability-20261016.md)。`tests/docker_smoke.py` 使用新生成的独立 Compose 项目名和测试卷，结束时仅回收该测试项目的容器及卷，保留镜像。
+实际容器验证见 [进程版本验证记录](validation-processes-20261016.md) 和 [观测版本历史记录](validation-observability-20261016.md)。`tests/docker_smoke.py` 使用新生成的独立 Compose 项目名和测试卷，验证 HTTP 控制进程被杀后容器未重启、相同 worker 完成 75 帧输出；结束时仅回收该测试项目的容器及卷，保留镜像。

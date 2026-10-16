@@ -50,6 +50,33 @@ def run():
                         "stream=width,height,nb_read_frames","-of","json",str(RUN/"output.ts")])
         stream=json.loads(result)["streams"][0]
         assert stream["width"]==640 and stream["height"]==360 and stream["nb_read_frames"]=="75"
+        # The container launcher restarts only the failed controller; the same worker survives.
+        recovery={"input":"/data/input.mp4","output":"/data/recovery.ts","width":640,"height":360,"pace":True}
+        (RUN/"recovery.json").write_text(json.dumps(recovery))
+        command(COMPOSE+["cp",str(RUN/"recovery.json"),"transcode:/data/recovery.json"])
+        accepted=control("start","/data/recovery.json")
+        original_worker=accepted["supervisor"]["worker_pid"]
+        original_controller=control("health")["supervisor_pid"]
+        command(COMPOSE+["exec","-T","transcode","python3","-c",
+                         "import os,signal,sys; os.kill(int(sys.argv[1]),signal.SIGKILL)",str(original_controller)])
+        deadline=time.monotonic()+15
+        recovered=None
+        while time.monotonic()<deadline:
+            try:
+                current=control("status")
+                if current.get("job_id")==accepted["job_id"] and current["supervisor"]["recovered"]:
+                    recovered=current
+                    if current["state"]=="completed":break
+            except subprocess.CalledProcessError:pass # HTTP may be absent briefly during restart.
+            time.sleep(.1)
+        assert recovered and recovered["state"]=="completed" and recovered["packets_out"]==75,recovered
+        assert recovered["supervisor"]["worker_pid"]==original_worker
+        assert control("health")["supervisor_pid"]!=original_controller
+        assert json.loads(command(["docker","inspect",container]))[0]["RestartCount"]==0
+        command(COMPOSE+["cp","transcode:/data/recovery.ts",str(RUN/"recovery.ts")])
+        recovered_stream=json.loads(command(["ffprobe","-v","error","-select_streams","v:0","-count_frames",
+                                             "-show_entries","stream=nb_read_frames","-of","json",str(RUN/"recovery.ts")]))["streams"][0]
+        assert recovered_stream["nb_read_frames"]=="75"
         time.sleep(.2)
         command(COMPOSE+["run","--rm","--no-deps","log-maintenance","--directory","/var/log/naki","--min-age-seconds","0"])
         count=int(command(COMPOSE+["exec","-T","transcode","python3","-c",
@@ -72,7 +99,8 @@ def run():
         assert events[-1]["event"]=="shutdown"
         (RUN/"COMPLETE.json").write_text(json.dumps({"project":PROJECT,"status":"passed","frames":75,
                                                     "compressed_segments":count,"exit_code":0},indent=2))
-        print("PASS Compose image, UID, health, full transcode, local logging, maintenance volume and SIGTERM:",RUN,flush=True)
+        assert any(event["event"]=="control_restarting" for event in events)
+        print("PASS Compose image, full transcode, controller crash/restart with same worker, health, maintenance and SIGTERM:",RUN,flush=True)
     finally:
         # This project name is newly generated above; no pre-existing resources are targeted.
         if started:command(COMPOSE+["down","--volumes","--remove-orphans"])

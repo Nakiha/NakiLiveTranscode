@@ -37,9 +37,9 @@
 
 `frame_log_every=10` 只抽取普通帧明细，I 帧、输出关键帧和达到慢帧阈值的帧总是尝试入队。统计仍然覆盖全部成功输出帧。默认 every=1 即保留全部帧明细。默认关闭时不为每帧构造 JSON 文本。
 
-日志线程独占 stdout 和追踪文件的写入、flush、关闭与轮转。入队不等待磁盘或网络；队列默认 512 条，单条序列化文本限制 64 KiB，另最多一条正在写出。16 个队列名额为状态/生命周期消息预留；满时丢弃日志并计数，不丢媒体帧、不让转码因日志失败终止。状态类日志在全部名额耗尽时也会丢弃，不能作为无损审计日志。
+worker 日志线程独占追踪文件的写入、flush、关闭与轮转；stdout 记录通过非阻塞 IPC 交由控制进程日志线程统一写入，避免多个进程交错写 JSONL。入队不等待磁盘或网络；每个 logger 队列默认 512 条，单条序列化文本限制 64 KiB，另最多一条正在写出。16 个队列名额为状态/生命周期消息预留；满时丢弃日志并计数，不丢媒体帧、不让转码因日志失败终止。状态类日志在全部名额耗尽时也会丢弃，不能作为无损审计日志。
 
-HTTP 状态含 `logging.queued/capacity/high_water/dropped_frames/dropped_status/io_errors/rotations`，这些是本进程 logger 的累计计数。磁盘满或慢 sink 的影响通过这些值暴露。stdout 长期不可写时，日志线程及其优雅退出可能等待；容器 stop grace period 是最终退出期限，不承诺日志完整落盘。
+HTTP 状态含 `logging.queued/capacity/high_water/dropped_frames/dropped_status/io_errors/rotations`，这些是本任务 worker 的 logger 累计计数。控制端失联或 IPC 发送缓冲满时 stdout 记录也会计为丢失，不积压无限日志；本地追踪轮转继续。控制进程另有 `supervisor.log_dropped_status/log_io_errors`。磁盘满或慢 sink 的影响通过这些值暴露。控制进程 stdout 长期不可写时，其日志线程及优雅退出可能等待；容器监管入口的退出期限和 stop grace period 是最终退出约束，不承诺日志完整落盘。
 
 启用追踪后 `log_path` 是路径前缀，实际文件如：
 
@@ -84,12 +84,12 @@ fork 新增 `libavformat/network_observer.h`，API 1 / libavformat 61.2.100。�
 
 ## 7×24 小时的进程结构
 
-无需在容器里再做传统 daemon 双重 fork。当前程序以前台单进程运行，线程不能隔离 native crash：一个 codec/filter 崩溃可能结束整个服务。
+无需传统 daemon 双重 fork。0.3.0 为“Docker/init → 前台轻量监管入口 → 可重启的 HTTP 控制进程”，独立 worker 持有媒体连接及状态。HTTP 进程使用 spawn/exec 启动小型待命池；其异常退出不会取消转码。容器内监管入口只重启控制进程，新控制进程经私有 socket 接管原 worker，期间不重启容器、不重新打开媒体输出。详见 [进程池与接管](processes.md)。
 
-推荐的长期结构是“Docker/systemd 等外部监管 → 控制进程 → 每路转码 worker 进程”。从系统看可以有三层职责，但不必自己再写一层常驻 daemon 与 Docker 重复监管。worker 使用 spawn/exec 启动，避免已启动多线程的父进程 fork 后直接继续操作 FFmpeg。
+worker 崩溃会令任务失败，保留诊断，不自动重播或重建媒体任务；待命进程退出会退避补位。stop/SIGTERM 是明确的停止意图，会停止全部 worker。容器或宿主机重启会结束媒体进程，当前没有跨容器/主机的任务持久化恢复。原生 systemd 部署也必须避免监管器在 HTTP 故障后清理整个 cgroup，否则无法接管幸存 worker。
 
-控制进程管理任务期望状态、IPC、心跳和有界重启退避；worker 负责一路媒体及其资源。这样单路崩溃或输出阻塞可单独重建。还需要任务状态持久化、重启风暴抑制、CPU/内存/FD 限额、磁盘监控、媒体进度 watchdog、网络重连及长时间 soak test。这些尚未由本轮实现。
+还需要多路 admission、控制/观测通道分离、可确认的动态变更协议、媒体进度 watchdog、CPU/内存/FD 限额、网络重连、任务持久化及长时间 soak test。当前单路进程池不证明几百路容量或 7×24 小时可用性。
 
-Compose 的 healthcheck 检查控制 API 存活，不代表正在持续出流；普通 Compose 不会仅因 unhealthy 自动重启，restart 策略主要针对进程/容器退出。Docker 重启目前也不会自动恢复上一次内存中的转码任务。
+Compose 的 healthcheck 检查控制 API 存活，不代表正在持续出流；普通 Compose 不会仅因 unhealthy 自动重启。容器内监管入口目前只检测控制进程退出，不检测它还活着但卡死的情况。
 
 参考：[Docker 进程与 init](https://docs.docker.com/engine/containers/multi-service_container/)、[重启策略](https://docs.docker.com/engine/containers/start-containers-automatically/)、[local 日志驱动](https://docs.docker.com/engine/logging/drivers/local/)。

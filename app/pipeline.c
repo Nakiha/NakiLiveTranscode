@@ -288,6 +288,10 @@ static int receive_encoded(Pipeline *p) {
         double total=(written-stamp.ingress_us)/1000.0;
         pthread_mutex_lock(&p->job->mutex);
         p->job->packets_out++; p->job->bytes_out=(uint64_t)p->output->pb->bytes_written;
+        int first_output=!p->job->first_video_output_us;
+        int first_output_key=output_key && !p->job->first_key_output_us;
+        if(first_output)p->job->first_video_output_us=written;
+        if(first_output_key)p->job->first_key_output_us=written;
         int first_i=!p->job->i_frames;
         double slow=p->job->config.slow_frame_ms;
         sample_latencies(&p->job->lifetime,&stamp,encoded,mux_start,interleaved,written,slow);
@@ -302,8 +306,9 @@ static int receive_encoded(Pipeline *p) {
         p->job->last_output_us=written;
         uint64_t ordinal=p->job->packets_out;
         pthread_mutex_unlock(&p->job->mutex);
-        if(!p->job->config.frame_log || ((ordinal-1)%p->job->config.frame_log_every &&
-           stamp.picture_type!=AV_PICTURE_TYPE_I && !output_key && total<slow)) continue;
+        int trace=p->job->config.frame_log && (!((ordinal-1)%p->job->config.frame_log_every) ||
+           stamp.picture_type==AV_PICTURE_TYPE_I || output_key || total>=slow);
+        if(!trace && !first_output && !first_output_key)continue;
         yyjson_mut_doc *doc=new_event("frame",p->job);
         json_int(doc,"input_sequence",stamp.sequence); json_int(doc,"pts_us",pts_us);
         json_int(doc,"encoded_bytes",bytes);
@@ -320,7 +325,37 @@ static int receive_encoded(Pipeline *p) {
         json_num(doc,"avio_flush_ms",(written-interleaved)/1000.0);
         json_num(doc,"ingress_to_mux_ms",total);
         if (stamp.scheduled_us) json_num(doc,"scheduled_to_mux_ms",(written-stamp.scheduled_us)/1000.0);
-        logger_submit(p->job->logger,p->job->trace,doc);
+        if(first_output || first_output_key) {
+            yyjson_mut_doc *first=yyjson_mut_doc_mut_copy(doc,NULL);
+            yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(first),"event");
+            json_str(first,"event","first_frame");
+            json_str(first,"boundary","complete_http_request_handler_to_mux_flush_not_peer_display");
+            json_int(first,"first_video",first_output); json_int(first,"first_output_key",first_output_key);
+            json_int(first,"prewarmed",p->job->prewarmed);
+            json_int(first,"request_monotonic_us",p->job->started_us);
+            json_int(first,"dispatch_monotonic_us",p->job->assigned_us);
+            json_int(first,"worker_received_monotonic_us",p->job->worker_received_us);
+            json_int(first,"packet_ingress_monotonic_us",stamp.ingress_us);
+            json_int(first,"decoder_submit_monotonic_us",stamp.submitted_us);
+            json_int(first,"decoded_monotonic_us",stamp.decoded_us);
+            json_int(first,"filter_submit_monotonic_us",stamp.filter_started_us);
+            json_int(first,"filtered_monotonic_us",stamp.filtered_us);
+            json_int(first,"encoder_submit_monotonic_us",stamp.encoder_submit_us);
+            json_int(first,"encoded_monotonic_us",encoded);
+            json_int(first,"mux_begin_monotonic_us",mux_start);
+            json_int(first,"mux_flush_done_monotonic_us",written);
+            json_num(first,"request_to_dispatch_ms",(p->job->assigned_us-p->job->started_us)/1000.0);
+            json_num(first,"dispatch_to_worker_ms",(p->job->worker_received_us-p->job->assigned_us)/1000.0);
+            json_num(first,"worker_to_packet_ingress_ms",(stamp.ingress_us-p->job->worker_received_us)/1000.0);
+            json_num(first,"request_to_mux_ms",(written-p->job->started_us)/1000.0);
+            pthread_mutex_lock(&p->job->mutex);
+            int checkpoint=first_output ? 0 : 1;
+            p->job->first_chain[checkpoint]=yyjson_mut_doc_mut_copy(first,NULL);
+            pthread_mutex_unlock(&p->job->mutex);
+            logger_submit(p->job->logger,NULL,first);
+        }
+        if(trace)logger_submit(p->job->logger,p->job->trace,doc);
+        else yyjson_mut_doc_free(doc);
     }
     av_packet_free(&packet);
     return ret==AVERROR(EAGAIN) || ret==AVERROR_EOF ? 0 : ret;
