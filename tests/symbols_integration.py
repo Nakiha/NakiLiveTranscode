@@ -93,7 +93,7 @@ def run(ffmpeg_symbols):
         resolved = resolver.symbolize(sample, [ffmpeg_symbols])
         frame = resolved["threads"][0]["frames"][0]["symbolization"]
         assert frame["status"] == "resolved" and any("version.c:" in item["location"] for item in frame["inline_chain"]), frame
-    print("PASS exact Build ID, stripped runtime, real PIE fault/source line, library DWARF, missing/mismatched symbols and invalid input; artifacts:", evidence)
+    print("PASS exact Build ID, stripped runtime, real PIE fault/source line, missing/mismatched symbols and invalid input; FFmpeg DWARF checked:", bool(ffmpeg_symbols), "; artifacts:", evidence)
 
 
 if __name__ == "__main__":

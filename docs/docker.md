@@ -1,5 +1,7 @@
 # Docker 部署
 
+也可直接下载 CI 验证过的镜像包并 `docker load`，同时保存配套的独立符号；操作见 [CI 与构建产物](ci.md)。离线解析轻量报告见 [崩溃诊断](crashes.md)。
+
 ```sh
 git submodule update --init --recursive
 docker compose build

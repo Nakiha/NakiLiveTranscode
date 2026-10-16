@@ -42,10 +42,9 @@ docker compose up -d --no-build transcode
 本地仍支持 `docker compose up -d --build transcode`，会在本地构建 FFmpeg。若想复用 SDK：
 
 ```sh
-mkdir -p out/ffmpeg-sdk
+mkdir -p out
 gh release download <ffmpeg-sdk-release-tag> -p 'ffmpeg-sdk.tar.gz*' -D out
 sha256sum -c out/ffmpeg-sdk.tar.gz.sha256
-tar -C out/ffmpeg-sdk -xzf out/ffmpeg-sdk.tar.gz
 docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt -t naki-live-transcode:local .
 docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt --target symbols \
   --output type=local,dest=out/symbols .

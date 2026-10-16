@@ -1,7 +1,9 @@
 ARG FFMPEG_STAGE=ffmpeg-local
 FROM ubuntu:24.04 AS toolchain
 RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev libunwind-dev python3 \
+    build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends libunwind-dev python3 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 ENV NAKI_BUILD_ROOT=/opt/naki-build
@@ -11,7 +13,8 @@ COPY experiments/decoder-20261016/ffmpeg-7.0.3/ experiments/decoder-20261016/ffm
 RUN bash scripts/build-ffmpeg.sh && python3 scripts/archive-symbols.py \
     --output /opt/naki-build/ffmpeg-symbols --label ffmpeg-local /opt/naki-build/ffmpeg/lib*/*.so.*
 FROM scratch AS ffmpeg-prebuilt
-COPY out/ffmpeg-sdk/ /opt/naki-build/
+# Extract inside Linux so Windows clients do not have to transmit Linux symlinks.
+ADD out/ffmpeg-sdk.tar.gz /opt/naki-build/
 FROM ${FFMPEG_STAGE} AS ffmpeg
 FROM toolchain AS build
 COPY --from=ffmpeg /opt/naki-build/install/ /opt/naki-build/install/
