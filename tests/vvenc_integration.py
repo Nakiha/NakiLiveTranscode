@@ -41,6 +41,7 @@ def run():
         else:
             raise AssertionError("server did not start")
         for invalid in ({"encoder": "bad"}, {"encoder": "libvvenc", "encoder_preset": "veryfast"},
+                        {"encoder": "libvvenc", "encoder_preset": "fast|medium"},
                         {"encoder": "libvvenc", "output_format": "flv"}):
             service.http(data={"input": "unused", "output": "unused", **invalid}, code=400)
         # Both decoder bit depths, resize and no resize, MPEG-TS and MP4, and short EOF.

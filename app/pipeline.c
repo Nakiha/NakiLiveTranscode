@@ -416,7 +416,8 @@ static int process_frame(Pipeline *p, AVFrame *frame) {
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
     stamp->decoded_us=now_us();
     stamp->picture_type=frame->pict_type;
-    stamp->first_i=frame->pict_type==AV_PICTURE_TYPE_I && !p->seen_input_i++;
+    stamp->first_i=frame->pict_type==AV_PICTURE_TYPE_I && !p->seen_input_i;
+    if (frame->pict_type==AV_PICTURE_TYPE_I) p->seen_input_i=1;
     stamp->decoded_key=!!(frame->flags&AV_FRAME_FLAG_KEY);
     if (frame->best_effort_timestamp!=AV_NOPTS_VALUE) frame->pts=frame->best_effort_timestamp;
     if (frame->pts==AV_NOPTS_VALUE) frame->pts=p->synthetic_pts;

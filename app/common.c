@@ -230,7 +230,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if (!*c.encoder_preset) strcpy(c.encoder_preset,vvc ? "faster" : "veryfast");
     const char *presets=vvc ? "|faster|fast|medium|slow|slower|" : "|ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|";
     char preset_key[20]; snprintf(preset_key,sizeof(preset_key),"|%s|",c.encoder_preset);
-    if (!strstr(presets,preset_key)) {bad(error,cap,"Invalid preset for selected encoder"); goto end;}
+    if (strchr(c.encoder_preset,'|') || !strstr(presets,preset_key)) {bad(error,cap,"Invalid preset for selected encoder"); goto end;}
     if (vvc && !strcmp(c.output_format,"flv")) {bad(error,cap,"libvvenc output requires mpegts or mp4"); goto end;}
     if (c.min_threads>c.max_threads || (!!c.width != !!c.height) || c.width%2 || c.height%2) {bad(error,cap,"Invalid thread limits or dimensions (use two even dimensions)"); goto end;}
     if (strcmp(c.output_format,"mpegts") && strcmp(c.output_format,"mp4") && strcmp(c.output_format,"flv")) {bad(error,cap,"output_format must be mpegts, mp4 or flv"); goto end;}
