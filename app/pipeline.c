@@ -49,6 +49,8 @@ typedef struct Pipeline {
     Ledger ledger[LEDGER_CAPACITY];
     int64_t last_pts, synthetic_pts, next_stats_us;
     int64_t encoder_api_us;
+    int64_t first_encoder_pts, previous_key_pts;
+    int seen_output_key;
 } Pipeline;
 
 static void checkpoint(Pipeline *p, int64_t *field) {
@@ -200,9 +202,10 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     p->encoder->height=av_buffersink_get_h(p->sink);
     p->encoder->sample_aspect_ratio=av_buffersink_get_sample_aspect_ratio(p->sink);
     p->encoder->pix_fmt=vvc ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
-    /* libvvenc generates DTS in one-tick-per-picture mode. CTS and DTS must
-       share that time base, including fractional nominal frame rates. */
-    p->encoder->time_base=vvc ? av_inv_q(p->frame_rate) : (AVRational){1,90000};
+    /* The live VVenC fork preserves PTS at 90 kHz and generates DTS from the
+       input timestamp FIFO. The reference profile retains upstream timing. */
+    int pts_gop=vvc && strcmp(cfg->encoder_profile,"reference");
+    p->encoder->time_base=vvc && !pts_gop ? av_inv_q(p->frame_rate) : (AVRational){1,90000};
     p->encoder->framerate=p->frame_rate;
     p->encoder->bit_rate=cfg->bitrate;
     p->encoder->thread_count=cfg->encoder_threads;
@@ -223,14 +226,14 @@ static int open_output(Pipeline *p, AVFrame *frame) {
         intra_frames=(int)av_rescale_q(2,(AVRational){1,1},av_inv_q(p->frame_rate));
         if (intra_frames<4) return AVERROR(EINVAL);
         p->encoder->gop_size=intra_frames; p->encoder->max_b_frames=3;
-        /* Display order I B B B P ... ; coding order P4 B2 B1 B3. Explicit
-           frame period avoids VVenC's seconds-to-GOP rounding (50 -> 48).
+        /* Display order I B B B P ... ; coding order P4 B2 B1 B3. The
+           nominal frame period remains an RC hint; CTS schedules CRA.
            Frame-parallel=0 keeps intra-frame threading and avoids the extra
            stage queue. LookAhead stays enabled for single-pass bitrate RC.
            BIM=1 with this P-anchor layout + MCTF reproducibly aborts v1.14
            on the 320x180 10-bit regression; keep BIM off independently. */
         snprintf(vvenc_params,sizeof(vvenc_params),
-            "GOPSize=4:IntraPeriod=%d:POC0IDR=1:STA=0:MaxParallelFrames=0:"
+            "GOPSize=4:IntraPeriod=%d:RefreshSec=2:POC0IDR=1:STA=0:MaxParallelFrames=0:"
             "MCTF=%d:BIM=0:MCTFFutureReference=0:"
             "Frame1=P 4 0 0 0 0 0 1.0 0 0 0 0 0 0 0 1 1 4 0 0:"
             "Frame2=B 2 1 0 0 0 0 1.0 0 0 0 0 0 0 1 1 1 2 1 1 -2:"
@@ -238,10 +241,13 @@ static int open_output(Pipeline *p, AVFrame *frame) {
             "Frame4=B 3 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1",
             intra_frames,temporal_filter);
         av_dict_set(&options,"vvenc-params",vvenc_params,0);
+        av_dict_set(&options,"live-pts-gop","1",0);
     }
     else if (vvc) av_dict_set(&options,"period","2",0);
     else av_dict_set(&options,"tune","zerolatency",0);
-    ret=avcodec_open2(p->encoder,codec,&options); av_dict_free(&options);
+    ret=avcodec_open2(p->encoder,codec,&options);
+    if (ret>=0 && av_dict_count(options)) ret=AVERROR_OPTION_NOT_FOUND;
+    av_dict_free(&options);
     if (ret<0) return ret;
     checkpoint(p,&p->job->encoder_open_done_us);
     p->video=avformat_new_stream(p->output,NULL);
@@ -276,7 +282,12 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     json_int(doc,"output_width",p->encoder->width); json_int(doc,"output_height",p->encoder->height);
     json_str(doc,"encoder",cfg->encoder); json_str(doc,"encoder_preset",cfg->encoder_preset);
     json_str(doc,"encoder_profile",cfg->encoder_profile);
-    if (vvc) {json_str(doc,"vvenc_params",vvenc_params); json_int(doc,"intra_period_frames",intra_frames);}
+    if (vvc) {
+        json_str(doc,"vvenc_params",vvenc_params);
+        json_int(doc,"rate_control_intra_period_frames",intra_frames);
+        json_str(doc,"keyframe_schedule",pts_gop ? "pts_grid" : "reference_frames");
+        if (pts_gop) json_int(doc,"keyframe_period_ms",2000);
+    }
     json_str(doc,"pixel_format",pixel_format); json_str(doc,"filter",chain);
     json_int(doc,"encoder_time_base_num",p->encoder->time_base.num);
     json_int(doc,"encoder_time_base_den",p->encoder->time_base.den);
@@ -317,6 +328,15 @@ static int receive_encoded(Pipeline *p) {
         int bytes=packet->size;
         int output_key=!!(packet->flags&AV_PKT_FLAG_KEY);
         int64_t pts_us=av_rescale_q(packet->pts,p->encoder->time_base,AV_TIME_BASE_Q);
+        int pts_gop=!strcmp(p->job->config.encoder,"libvvenc") && strcmp(p->job->config.encoder_profile,"reference");
+        int64_t key_target=0, key_interval=0;
+        int had_output_key=p->seen_output_key;
+        if (output_key && pts_gop) {
+            int64_t offset=packet->pts-p->first_encoder_pts;
+            key_target=av_rescale_q(p->first_encoder_pts+(offset/180000)*180000,p->encoder->time_base,AV_TIME_BASE_Q);
+            key_interval=pts_us-p->previous_key_pts;
+            p->previous_key_pts=pts_us; p->seen_output_key=1;
+        }
         av_packet_rescale_ts(packet,p->encoder->time_base,p->video->time_base);
         packet->stream_index=p->video->index;
         if (!packet->duration) packet->duration=av_rescale_q(1,av_inv_q(p->frame_rate),p->video->time_base);
@@ -376,6 +396,12 @@ static int receive_encoded(Pipeline *p) {
         json_str(doc,"decoded_picture_type",picture_type);
         json_int(doc,"input_packet_key",stamp.input_key); json_int(doc,"decoded_key",stamp.decoded_key);
         json_int(doc,"output_key",output_key); json_int(doc,"first_i",first_i && stamp.picture_type==AV_PICTURE_TYPE_I);
+        if (output_key && pts_gop) {
+            json_int(doc,"keyframe_target_pts_us",key_target);
+            json_num(doc,"keyframe_lateness_ms",(pts_us-key_target)/1000.0);
+            if(had_output_key)json_num(doc,"previous_key_interval_ms",key_interval/1000.0);
+            else yyjson_mut_obj_add_null(doc,yyjson_mut_doc_get_root(doc),"previous_key_interval_ms");
+        }
         json_num(doc,"demux_read_ms",stamp.read_us/1000.0);
         json_num(doc,"input_queue_ms",(stamp.submitted_us-stamp.ingress_us)/1000.0);
         json_num(doc,"decode_ms",decode); json_num(doc,"filter_ms",filter);
@@ -438,12 +464,10 @@ static int encode_frame(Pipeline *p, AVFrame *frame) {
     frame->time_base=p->encoder->time_base;
     /* Input picture type is trace metadata, not a forced output GOP decision. */
     frame->pict_type=AV_PICTURE_TYPE_NONE;
-    if (p->last_pts!=AV_NOPTS_VALUE && frame->pts<=p->last_pts) return AVERROR_INVALIDDATA;
-    if (!strcmp(p->job->config.encoder,"libvvenc") && strcmp(p->job->config.encoder_profile,"reference") &&
-        p->last_pts!=AV_NOPTS_VALUE && frame->pts!=p->last_pts+1) {
-        p->stage="non-CFR VVC input; frame-rate conversion required";
-        return AVERROR_INVALIDDATA;
+    if (p->last_pts!=AV_NOPTS_VALUE && frame->pts<=p->last_pts) {
+        p->stage="non-monotonic encoder PTS"; return AVERROR_INVALIDDATA;
     }
+    if (p->last_pts==AV_NOPTS_VALUE) p->first_encoder_pts=frame->pts;
     int slot=-1;
     for (int i=0;i<LEDGER_CAPACITY;i++) if(!p->ledger[i].used) {slot=i; break;}
     if (slot<0) return AVERROR(ENOBUFS);

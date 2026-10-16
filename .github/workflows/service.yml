@@ -49,7 +49,7 @@ jobs:
         run: |
           mkdir -p out/ci-results
           docker run --rm --init -v "$PWD/out/ci-results:/src/out/results" naki-live-transcode:test \
-            bash -c 'trap "cp -a out/service-test-* out/symbols-test-* out/decoder-test-* out/vvenc-test-* out/vvenc-latency-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/ci-test.sh'
+            bash -c 'trap "cp -a out/service-test-* out/symbols-test-* out/decoder-test-* out/vvenc-test-* out/vvenc-latency-* out/vvenc-pts-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/ci-test.sh'
       - name: Runtime image recovery and source-line symbolization
         env:
           NAKI_SYMBOLS_DIR: ${{ github.workspace }}/out/symbols

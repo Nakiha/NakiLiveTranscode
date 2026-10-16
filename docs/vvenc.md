@@ -1,6 +1,6 @@
 # VVenC 实验链路
 
-源码为 [Nakiha/vvenc](https://github.com/Nakiha/vvenc)，上游 [fraunhoferhhi/vvenc](https://github.com/fraunhoferhhi/vvenc)。独立子模块 `third_party/vvenc` 固定 v1.14.0，提交 `9428ea8636ae7f443ecde89999d16b2dfc421524`。FFmpeg 继续固定 n9.0.2 fork，不需要为了启用编码器改上游 wrapper。
+源码为 [Nakiha/vvenc](https://github.com/Nakiha/vvenc)，上游 [fraunhoferhhi/vvenc](https://github.com/fraunhoferhhi/vvenc)。独立子模块 `third_party/vvenc` 基于 v1.14.0；精确提交由 gitlink 固定。0.7.0 在公开 fork 独立实现 PTS 调度，不使用内网 patch；FFmpeg n9.0.2 fork 的 wrapper 同时增加显式启用选项与 VFR DTS 处理。
 
 构建保留 VVenC 默认的内部 nlohmann JSON 支持：v1.14.0 的单遍码控前瞻缓存依赖该路径，关闭后即使不写 stats 文件也会在排空时失败。它仅是编码库内部依赖，服务的 HTTP/日志 JSON 继续使用 yyjson。
 
@@ -10,7 +10,9 @@
 
 ## 时间与帧关联
 
-0.6.0 的默认 VVC profile 是 `live_3b_2s`：显式 4 帧编码组，PTS 显示顺序 `I BBB P BBB P…`，编码顺序 P4/B2/B1/B3。`IntraPeriod` 明确设为 `round(2 × 输入名义帧率)`，25fps 为 50 帧、30fps 为 60 帧；30000/1001fps 取 60 帧，即 2.002 秒，不能在整数帧边界得到恰好 2 秒。GOP 末尾、EOF 可缩短 B 组，不强行凑满 3B；要求输入名义帧率至少 2fps。`STA=0` 禁止场景切换插入额外 I 帧，`POC0IDR=1` 使首输出从首个输入画面开始，不强制源 PTS 归零。后续关键帧使用 CRA，未承诺闭合 IDR GOP。
+0.7.0 的默认 VVC profile 是 `live_3b_2s`：完整 4 帧组的显示顺序 `I BBB P BBB P…`、编码顺序 P4/B2/B1/B3。关键帧按首个编码输入 PTS 锚定的 `+2s、+4s、+6s…` 时间网格调度，选择达到目标的第一帧；不以实际关键帧位置重新推算下一目标，避免累积漂移。到边界时先用 P 结束前一组，再单独编码 CRA，完整组仍为 3B；边界及 EOF 可为 IP / IBP / IBBP。若输入向前跳过多个周期，只为新占用区间插一次 CRA，不连续补 I 帧。没有恰好处在目标时间的帧时，实际关键帧会迟于目标，不能保证任意 VFR 输入每段精确 2.000 秒或最大 GOP 时长。名义帧率及 `IntraPeriod=round(2×fps)` 只保留为 RC 提示；名义周期小于 4 帧仍拒绝。`STA=0` 禁止场景切换额外插 I，`POC0IDR=1` 使首输出从首画面开始，不强制源 PTS 归零；后续关键帧为 CRA，未承诺闭合 IDR。
+
+VVenC opt-in `LivePtsGop=1` 在参考关系对下游可见之前计划最多 4 个待处理画面，预先构造并检查所有短组的参考列表与 DPB 约束，不改写已发布帧的 GOP 信息。MCTF 能消费成组到达的画面；串行码控在分析数据齐备后才初始化下一锚帧。此路径限制为已验证的 GOP4、P-anchor/B-interior、单遍、无未来 MCTF、无帧并行配置，其他参考布局显式拒绝。旧/default 编码路径不启用这些行为。详见子模块 `doc/live-pts-gop.md`。
 
 保持单遍目标码率和 `LookAhead=1`，没有切换成固定 QP 来换时延。关闭跨帧并行队列 `MaxParallelFrames=0`，仍用 `encoder_threads` 做帧内线程；保留 MCTF、QPA，但 `MCTFFutureReference=0`，不为时域滤波等待未来帧。`BIM=0`：本次 custom P-anchor + MCTF + BIM 组合在 v1.14.0 的 320×180、10-bit 回归中可稳定触发未捕获的 `copyClip: Incompatible formats`；独立 CLI 也能复现，关闭 BIM 后通过。未将它当作一般性 BIM 缺陷，也未改动 VVenC 源码掩盖异常。
 
@@ -18,7 +20,11 @@
 
 首轮测量从约 3.29 秒降到 0.45 秒，详见 [低时延验证](validation-vvenc-lowlatency-20261017.md)。这仍有重排与码控前瞻，不能套用 x264 的 zerolatency 假设；目前没有采用纯 P 或 low-delay B 伪装连续 3B 输出。
 
-FFmpeg wrapper 的 DTS 默认以一帧为一 tick，服务为 VVenC 使用名义帧率的倒数作为编码时间基（包括 30000/1001），再换算到容器时间基。输入 PTS 因此量化到名义帧周期；非单调或量化后重复的 PTS 显式失败。live profiles 还要求量化后逐帧递增 1 tick，遇到间断会明确失败，不自动丢帧/补帧，以免悄悄违反 2 秒关键帧周期；当前不承诺任意 VFR 输入兼容。frame rate 不由请求 `fps` 强制覆盖，`fps` 仅在输入缺失帧率时回退。
+live profiles 显式启用 FFmpeg `live-pts-gop=1`，使用 1/90000 时间基保留 PTS，精度为约 11.1 微秒，不再量化到名义帧周期。不丢帧、不补帧，允许单调的变帧率、间隔抖动和向前缺口；回退、重复、无效或溢出的编码时间戳显式失败。VVenC 此模式不再返回由名义帧间隔猜测的有效 DTS，匹配的 wrapper 维护 256 项有界 PTS FIFO，在编码顺序输出时使用向后错开两帧的输入显示时间轴作为 DTS；前两个 DTS 按名义周期向首 PTS 之前外推。校验 DTS 严格递增且不大于对应 PTS，FIFO 只存时间戳，不存画面。`reference` 保留原版一帧一 tick 路径。`fps` 请求字段仍只用于输入缺失名义帧率时回退，不强制帧率转换。
+
+这里使用的是解码/filter 输出的有效显示时间戳：解码器的 best_effort_timestamp 恢复和输入完全无 PTS 时按名义帧率合成的既有回退仍然存在。没有有效输入时间信息时无法凭空恢复真实媒体时间，不能把该回退当作对源端变帧率的准确计量。
+
+`pipeline_ready` 记录 `keyframe_schedule=pts_grid`、`keyframe_period_ms=2000` 与 `rate_control_intra_period_frames`，避免把 RC 提示误当作实际关键帧周期。输出关键帧的明细及首帧日志增加 `keyframe_target_pts_us`、`keyframe_lateness_ms`、`previous_key_interval_ms`（首关键帧为 null）。lateness 是媒体时间轴上晚于目标的差值，不是该帧编码计算耗时；各阶段真实驻留时延仍按原有字段统计。
 
 每个输入 Stamp 沿 packet/frame opaque_ref 进入 filter，编码后按 packet PTS 在 256 项有界 ledger 中找回。不能按输出顺序关联：VVC 输出顺序可能不是显示顺序。正常 EOF 排空 encoder 后必须清空 ledger，否则任务失败；容量满也明确失败，不丢统计、不扩成无界队列。first I 在解码显示顺序中标记，重排后仍保留该身份；输入 I 与 VVC 输出关键帧分别统计。
 
@@ -37,6 +43,6 @@ python3 scripts/symbolize-crash.py crash.json \
   --symbols symbols/app --symbols symbols/ffmpeg --symbols symbols/vvenc
 ```
 
-`tests/vvenc_integration.py` 生成 H.264/HEVC 的 8/10-bit B 帧输入，覆盖缩放、MPEG-TS、MP4、UDP、分数帧率、重排与单帧 EOF，使用构建出的 n9 ffprobe 原生 VVC decoder 独立解码并计数，验证输入帧关联、各阶段与 I 帧统计、无明细时的首帧日志。CI 另验证运行镜像能装载并执行 VVenC，以及 VVenC Build ID 到函数/源码行的离线解析。
+`tests/vvenc_integration.py` 生成 H.264/HEVC 的 8/10-bit B 帧输入，覆盖缩放、MPEG-TS、MP4、UDP、分数帧率、重排与单帧 EOF，使用构建出的 n9 ffprobe 原生 VVC decoder 独立解码并计数。`tests/vvenc_pts_integration.py` 另覆盖 12 组变帧率、抖动、向前跳变、非零起点、所有短尾组和关键帧邻近 EOF，核对每帧 PTS 间隔、DTS、时间网格关键帧、日志时差及各阶段帧关联。CI 还验证运行镜像能装载并执行 VVenC，以及 VVenC Build ID 到函数/源码行的离线解析。
 
 输出帧型与关键帧周期由 `tests/vvc_structure.py` 对独立解码结果验收。`python3 tests/vvenc_latency.py` 默认对 reference/live/no-MCTF 各做 2 次实时文件回放，并验证真实 UDP 输入；结果写入新的 `out/vvenc-latency-*`。CI 使用 `--repeats 1`，保存配置、首帧日志、逐帧解码与阶段指标，验证结构/算术关系，不以共享 runner 上的绝对毫秒数作为门槛。

@@ -11,7 +11,7 @@ import threading
 import time
 
 import service_integration as service
-from vvc_structure import decode_frames, check_structure
+from vvc_structure import decode_frames, check_structure, check_pts_structure
 
 ROOT, BIN = service.ROOT, service.BIN
 RUN = pathlib.Path(tempfile.mkdtemp(prefix="vvenc-test-", dir=ROOT / "out"))
@@ -143,14 +143,17 @@ def run():
                               "i_frame_stages": state["i_frame_stages"]})
             (RUN / f"state-{index}.json").write_text(json.dumps(state, indent=2))
             print(f"PASS {codec}/{depth}-bit -> VVC/10-bit {fmt}, {count} frames, resize={resize}", flush=True)
-        # Reject timestamp gaps explicitly instead of violating the 2s contract.
+        # Preserve timestamp gaps; CRA decisions follow the PTS grid.
         gapped=RUN/"gapped.mp4"
         subprocess.run(["ffmpeg","-v","error","-i",str(RUN/"input-0.mp4"),"-frames:v","30",
                         "-vf",r"setpts=PTS+gte(N\,12)*0.2/TB","-fps_mode","passthrough",
                         "-c:v","libx264","-preset","ultrafast","-threads","2",str(gapped)],check=True,timeout=30)
         service.start({"input":str(gapped),"output":str(RUN/"gapped-output.ts"),"encoder":"libvvenc"})
-        rejected=service.finished("failed")
-        assert "non-CFR VVC input" in rejected["error"],rejected
+        gapped_state=service.finished()
+        source_frames=json.loads(subprocess.check_output(["ffprobe","-v","error","-select_streams","v:0",
+            "-show_frames","-show_entries","frame=pts_time","-of","json",str(gapped)]))["frames"]
+        check_pts_structure(decode_frames(PROBE,RUN/"gapped-output.ts"),[float(f["pts_time"]) for f in source_frames])
+        assert gapped_state["packets_out"]==30,gapped_state
         # Includes first-frame checkpoints even when per-frame logging is disabled.
         time.sleep(.1)
     finally:

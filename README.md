@@ -23,7 +23,7 @@ JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 li
 
 默认每 10 秒输出状态 JSONL，逐帧明细按需开启。累计/窗口时延覆盖全部成功输出帧，包含分位数上界和 I 帧独立统计；独立日志线程使用有界队列，并轮转追踪文件。TCP/UDP socket 收发另有原子计数观测，不等同逐帧网络端到端时延。详见 [运维与观测](docs/operations.md)。
 
-VVC 默认低时延配置为 `live_3b_2s`，PTS 顺序 I BBB P…，25fps 下每 50 帧一个关键帧；保留码率控制、缩短编码组与前瞻链路等待。首轮本机实时文件回放首输出约 0.45 秒（旧配置约 3.3 秒），具体边界、阶段分解和验证见 [低时延测量](docs/validation-vvenc-lowlatency-20261017.md)。
+VVC 默认低时延配置为 `live_3b_2s`，PTS 顺序 I BBB P…，以首帧 PTS 为起点，每到 2 秒时间目标的第一帧输出关键帧，不再靠固定帧数决定；边界及 EOF 允许 IP / IBP / IBBP 短组。保留码率控制与重排，支持单调的变帧率时间轴。实时文件回放首输出约 0.45 秒（旧配置约 3.3 秒），见 [低时延测量](docs/validation-vvenc-lowlatency-20261017.md) 和 [PTS 调度验证](docs/validation-vvenc-pts-20261017.md)。
 
 容器运行：`docker compose up -d --build transcode`，见 [Docker 部署](docs/docker.md)。
 

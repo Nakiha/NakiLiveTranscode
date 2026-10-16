@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(NakiLiveTranscode VERSION 0.6.0 LANGUAGES C)
+project(NakiLiveTranscode VERSION 0.7.0 LANGUAGES C)
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "Only Linux / WSL is supported")
 endif()
