@@ -13,6 +13,7 @@
 - Read the submodule's `doc/live-async-guide-zh.txt` and `doc/live-async-auto-zh.txt` before changing decoder integration.
 - The historical submodule directory name is retained, but the active fork is based on FFmpeg n9.0.2. Also read `doc/live-n9-port-zh.txt`; never reuse the frozen n7.0.3 performance evidence as measurements of n9.
 - Historical baseline media, hashes, timings and reports are frozen evidence. Write new runs to unique directories under `out/`; never overwrite frozen results.
+- When exporting patches containing binary artifacts, use `git diff --no-textconv --binary`; Git for Windows PDF text conversion is configured on this host. Verify frozen artifact trees byte-for-byte against their source commit after migration.
 - Use `scripts/build-decoder.sh` and `scripts/test-decoder.sh` as the new decoder entry points. Archived root-level export/capture scripts contain obsolete paths.
 - Keep generated libraries, objects, media, logs, virtual environments and offline bundles out of Git. Do not delete local archived experiments without a user request.
 - Run appropriate checks for the actual change. Claims about latency or capacity require fresh measurement with its boundaries stated; documentation/organization changes do not justify rerunning the full benchmark matrix.

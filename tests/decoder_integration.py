@@ -67,7 +67,8 @@ def run():
                     for row in csv.DictReader(file):
                         assert 0 <= int(row["busy"]) <= int(row["leased"]) <= slots, row
         print(f"PASS {codec}: generated B=0/3 pixel/metadata parity, lifecycle, capacity-one replay and three-owner budgets", flush=True)
-    command([result / "auto_lifetime_test", result / "h264-b0.mp4"], timeout=90)
+    for codec in ("h264", "hevc"):
+        command([result / "auto_lifetime_test", result / f"{codec}-b0.mp4"], timeout=90)
     (result / "COMPLETE.json").write_text(json.dumps({"status": "passed", "ffmpeg_prefix": str(PREFIX)}) + "\n")
     print("PASS decoder regression; artifacts:", result, flush=True)
 
