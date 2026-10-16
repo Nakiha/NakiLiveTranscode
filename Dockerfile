@@ -25,8 +25,9 @@ COPY scripts/build-service.sh scripts/archive-symbols.py scripts/
 COPY CMakeLists.txt ./
 COPY app/ app/
 COPY third_party/yyjson/src/ third_party/yyjson/src/
-COPY tests/logger_test.c tests/network_probe.c tests/crash_fixture.c tests/crash_unwind_stall.c tests/live_mux_test.c tests/live_transport_fixture.c tests/
-RUN NAKI_SKIP_FFMPEG=1 bash scripts/build-service.sh
+COPY tests/logger_test.c tests/network_probe.c tests/crash_fixture.c tests/crash_unwind_stall.c tests/live_mux_test.c tests/live_transport_fixture.c tests/media_hooks_fixture.c tests/
+ARG NAKI_MEDIA_HOOK_SOURCE=
+RUN NAKI_SKIP_FFMPEG=1 NAKI_MEDIA_HOOK_SOURCE="$NAKI_MEDIA_HOOK_SOURCE" bash scripts/build-service.sh
 ARG SOURCE_REVISION=unknown
 ARG DEPENDENCY_KEY=local
 RUN python3 scripts/archive-symbols.py --output /symbols/app --label application \

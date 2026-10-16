@@ -21,6 +21,8 @@ bash scripts/build-service.sh
 
 JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 libcurl。服务默认监听 `127.0.0.1:8090`。当前无音频转码、无在线视频规格切换；“端到端”指标指服务收到解封装包到转码包写出，不含采集端和播放器。交织默认最多排队 50ms，媒体线程每 10ms 检查；网络写入另有 10 秒中断期限。
 
+内网自定义业务可以通过 [内部 C 媒体 hook](docs/media-hooks.md) 观察音频包、处理编码后的视频包并管理任务上下文。默认空实现；响度计算、客户 SEI 格式和时间戳修复仍只是后续接入点，不是当前功能。
+
 默认每 10 秒输出状态 JSONL，逐帧明细按需开启。累计/窗口时延覆盖全部成功输出帧，包含分位数上界和 I 帧独立统计；独立日志线程使用有界队列，并轮转追踪文件。TCP/UDP socket 收发另有原子计数观测，不等同逐帧网络端到端时延。详见 [运维与观测](docs/operations.md)。
 
 VVC 默认低时延配置为 `live_3b_2s`，PTS 顺序 I BBB P…，以首帧 PTS 为起点，每到 2 秒时间目标的第一帧输出关键帧，不再靠固定帧数决定；边界及 EOF 允许 IP / IBP / IBBP 短组。保留码率控制与重排，支持单调的变帧率时间轴。实时文件回放首输出约 0.45 秒（旧配置约 3.3 秒），见 [低时延测量](docs/validation-vvenc-lowlatency-20261017.md) 和 [PTS 调度验证](docs/validation-vvenc-pts-20261017.md)。

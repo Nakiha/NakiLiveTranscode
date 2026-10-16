@@ -102,7 +102,21 @@ planner 按显示 PTS 次序处理，强制请求需在编码器的 GOP/lookahea
 
 当前 flvenc.put_timestamp 还屏蔽 extended timestamp 高位，长时间/跨回绕的实际线上行为需要专门验收；内部换成 int64_t 不代表输出文件/协议已经正确。缺失 PTS 的严格透传默认失败，允许合成时必须标记 provenance，不能把合成值当作原始值。保留时序不代表现有 VVenC DTS FIFO 已覆盖任意程度的抽帧，仍需新增稀疏/不规则 PTS 与强制 I 的组合回归。
 
+## 不干净的输入与“尽量接近”的 DTS/PTS
+
+新增客户要求：在不干净的输入上尽量保留时间、减少错误，同时希望输出 DTS/PTS 距离较小。这部分仅记录设计，不在当前 hook 中实现修复。
+
+视频转码可保留有效源 PTS，但 DTS 由新编码顺序生成；真正的视频 copy/remux 还要服从原编码依赖，不能套用同一重排策略。音频 copy 的无重排时间模型也不能照搬给 3B 视频。配置应拆分 PTS 模式（strict preserve / best-effort preserve / retime）与 DTS 模式（encoder / validated regeneration），分别记录实际生效策略。
+
+“尽量接近”是有约束的优化目标：遵守编码依赖/解码节奏、封装需要的单调性、time_base 精度及合法 composition offset。保留 3B 时不承诺差值为零或任意固定小值；不能逐包把 DTS 设为 PTS，也不能仅用 1 tick 间隔挤成一团来通过 mux 检查。当前 VVenC 的 DTS FIFO 是已测场景的实现，不是已完成任意脏输入上的最优 DTS 调度。
+
+最小修复先区分正常 packet PTS 的 B 帧乱序、合法回绕、缺失值、完整显示顺序的重复/回退和真正 discontinuity；源向前 PTS 空洞继续按已确认规则保留。只修改必要字段，记录原值、输出值、原因和改变量。严格保留 I 的 PTS 时，其他值的修复不能偷偷移动该锚点；若时间精度或编码/封装约束无法同时满足，执行客户明确的失败/降级策略。
+
+输入异常次数、实际修复次数、修复后仍非法次数、时间量化次数及主动丢帧次数分别计数；正常 B 重排/回绕不计为错误。PTS-DTS 分布也单独报告，不能通过扩大容忍范围或不记录错误来降低表面错误率。首 DTS 的预滚及 mux 的自动平移要纳入端到端的时间轴验证。
+
 ## SEI：解码前提取，按画面关联，编码后重封装
+
+仅用于内网自行组合业务的编码后包处理 hook 已接入，见 [内部媒体接口](media-hooks.md)；它不等于本节的任意 SEI 提取/透传已经实现。
 
 不能只依赖 AV_FRAME_DATA_SEI_UNREGISTERED 等已知 side data：当前 H.264/HEVC decoder 会跳过未处理的 SEI，任意 UNKNOWN 不保证成为 AVFrame side data。建议解码前在已识别的 AU 边界提取，保存到有界、引用计数 MetadataBundle，经 opaque_ref/画面 id/分支谱系与编码 PTS ledger 关联，编码完成后、mux/格式转换前插入目标 AU。容器包不一定等于一张画面；prefix/suffix 与多个 AU/多消息的归属必须正确，不能简单按返回顺序贴标签。
 

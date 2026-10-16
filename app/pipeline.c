@@ -1,5 +1,6 @@
 #include "live.h"
 #include "crash.h"
+#include "media_hooks.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -30,8 +31,8 @@ typedef struct Stamp {
 } Stamp;
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; } Interrupt;
 typedef struct Ledger { int used; int64_t pts; Stamp stamp; } Ledger;
-typedef struct InputItem { AVPacket *packet; AVCodecParameters *params; AVRational tb; } InputItem;
-typedef struct MuxTrace { Stamp stamp; int64_t encoded_us, pts_us; int bytes; } MuxTrace;
+typedef struct InputItem { AVPacket *packet; AVCodecParameters *params; AVRational tb; int64_t demuxed_us; } InputItem;
+typedef struct MuxTrace { Stamp stamp; int64_t encoded_us, pts_us, hook_us; int bytes; } MuxTrace;
 typedef struct AudioTrack {
     int input_index, rejected, have_clock;
     AVStream *output; AVBSFContext *bsf;
@@ -39,6 +40,7 @@ typedef struct AudioTrack {
 } AudioTrack;
 typedef struct Pipeline {
     Job *job;
+    NakiMediaHooks hooks;
     const char *stage;
     AVFormatContext *input, *output;
     AVCodecContext *decoder, *encoder;
@@ -122,11 +124,13 @@ static void *reader_main(void *opaque) {
         }
         if (packet->size<=0) {av_packet_free(&packet); continue;}
         int video=packet->stream_index==p->stream_index;
-        InputItem item={.packet=packet,.tb=p->input_tb};
+        InputItem item={.packet=packet,.tb=p->input_tb,.demuxed_us=finished};
         if (!video) {
             AVStream *stream=p->input->streams[packet->stream_index];
-            if (!job->config.audio_copy || !strcmp(job->config.output_format,"mp4") ||
-                stream->codecpar->codec_type!=AVMEDIA_TYPE_AUDIO) {free_input(&item); continue;}
+            int deliver=job->config.audio_copy && strcmp(job->config.output_format,"mp4");
+            if (stream->codecpar->codec_type!=AVMEDIA_TYPE_AUDIO || (!deliver && !p->hooks.audio_packet)) {
+                free_input(&item); continue;
+            }
             if(stream->codecpar->extradata_size<0 || stream->codecpar->extradata_size>65536) {
                 pthread_mutex_lock(&job->mutex);job->audio_unsupported++;pthread_mutex_unlock(&job->mutex);
                 free_input(&item);continue;
@@ -454,6 +458,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     json_num(doc,"decode_ms",decode); json_num(doc,"filter_ms",filter);
     json_num(doc,"setup_or_dispatch_ms",(stamp.filter_started_us-stamp.decoded_us)/1000.0);
     json_num(doc,"encode_ms",encode); json_num(doc,"mux_ms",mux);
+    json_num(doc,"media_hook_ms",meta->hook_us/1000.0);
     json_num(doc,"encode_submit_ms",(stamp.encoder_accepted_us-stamp.encoder_submit_us)/1000.0);
     json_num(doc,"encode_wait_ms",(encoded-stamp.encoder_accepted_us)/1000.0);
     json_num(doc,"interleave_call_ms",(interleaved-mux_start)/1000.0);
@@ -548,12 +553,33 @@ static int receive_encoded(Pipeline *p) {
     if(!packet)return AVERROR(ENOMEM);
     int ret;
     while((ret=encoder_receive(p,packet))>=0) {
+        int64_t encoded_us=now_us(), hook_us=0;
         int slot=-1;
         for(int i=0;i<LEDGER_CAPACITY;i++)if(p->ledger[i].used && p->ledger[i].pts==packet->pts){slot=i;break;}
         if(slot<0){ret=AVERROR_INVALIDDATA;break;}
+        if(p->hooks.video_packet) {
+            size_t stats_size=0;
+            const uint8_t *stats=av_packet_get_side_data(packet,AV_PKT_DATA_QUALITY_STATS,&stats_size);
+            Stamp *source=&p->ledger[slot].stamp;
+            NakiVideoEncodedEvent event={.codec_id=p->encoder->codec_id,.time_base=p->encoder->time_base,
+                .encoded_us=encoded_us,.input_sequence=source->sequence,.input_picture_type=source->picture_type,
+                .output_picture_type=stats_size>=5 ? stats[4] : AV_PICTURE_TYPE_NONE,
+                .output_key=!!(packet->flags&AV_PKT_FLAG_KEY)};
+            int64_t pts=packet->pts,dts=packet->dts,duration=packet->duration;
+            int flags=packet->flags,index=packet->stream_index,size=packet->size;
+            p->stage="encoded video media hook";
+            int64_t began=now_us();
+            ret=p->hooks.video_packet(p->hooks.opaque,&event,packet);
+            hook_us=now_us()-began;
+            if(ret>0)ret=AVERROR(EINVAL);
+            if(ret>=0 && (packet->pts!=pts || packet->dts!=dts || packet->duration!=duration ||
+                packet->flags!=flags || packet->stream_index!=index || packet->size<=0 || !packet->data ||
+                (int64_t)packet->size-size>NAKI_MEDIA_HOOK_MAX_ADDED_BYTES))ret=AVERROR(EINVAL);
+            if(ret<0)break;
+        }
         av_buffer_unref(&packet->opaque_ref);packet->opaque_ref=av_buffer_alloc(sizeof(MuxTrace));
         if(!packet->opaque_ref){ret=AVERROR(ENOMEM);break;}
-        *(MuxTrace *)packet->opaque_ref->data=(MuxTrace){.stamp=p->ledger[slot].stamp,.encoded_us=now_us(),
+        *(MuxTrace *)packet->opaque_ref->data=(MuxTrace){.stamp=p->ledger[slot].stamp,.encoded_us=encoded_us,.hook_us=hook_us,
             .pts_us=av_rescale_q(packet->pts,p->encoder->time_base,AV_TIME_BASE_Q),.bytes=packet->size};
         p->ledger[slot].used=0;
         av_packet_rescale_ts(packet,p->encoder->time_base,p->video->time_base);packet->stream_index=p->video->index;
@@ -858,7 +884,11 @@ void *pipeline_main(void *opaque) {
     atomic_init(&p.read_interrupt.deadline,0); atomic_init(&p.write_interrupt.deadline,0);
     pthread_mutex_init(&p.ring_mutex,NULL); pthread_cond_init(&p.ring_space,NULL);
     InputItem pending={0}; AVFrame *frame=av_frame_alloc();
-    int ret=frame ? initialize_decoder(&p) : AVERROR(ENOMEM);
+    NakiMediaJobInfo info={.job_id=job->id,.request_id=job->request_id,.config=&job->config,.request_us=job->started_us};
+    p.stage="media hook initialization";
+    int ret=frame ? naki_media_hooks_open(&info,&p.hooks) : AVERROR(ENOMEM);
+    if(ret>0 || (ret>=0 && p.hooks.api_version!=NAKI_MEDIA_HOOK_API))ret=AVERROR(EINVAL);
+    if(ret>=0)ret=initialize_decoder(&p);
     if (ret<0) goto cleanup;
     ret=pthread_create(&p.reader,NULL,reader_main,&p);
     if (ret) {ret=AVERROR(ret); goto cleanup;}
@@ -882,7 +912,14 @@ void *pipeline_main(void *opaque) {
         int input_done=0, input_error=0;
         if (!pending.packet && !eof_sent) pending=pop_input(&p,&input_done,&input_error);
         if(pending.params) {
-            ret=handle_audio(&p,&pending);
+            if(p.hooks.audio_packet) {
+                NakiAudioPacketEvent event={.packet=pending.packet,.parameters=pending.params,.time_base=pending.tb,
+                    .input_stream_index=pending.packet->stream_index,.demuxed_us=pending.demuxed_us,.dispatched_us=now_us()};
+                p.stage="audio media hook";
+                ret=p.hooks.audio_packet(p.hooks.opaque,&event);
+                if(ret>0)ret=AVERROR(EINVAL);
+            }
+            if(ret>=0 && job->config.audio_copy && strcmp(job->config.output_format,"mp4"))ret=handle_audio(&p,&pending);
             free_input(&pending);
             if(ret<0)goto cleanup;
             progress=1;
@@ -942,6 +979,11 @@ cleanup:
             int trailer_ret=av_write_trailer(p.output);
             if (p.output->pb) {avio_flush(p.output->pb); if (trailer_ret>=0 && p.output->pb->error<0) trailer_ret=p.output->pb->error;}
             if (ret>=0 && !stopped && trailer_ret<0) {p.stage="output trailer"; ret=trailer_ret;}
+        }
+        if(p.hooks.close) {
+            NakiMediaEnd end={.cancelled=stopped,.error_code=ret<0 ? ret : 0,.stage=p.stage};
+            p.hooks.close(p.hooks.opaque,&end);
+            p.hooks=(NakiMediaHooks){0};
         }
         if (p.output) {
             if (p.output->pb) {pthread_mutex_lock(&job->mutex); job->bytes_out=(uint64_t)p.output->pb->bytes_written; pthread_mutex_unlock(&job->mutex);}

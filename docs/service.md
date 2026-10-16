@@ -52,6 +52,8 @@ bash scripts/build-service.sh
 
 过载抽帧、I 帧/PTS/任意 SEI 透传尚未实现，后续合同与冲突处理见 [直播帧策略](live-frame-policy.md)。当前 PTS 追踪与 VFR GOP 支持不代表线上原始 PTS 逐刻度透传。
 
+内网业务可编译接入 [内部媒体 hook](media-hooks.md)，观察音频和编码后的视频包；默认空实现，没有新增 HTTP 参数，也没有启用响度检测或 SEI 注入。
+
 `width`、`height` 同时为正偶数时缩放；同时省略则保持输入尺寸，但转换为 YUV420P。`bitrate` 默认 1.5 Mbps；`encoder_threads` 默认 2。`max_threads` 默认 12，自动模式 `min_threads` 默认 2，`budget_slots` 默认 12；预算只约束解码任务，不含 filter 和编码器。`queue_capacity` 默认 4，此外有 8 个包的输入队列。`fps` 是缺失帧率时的回退值；不做帧率转换。`pace=true` 仅用于本地文件按 DTS 实时回放。
 
 本版转码第一条可用视频流：原生 H.264/HEVC 软解 → null/scale + format filter → 编码 → 输出。默认 `encoder=libx264`，`encoder_preset=veryfast`，YUV420P、zerolatency、无输出 B 帧，支持 MPEG-TS / MP4 / FLV。选择 `encoder=libvvenc` 时默认 `encoder_preset=faster`、`encoder_profile=live_3b_2s`，强制 YUV420P10LE，支持 MPEG-TS / MP4 / Enhanced FLV；完整组为 I BBB P…，关键帧按首帧 PTS 锚定的 2 秒时间网格调度，边界及 EOF 允许 IP / IBP / IBBP。保留单遍码控前瞻与必要重排，单调变帧率及向前时间戳缺口不再因非 CFR 被拒绝；回退或重复 PTS 显式失败。其 preset 可用 faster/fast/medium/slow/slower，非法组合返回 400。详见 [VVenC](vvenc.md)。配置不接受未知或重复字段；请求体上限 16 KiB。
