@@ -73,3 +73,52 @@ ROI 检测属于分析支路：低分辨率采样可降低成本，结果记录�
 先支持启动时固定图。后续配置更新采用有 revision 的 prepare→validate→apply，指定帧边界或目标 PTS，IPC 只传有界配置和 ACK；不能在 HTTP 线程直接碰 graph。亮度/锐化等节点也只有验证过运行时命令才允许原地变更。尺寸、像素格式、色彩或输出时序改变可能要求重建图/编码器及刷新序列头；这与“晚加入音轨”不同，不能承诺任意修改均不断流。先明确各封装和接收端能力再开放。
 
 落地顺序建议：模块搬运和 JobSpec → crop/pad/scale/sharpen 保帧链 → 追踪一对多后接解交错/fps → 完整颜色模型与 HDR→SDR → ROI 分支和编码器适配 → 在线 revision 更新。每一步补实际像素/色彩/时间戳、EOF 和缓存上限验证，不用只检查滤镜名能否找到。
+
+## 可热更新的图片/动画水印
+
+需求包括中途从无到有、更新 URI、锚点、偏移和宽高，支持 JPEG/PNG/GIF。建议复用 libavformat/libavcodec 解码与 libswscale/libavfilter 缩放/合成，把原先“大滤镜”的网络和资源生命周期拆出去，保留一个职责窄的常驻合成节点。媒体 owner 不下载、不等待资源、不持有跨线程可变解码器。
+
+草案层配置如下，同样尚未实现：
+
+```json
+{
+  "id": "customer_logo",
+  "enabled": true,
+  "resource": {"uri": "https://assets.example/logo.gif", "load_timeout_ms": 3000},
+  "startup": {"required": true, "timeout_ms": 5000, "on_timeout": "fail"},
+  "update": {"on_error": "keep_previous", "apply_at": "next_frame"},
+  "placement": {
+    "space": "output_canvas", "anchor": "bottom_right",
+    "offset": {"x": -24, "y": -24, "unit": "px"},
+    "size": {"width": 160, "height": 80, "unit": "px", "fit": "contain"},
+    "opacity": 1.0
+  },
+  "animation": {"clock": "media_pts", "loop": "forever", "restart_on_replace": true}
+}
+```
+
+规定 anchor 是水印外接矩形对应锚点对齐画布同名锚点，再施加向右/向下为正的偏移；百分比 x/y 分别以参考空间宽/高为基数。明确裁剪后源画面、缩放后内容区域、补边后输出画布三种坐标空间。contain 保持比例并在配置矩形中居中，stretch 明确变形；裁出屏幕的部分裁剪，完全离屏是合法不可见状态还是配置错误应固定策略。多水印按稳定 z-order 合成。输出帧率/尺寸不因水印布局改变。
+
+后台 asset manager 用有总超时、字节和并发上限的 libcurl 加载 URI，再由独立解码上下文生成资源。JPEG/PNG 静态图只留一帧；GIF 按实际帧时长、透明及 disposal 生成完整显示帧，不能按恒定 fps 猜测。限制压缩大小、解码像素、帧数、总动画长度和总 raw 内存；1080p RGBA 一帧约 7.9MiB，100 帧就约 791MiB，不能只按下载文件大小限额。长 GIF 选择拒绝或独立有界滚动解码，两种策略都要保证取帧不会阻塞主视频；默认可以先拒绝超限动画。
+
+资源缓存键包含内容 hash、解码/颜色参数、目标尺寸与插值方式；同 URI 内容可能变化，每次加载产出不可变 content generation。布局变化可以复用像素；尺寸变化后台重算。准备中的多次更新按 revision 合并/取消过期工作，限制同时存活的候选资源、旧资源和缓存总额，防止频繁更新绕过限额。缓存只含资源自有像素，逐帧 PTS 放在轻量 AVFrame 引用头中，不能修改共享缓存帧。失效/超时资源不进入 active revision。
+
+prepare 成功后通过有界消息发布 immutable layer set，媒体 owner 在帧边界一次切换整份版本；回报 accepted revision 与实际 applied revision、视频 PTS、content hash。准备失败保持旧水印，旧资源在所有在途 AVFrame 引用释放后回收；HTTP 和资源线程不直接修改 graph。未来可用 If-Match/revision 控制并发更新，当前 API 没有这类路径。
+
+静态图每个视频帧复用同一像素，GIF 以 active revision 生效时的媒体 PTS 为动画起点，按可变 duration 查找帧，最后给本次合成输入赋主视频帧 PTS。明确源 PTS 前跳、动画循环次数、最后一帧保持及 URI 替换时是否重启动画。资源供帧器在禁用/未就绪且允许无水印时也提供合法透明帧，不能让 framesync 等待第二路数据；禁止使用 wall clock 无意追赶/跳帧。
+
+“常驻”指逻辑合成节点，不代表任意尺寸图像可以直接塞入固定 buffersrc。overlay 的 x/y 命令、输入尺寸/像素格式协商、alpha 模式和 EOF/framesync 行为要分别验证；只设置 repeatlast 并不能解决从未来过第一张图的等待。可以先固定水印输入画布尺寸，后台把图渲染到透明画布，再用 overlay 合成，代价是内存带宽。若多层、尺寸频繁变化或 10-bit/HDR 性能不合适，再做一个只取已准备帧并合成的专用 C 节点；该节点不负责下载、demux 或缓存调度。不为了换图销毁整条视频 graph/编码器/muxer。
+
+建议 SDR 输出在 tone mapping/缩放后合成 SDR logo，随后做编码输入格式转换；HDR 输出则需明确 logo 的颜色空间、亮度与 alpha 合成规则。JPEG 无 alpha，PNG/GIF 的透明度、straight/premultiplied alpha 及颜色范围都要统一处理；不能把普通 8-bit logo 的数值直接当作 HDR 光强。当前精简 FFmpeg 尚未启用 JPEG/PNG/GIF 解码器或 overlay，URI 图片水印不是现有功能；后续实现应把所需组件、符号与能力检测纳入 SDK。
+
+## 必需水印与起播等待
+
+用户要求：部分客户第一帧起必须带水印，资源未就绪则等待至水印拉取超时。它是 startup gate，与运行中资源更新不同；不能自动套用“失败保留旧图”，因为起播时可能没有旧图。
+
+建议 task 状态增加 preparing/waiting_assets，并在 startup 日志记录资源准备起止、下载/解码/缩放耗时、重试次数及等待原因。HTTP 仍异步返回 202，状态查询和停止始终可用；取消需要中断等待、下载及解码任务。在 required layer 的资源、布局和首张可合成帧全部 ready 前，不提交任何视频到编码器，也不输出无水印视频包。多个 required layer 是一个联合 gate，所有 layer ready 才起播。
+
+`startup.timeout_ms` 是从任务接受开始的累计等待预算，不能每次重试重置；单次 URI load_timeout_ms 不得突破剩余预算。超时策略必须显式：`fail` 保证不输出无水印内容，建议 strict required 默认值；`start_without_watermark` 只在客户允许“等到超时后裸流起播”时配置。后者可以将资源设为可选并保留等待预算，但不能同时声称始终有水印。是否后台继续重试及失败后何时再更新也需另设有界策略。下载成功仍不等于 ready，坏图片、解码/缩放失败也计入同一预算。
+
+第一版在 gate ready 后再打开直播输入和推流输出，避免等水印期间积攒压缩包/原始帧、推流端空等超时；request-to-first-frame 明确包含整个 asset wait。以后若要与输入打开/探测并行，必须另设计缓存上限与等待结束后的 keyframe/catch-up 策略，不能用无界缓存来缩短表面启动时间。
+
+运行中更新默认 keep_previous；没有旧资源的新增可选 layer 在新资源 ready 后才启用，期间视频继续。若客户要求“更新请求到达立即遮挡/停画，直到新图 ready”，那是另外的业务连续性策略，需单独配置并评估接收端超时，不能隐式套用到所有热更新。

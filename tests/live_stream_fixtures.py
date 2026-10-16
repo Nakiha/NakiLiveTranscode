@@ -98,8 +98,16 @@ def create(run, ffmpeg):
              "-mpegts_pmt_start_pid","4096","-muxrate","1000000","-pcr_period","20",str(full)]
     subprocess.run(command,check=True,timeout=30)
     late_ts=run/"late.ts";make_ts(full,late_ts)
+    # Exercise Enhanced FLV's HEVC input path independently from H.264/TS.
+    hevc=run/"full-hevc.ts"
+    command[command.index("libx264")]="libx265"
+    command[command.index("-x264-params")]="-x265-params"
+    command[command.index("bframes=3:b-adapt=0:keyint=25:scenecut=0")]=(
+        "bframes=3:b-adapt=0:keyint=25:scenecut=0:log-level=error:pools=1:frame-threads=2")
+    command[-1]=str(hevc)
+    subprocess.run(command,check=True,timeout=30)
     full_flv=run/"full.flv"
-    subprocess.run([str(ffmpeg),"-v","error","-i",str(full),"-map","0","-c","copy","-f","flv",str(full_flv)],
+    subprocess.run([str(ffmpeg),"-v","error","-i",str(hevc),"-map","0","-c","copy","-f","flv",str(full_flv)],
                    check=True,timeout=20)
     late_flv=run/"late.flv";make_flv(full_flv,late_flv)
     return late_ts,late_flv

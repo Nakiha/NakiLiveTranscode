@@ -16,3 +16,5 @@
 本地 EOF 补充：MP3 44.1kHz 透传到 FLV/TS、`audio_copy=false`、MP4 保持纯视频，均输出 75/75 视频帧且队列排空。C API 单测验证失败注册不改变流数量、注册不写 header/连接、DTS 恒定且无新输入时 50ms 墙钟释放、4包/16字节测试上限、EAGAIN 保留输入、超大包拒绝、跨 time_base 排序、禁止混用通用交织队列。
 
 同次源码的 decoder、基础 service、VVC、PTS GOP、observability、process recovery 回归通过。测试不等同现网服务器/播放器兼容性、长时间稳定性或高规格容量验证；SRT 内部 UDP 未纳入现有 TCP/UDP observer。
+
+补充实测目录 `out/live-mux-aje7fsd6/`：RTMP 输入改为 Enhanced FLV/HEVC，SRT 保持 H.264/TS；两者仍通过 VVC、两条晚 AAC、同连接和交织测试。该输入组合已固化到回归脚本，覆盖 Enhanced FLV 的 HEVC 解封装入口。
