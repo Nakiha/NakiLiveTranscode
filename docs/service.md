@@ -61,7 +61,7 @@ HTTP 事件循环只管理任务，不调用媒体阻塞操作。任务 worker �
 
 ## JSONL 指标的边界
 
-服务 stdout 记录 listening/shutdown；每任务生成独立 `out/runs/<job_id>.jsonl`，包含 decoder_ready、pipeline_ready、每秒 status、每个输出视频包的 frame，以及最终 status。HTTP 查询返回相同摘要：mean / max / count；自动调度包含目标并行度、峰值及队列快照。
+服务默认每 10 秒由控制线程生成 status，经独立有界日志线程写 stdout；生命周期及最终状态也写 stdout。逐帧明细默认关闭，可用任务 `frame_log=true` 开启，文件由日志线程按大小/时间轮转。HTTP 查询返回累计及窗口耗时、分位数上界、I 帧拆分、自动调度快照和日志/网络计数。详见 [运行观测与长期运维](operations.md)。
 
 使用单调时钟计算耗时，另有 `unix_us` 便于关联日志。关联通过 packet opaque_ref 传递到 decoded/filter frame，再按 encoder PTS 匹配输出包；关联缺失、PTS 不递增或有界映射溢出会明确失败。
 
@@ -79,10 +79,14 @@ HTTP 事件循环只管理任务，不调用媒体阻塞操作。任务 worker �
 
 `ingress_to_mux_ms` 是**服务内部端到端时延**，不是源端采集到播放器显示时延。它不含收到包之前的网络/探测缓冲，也不代表接收端已收到或显示；写文件完成不等于 fsync 持久化。`startup_ms` 单独包含输入打开与探测、等待首帧和输出初始化。摘要对已经输出的帧统计；失败或取消时未输出帧不进入耗时均值。
 
-JSONL 逐帧同步写出并 flush，方便实验观察，会影响吞吐和下一帧排队；目前不作为生产容量基准。`bytes_out` 是 AVIO 累计写出字节，`encoded_bytes` 是单包 H.264 载荷大小。
+时延统计覆盖每个成功输出帧，不受逐帧明细采样或日志队列丢弃影响。日志队列满时丢弃日志并计数，不阻塞媒体线程等待写盘。`bytes_out` 是 AVIO 累计写出字节，`encoded_bytes` 是单包 H.264 载荷大小。网络层另有 TCP/UDP socket API 观测，不与这些视频帧指标混用。
 
 ## 验证
 
 `python3 tests/service_integration.py` 自动启动独立服务、生成合成输入并检查文件完整转码、HTTP 错误处理、停止、坏输入、已有输出保护，以及 UDP 输入。每次使用新的 `out/` 子目录，不覆盖冻结基线。测试需要系统 `ffmpeg`/`ffprobe`（仅用于生成和独立检查媒体）以及 Python 3；运行前先构建服务。
 
 实际验证环境与结果见 [2026-10-16 验证记录](validation-20261016.md)。
+
+新增日志/网络测试：`python3 tests/observability_integration.py`，覆盖 10 秒默认定时器、窗口计数、I 帧、轮转、压缩清理、队列饱和、阻塞输出期间心跳以及 TCP/UDP 收发。
+
+[新增验证记录](validation-observability-20261016.md)；容器测试为 `python3 tests/docker_smoke.py`（先构建镜像）。

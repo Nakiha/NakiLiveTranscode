@@ -6,16 +6,27 @@
 #include <stdio.h>
 #include <yyjson.h>
 #include <libavcodec/async.h>
+#include "logger.h"
+#include "netstats.h"
 
 typedef struct Config {
     char input[2048], output[2048], output_format[16];
     int width, height, bitrate, max_threads, min_threads, budget_slots;
     int queue_capacity, encoder_threads, fps, pace;
+    int frame_log, frame_log_every, slow_frame_ms;
 } Config;
 typedef struct Metric {
     uint64_t count;
     double sum_ms, max_ms;
+    uint64_t bins[256], slow_count;
 } Metric;
+typedef struct Latencies {
+    Metric demux_read, input_queue, decode, setup, filter, encode, mux;
+    Metric ingress_to_mux, scheduled_to_mux, interleave_call, avio_flush;
+} Latencies;
+typedef struct FrameGroups {
+    Metric i_frame, first_i, recurring_i, p_frame, b_frame, decoded_key, output_key;
+} FrameGroups;
 typedef struct Job {
     Config config;
     char id[64], log_path[4096], error[256], state[24];
@@ -23,23 +34,31 @@ typedef struct Job {
     pthread_mutex_t mutex;
     atomic_int cancel, done;
     int wake_fd;
-    FILE *log;
+    Logger *logger;
+    NetworkStats *network;
+    TraceSink *trace;
     int64_t started_us, ended_us;
     uint64_t packets_in, frames_decoded, frames_filtered, packets_out, bytes_out;
-    Metric decode, filter, encode, mux, ingress_to_mux;
+    Latencies lifetime, window;
+    Latencies i_lifetime, i_window;
+    FrameGroups groups, window_groups;
+    int64_t window_start_us, last_output_us, write_started_us, last_i_output_us;
+    int64_t auto_updated_us;
+    char write_phase[24];
+    uint64_t window_start_input, window_start_output, i_frames;
     AVCodecAsyncAutoStats auto_stats;
 } Job;
 
 int64_t now_us(void);
 void wake_job(void *opaque);
 void request_stop(Job *job);
-int log_json(FILE *file, yyjson_mut_doc *doc);
 yyjson_mut_doc *new_event(const char *event, const Job *job);
 void json_num(yyjson_mut_doc *doc, const char *name, double value);
 void json_int(yyjson_mut_doc *doc, const char *name, int64_t value);
 void json_str(yyjson_mut_doc *doc, const char *name, const char *value);
-void metric_add(Metric *metric, double ms);
+void metric_add(Metric *metric, double ms, double slow_ms);
 yyjson_mut_doc *job_snapshot(Job *job);
+yyjson_mut_doc *job_report(Job *job, int final);
 void *pipeline_main(void *opaque);
 int config_parse(const char *body, size_t size, Config *out, char *error, size_t cap);
 int mkdir_tree(const char *path);

@@ -7,7 +7,6 @@ prefix="$cache/install"
 build="$cache/ffmpeg"
 source_root="$root/experiments/decoder-20261016/ffmpeg-7.0.3"
 pkg-config --exists x264 libevent libcurl
-[[ -f "$root/third_party/yyjson/src/yyjson.c" ]] || { echo 'Run git submodule update --init --recursive' >&2; exit 1; }
 mkdir -p "$build" "$prefix" "$root/out/bin"
 cd "$build"
 if [[ ! -f config.h || "$source_root/configure" -nt config.h || "$root/scripts/build-service.sh" -nt config.h ]]; then
@@ -26,6 +25,8 @@ if [[ ! -f config.h || "$source_root/configure" -nt config.h || "$root/scripts/b
 fi
 make -j"${FFMPEG_LIVE_BUILD_JOBS:-8}"
 make install
+[[ ${NAKI_FFMPEG_ONLY:-0} == 1 ]] && exit 0
+[[ -f "$root/third_party/yyjson/src/yyjson.c" ]] || { echo 'Run git submodule update --init --recursive' >&2; exit 1; }
 cd "$root"
 export PKG_CONFIG_PATH="$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 cmake -S "$root" -B "$cache/service" -DCMAKE_BUILD_TYPE=RelWithDebInfo \

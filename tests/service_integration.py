@@ -69,13 +69,39 @@ def check_duration(path, expected):
 
 
 def check_trace(state, count, source=None):
-    events = [json.loads(line) for line in pathlib.Path(state["log_path"]).read_text().splitlines()]
+    prefix=pathlib.Path(state["log_path"])
+    deadline=time.monotonic()+5
+    lines=[]
+    while time.monotonic()<deadline:
+        files=sorted(prefix.parent.glob(prefix.name+".*.jsonl"))
+        if not list(prefix.parent.glob(prefix.name+".*.active")) and files:
+            lines=[line for path in files for line in path.read_text().splitlines()]
+            if len(lines)==count:break
+        time.sleep(0.02)
+    events = [json.loads(line) for line in lines]
     frames = [event for event in events if event["event"] == "frame"]
     assert len(frames) == count, (count, len(frames))
     assert len({row["input_sequence"] for row in frames}) == count
     assert [row["pts_us"] for row in frames] == sorted(row["pts_us"] for row in frames)
     assert state["frames_decoded"] == state["frames_filtered"] == state["packets_out"] == count
     assert state["auto"]["maximum"] == 12 and state["auto"]["minimum"] == 2
+    assert state["logging"]["dropped_frames"]==0
+    assert state["frame_types"]["first_i"]["count"]==1
+    assert state["frame_types"]["i_frame"]["count"]>=1
+    assert state["i_frame_stages"]["ingress_to_mux"]["count"]==state["frame_types"]["i_frame"]["count"]
+    assert sum(state["frame_types"][name]["count"] for name in ("i_frame","p_frame","b_frame"))==count
+    values=sorted(row["ingress_to_mux_ms"] for row in frames)
+    metric=state["ingress_to_mux"]
+    assert abs(metric["mean_ms"]-sum(values)/len(values))<1e-6
+    assert abs(metric["max_ms"]-max(values))<1e-6
+    assert metric["slow_count"]==sum(value>=state["slow_frame_ms"] for value in values)
+    for percent in (50,95,99):
+        true_value=values[math.ceil(count*percent/100)-1]
+        upper=metric[f"p{percent}_upper_ms"]
+        if true_value>=16000:assert upper is None
+        else:
+            width=1 if true_value<200 else 20 if true_value<1000 else 1000
+            assert true_value<=upper+1e-9 and upper-true_value<=width+1e-9
     for row in frames:
         for key in ("decode_ms", "filter_ms", "encode_ms", "mux_ms", "input_queue_ms", "ingress_to_mux_ms"):
             assert math.isfinite(row[key]) and row[key] >= 0, (key, row)
@@ -89,6 +115,14 @@ def check_trace(state, count, source=None):
         for row in frames:
             expected = float(packets[row["input_sequence"]]["pts_time"]) * 1_000_000
             assert abs(row["pts_us"] - expected) < 15, (row, expected)
+        result=subprocess.run(["ffprobe","-v","error","-select_streams","v:0","-show_frames",
+                               "-show_entries","frame=pict_type,key_frame,best_effort_timestamp_time","-of","json",str(source)],
+                              check=True,capture_output=True,text=True)
+        reference={round(float(frame["best_effort_timestamp_time"])*1e6):frame for frame in json.loads(result.stdout)["frames"]}
+        for row in frames:
+            key=round(float(packets[row["input_sequence"]]["pts_time"])*1e6)
+            assert row["decoded_picture_type"]==reference[key]["pict_type"]
+            assert row["decoded_key"]==reference[key]["key_frame"]
     return frames
 
 
@@ -103,7 +137,8 @@ def run():
                     "-x264-params", "bframes=3:b-adapt=0:keyint=25:scenecut=0", str(sample)], check=True, timeout=30)
     server_log = (RUN / "server.jsonl").open("w")
     server = subprocess.Popen([str(BIN / "naki-live"), "--port", str(PORT),
-                               "--run-dir", str(RUN / "logs")], cwd=ROOT, stdout=server_log,
+                               "--run-dir", str(RUN / "logs"), "--status-interval", "1",
+                               "--log-rotate-bytes", "4096"], cwd=ROOT, stdout=server_log,
                               stderr=(RUN / "server.stderr").open("w"))
     try:
         for _ in range(100):
@@ -128,7 +163,7 @@ def run():
                                  capture_output=True, text=True, check=True)
         assert json.loads(client.stdout)["status"] == "ok"
         output = RUN / "file.ts"
-        config = {"input": str(sample), "output": str(output), "width": 640, "height": 360, "pace": True}
+        config = {"input": str(sample), "output": str(output), "width": 640, "height": 360, "pace": True, "frame_log": True}
         config_file = RUN / "job.json"
         config_file.write_text(json.dumps(config))
         subprocess.run([str(BIN / "naki-live-ctl"), "--url", BASE, "start", str(config_file)],
@@ -142,6 +177,7 @@ def run():
         assert state["bytes_out"] == output.stat().st_size
         check_duration(output, 3.0)
         frames = check_trace(state, 75, sample)
+        assert len(list(pathlib.Path(state["log_path"]).parent.glob(pathlib.Path(state["log_path"]).name+".*.jsonl")))>1
         assert all("scheduled_to_mux_ms" in row for row in frames)
         print("PASS file replay, B-frame correlation, 75 frames, scale/encode/mux, JSONL, concurrent HTTP", flush=True)
 
@@ -156,8 +192,9 @@ def run():
         state = finished()
         assert probe(mp4)["nb_read_frames"] == "30"
         check_duration(mp4, 1.2)
-        check_trace(state, 30, hevc)
-        print("PASS HEVC B-frame input, MP4 finalization, 30 correlated output frames", flush=True)
+        assert state["packets_out"]==30 and state["ingress_to_mux"]["count"]==30
+        assert state["log_path"]=="" and state["frame_log"]==0
+        print("PASS HEVC B-frame input, MP4 finalization, default frame logging disabled", flush=True)
 
         # A socket receiver independently captures the service's live UDP output.
         capture = RUN / "udp-captured.ts"
@@ -181,6 +218,7 @@ def run():
             start({**config, "output": f"udp://127.0.0.1:{destination}?pkt_size=1316"})
             state = finished()
             check_trace(state, 75, sample)
+            assert state["network"]["udp_send"]["bytes"]>0
             time.sleep(0.15)
         finally:
             receive_done.set()
@@ -225,6 +263,8 @@ def run():
                 raise AssertionError(("UDP did not produce frames", state))
             http("/v1/job/stop", data={}, code=202)
             state = finished("stopped", timeout=5)
+            assert state["network"]["udp_receive"]["bytes"]>0
+            assert state["network"]["udp_receive"]["background_calls"]>0
             assert int(probe(udp_output)["nb_read_frames"]) >= 30
             print("PASS real-time UDP input to H.264 MPEG-TS output and stop", flush=True)
         finally:

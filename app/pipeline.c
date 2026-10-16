@@ -23,6 +23,7 @@
 typedef struct Stamp {
     int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
     int64_t encoder_submit_us, scheduled_us, filter_started_us;
+    int picture_type, decoded_key, input_key;
 } Stamp;
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; } Interrupt;
 typedef struct Ledger { int used; int64_t pts; Stamp stamp; } Ledger;
@@ -58,10 +59,11 @@ static void refresh_auto(Pipeline *p) {
     if (p->async) avcodec_async_get_auto_stats(p->async,&stats);
     pthread_mutex_lock(&p->job->mutex);
     p->job->auto_stats=stats;
+    p->job->auto_updated_us=now_us();
     pthread_mutex_unlock(&p->job->mutex);
 }
 static int event_log(Pipeline *p, const char *event) {
-    return log_json(p->job->log,new_event(event,p->job)) ? AVERROR(EIO) : 0;
+    logger_submit(p->job->logger,NULL,new_event(event,p->job)); return 0;
 }
 static void *reader_main(void *opaque) {
     Pipeline *p=opaque; Job *job=p->job;
@@ -100,6 +102,7 @@ static void *reader_main(void *opaque) {
         Stamp *stamp=(Stamp *)packet->opaque_ref->data;
         stamp->sequence=seq++; stamp->read_us=finished-began;
         stamp->ingress_us=now_us(); stamp->scheduled_us=due;
+        stamp->input_key=!!(packet->flags&AV_PKT_FLAG_KEY);
         pthread_mutex_lock(&p->ring_mutex);
         while (p->count==READER_CAPACITY && !atomic_load(&job->cancel)) pthread_cond_wait(&p->ring_space,&p->ring_mutex);
         if (atomic_load(&job->cancel)) {pthread_mutex_unlock(&p->ring_mutex); av_packet_free(&packet); break;}
@@ -225,7 +228,27 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     json_int(doc,"output_width",p->encoder->width); json_int(doc,"output_height",p->encoder->height);
     json_str(doc,"encoder","libx264"); json_str(doc,"filter",chain);
     json_num(doc,"startup_ms",(now_us()-p->job->started_us)/1000.0);
-    return log_json(p->job->log,doc) ? AVERROR(EIO) : 0;
+    logger_submit(p->job->logger,NULL,doc); return 0;
+}
+static void sample_latencies(Latencies *m, const Stamp *s, int64_t encoded, int64_t begin,
+                             int64_t interleaved, int64_t written, double slow) {
+#define SAMPLE(name,us) metric_add(&m->name,(us)/1000.0,slow)
+    SAMPLE(demux_read,s->read_us); SAMPLE(input_queue,s->submitted_us-s->ingress_us);
+    SAMPLE(decode,s->decoded_us-s->submitted_us); SAMPLE(setup,s->filter_started_us-s->decoded_us);
+    SAMPLE(filter,s->filtered_us-s->filter_started_us); SAMPLE(encode,encoded-s->encoder_submit_us);
+    SAMPLE(mux,written-begin); SAMPLE(ingress_to_mux,written-s->ingress_us);
+    SAMPLE(interleave_call,interleaved-begin); SAMPLE(avio_flush,written-interleaved);
+    if(s->scheduled_us) {SAMPLE(scheduled_to_mux,written-s->scheduled_us);}
+#undef SAMPLE
+}
+static void sample_groups(FrameGroups *g, const Stamp *s, int output_key, int first_i, double total, double slow) {
+    if(s->picture_type==AV_PICTURE_TYPE_I) {
+        metric_add(&g->i_frame,total,slow);
+        metric_add(first_i ? &g->first_i : &g->recurring_i,total,slow);
+    } else if(s->picture_type==AV_PICTURE_TYPE_P) metric_add(&g->p_frame,total,slow);
+    else if(s->picture_type==AV_PICTURE_TYPE_B) metric_add(&g->b_frame,total,slow);
+    if(s->decoded_key)metric_add(&g->decoded_key,total,slow);
+    if(output_key)metric_add(&g->output_key,total,slow);
 }
 static int receive_encoded(Pipeline *p) {
     int ret; AVPacket *packet=av_packet_alloc();
@@ -237,16 +260,25 @@ static int receive_encoded(Pipeline *p) {
         Stamp stamp=p->ledger[slot].stamp;
         p->ledger[slot].used=0;
         int bytes=packet->size;
+        int output_key=!!(packet->flags&AV_PKT_FLAG_KEY);
         int64_t pts_us=av_rescale_q(packet->pts,p->encoder->time_base,AV_TIME_BASE_Q);
         av_packet_rescale_ts(packet,p->encoder->time_base,p->video->time_base);
         packet->stream_index=p->video->index;
         if (!packet->duration) packet->duration=av_rescale_q(1,av_inv_q(p->frame_rate),p->video->time_base);
         p->stage="mux/write";
         int64_t mux_start=now_us();
+        pthread_mutex_lock(&p->job->mutex);
+        p->job->write_started_us=mux_start; strcpy(p->job->write_phase,"interleaved_write");
+        pthread_mutex_unlock(&p->job->mutex);
         atomic_store(&p->write_interrupt.deadline,mux_start+IO_TIMEOUT_US);
         ret=av_interleaved_write_frame(p->output,packet);
+        int64_t interleaved=now_us();
+        pthread_mutex_lock(&p->job->mutex); strcpy(p->job->write_phase,"avio_flush"); pthread_mutex_unlock(&p->job->mutex);
         avio_flush(p->output->pb);
         int64_t written=now_us();
+        pthread_mutex_lock(&p->job->mutex);
+        p->job->write_started_us=0; *p->job->write_phase=0;
+        pthread_mutex_unlock(&p->job->mutex);
         atomic_store(&p->write_interrupt.deadline,0);
         if (ret<0 || p->output->pb->error<0) {if(ret>=0)ret=p->output->pb->error; break;}
         double decode=(stamp.decoded_us-stamp.submitted_us)/1000.0;
@@ -256,21 +288,39 @@ static int receive_encoded(Pipeline *p) {
         double total=(written-stamp.ingress_us)/1000.0;
         pthread_mutex_lock(&p->job->mutex);
         p->job->packets_out++; p->job->bytes_out=(uint64_t)p->output->pb->bytes_written;
-        metric_add(&p->job->decode,decode); metric_add(&p->job->filter,filter);
-        metric_add(&p->job->encode,encode); metric_add(&p->job->mux,mux);
-        metric_add(&p->job->ingress_to_mux,total);
+        int first_i=!p->job->i_frames;
+        double slow=p->job->config.slow_frame_ms;
+        sample_latencies(&p->job->lifetime,&stamp,encoded,mux_start,interleaved,written,slow);
+        sample_latencies(&p->job->window,&stamp,encoded,mux_start,interleaved,written,slow);
+        sample_groups(&p->job->groups,&stamp,output_key,first_i,total,slow);
+        sample_groups(&p->job->window_groups,&stamp,output_key,first_i,total,slow);
+        if(stamp.picture_type==AV_PICTURE_TYPE_I) {
+            sample_latencies(&p->job->i_lifetime,&stamp,encoded,mux_start,interleaved,written,slow);
+            sample_latencies(&p->job->i_window,&stamp,encoded,mux_start,interleaved,written,slow);
+            p->job->i_frames++; p->job->last_i_output_us=written;
+        }
+        p->job->last_output_us=written;
+        uint64_t ordinal=p->job->packets_out;
         pthread_mutex_unlock(&p->job->mutex);
+        if(!p->job->config.frame_log || ((ordinal-1)%p->job->config.frame_log_every &&
+           stamp.picture_type!=AV_PICTURE_TYPE_I && !output_key && total<slow)) continue;
         yyjson_mut_doc *doc=new_event("frame",p->job);
         json_int(doc,"input_sequence",stamp.sequence); json_int(doc,"pts_us",pts_us);
         json_int(doc,"encoded_bytes",bytes);
+        char picture_type[2]={av_get_picture_type_char(stamp.picture_type),0};
+        json_str(doc,"decoded_picture_type",picture_type);
+        json_int(doc,"input_packet_key",stamp.input_key); json_int(doc,"decoded_key",stamp.decoded_key);
+        json_int(doc,"output_key",output_key); json_int(doc,"first_i",first_i && stamp.picture_type==AV_PICTURE_TYPE_I);
         json_num(doc,"demux_read_ms",stamp.read_us/1000.0);
         json_num(doc,"input_queue_ms",(stamp.submitted_us-stamp.ingress_us)/1000.0);
         json_num(doc,"decode_ms",decode); json_num(doc,"filter_ms",filter);
         json_num(doc,"setup_or_dispatch_ms",(stamp.filter_started_us-stamp.decoded_us)/1000.0);
         json_num(doc,"encode_ms",encode); json_num(doc,"mux_ms",mux);
+        json_num(doc,"interleave_call_ms",(interleaved-mux_start)/1000.0);
+        json_num(doc,"avio_flush_ms",(written-interleaved)/1000.0);
         json_num(doc,"ingress_to_mux_ms",total);
         if (stamp.scheduled_us) json_num(doc,"scheduled_to_mux_ms",(written-stamp.scheduled_us)/1000.0);
-        if (log_json(p->job->log,doc)) {ret=AVERROR(EIO); break;}
+        logger_submit(p->job->logger,p->job->trace,doc);
     }
     av_packet_free(&packet);
     return ret==AVERROR(EAGAIN) || ret==AVERROR_EOF ? 0 : ret;
@@ -283,6 +333,8 @@ static int encode_frame(Pipeline *p, AVFrame *frame) {
     frame->pts=av_rescale_q(frame->pts,filter_tb,p->encoder->time_base);
     frame->duration=av_rescale_q(frame->duration,filter_tb,p->encoder->time_base);
     frame->time_base=p->encoder->time_base;
+    /* Input picture type is trace metadata, not a forced output GOP decision. */
+    frame->pict_type=AV_PICTURE_TYPE_NONE;
     if (p->last_pts!=AV_NOPTS_VALUE && frame->pts<=p->last_pts) return AVERROR_INVALIDDATA;
     int slot=-1;
     for (int i=0;i<LEDGER_CAPACITY;i++) if(!p->ledger[i].used) {slot=i; break;}
@@ -316,6 +368,8 @@ static int process_frame(Pipeline *p, AVFrame *frame) {
     if (ret<0) return ret;
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
     stamp->decoded_us=now_us();
+    stamp->picture_type=frame->pict_type;
+    stamp->decoded_key=!!(frame->flags&AV_FRAME_FLAG_KEY);
     if (frame->best_effort_timestamp!=AV_NOPTS_VALUE) frame->pts=frame->best_effort_timestamp;
     if (frame->pts==AV_NOPTS_VALUE) frame->pts=p->synthetic_pts;
     p->synthetic_pts=frame->pts+av_rescale_q(1,av_inv_q(p->frame_rate),p->input_tb);
@@ -415,7 +469,6 @@ void *pipeline_main(void *opaque) {
         }
         if (now_us()>=p.next_stats_us) {
             refresh_auto(&p);
-            if (log_json(job->log,job_snapshot(job))) {ret=AVERROR(EIO); goto cleanup;}
             p.next_stats_us=now_us()+1000000;
         }
         if (!progress) {
@@ -437,6 +490,12 @@ void *pipeline_main(void *opaque) {
 cleanup:
     {
         int stopped=atomic_load(&job->cancel);
+        if(ret<0 && !stopped) {
+            char message[AV_ERROR_MAX_STRING_SIZE]; av_strerror(ret,message,sizeof(message));
+            yyjson_mut_doc *error_event=new_event("pipeline_error",job);
+            json_str(error_event,"stage",p.stage); json_str(error_event,"error",message);
+            logger_submit(job->logger,NULL,error_event);
+        }
         /* Wake a blocked producer and interrupt network reads before joining. */
         if (ret<0) atomic_store(&job->cancel,1);
         pthread_mutex_lock(&p.ring_mutex); pthread_cond_broadcast(&p.ring_space); pthread_mutex_unlock(&p.ring_mutex);
@@ -469,7 +528,8 @@ cleanup:
             snprintf(job->error,sizeof(job->error),"%s: %s",p.stage,message);
         }
         pthread_mutex_unlock(&job->mutex);
-        log_json(job->log,job_snapshot(job));
+        logger_submit(job->logger,NULL,job_report(job,1));
+        logger_trace_finish(job->logger,job->trace);
         atomic_store(&job->done,1);
     }
     return NULL;

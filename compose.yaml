@@ -1,0 +1,39 @@
+services:
+  transcode:
+    image: naki-live-transcode:local
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    ports:
+      - "127.0.0.1:${NAKI_HTTP_PORT:-8090}:8090"
+      - "127.0.0.1:${NAKI_UDP_PORT:-15000}:15000/udp"
+    volumes:
+      - media:/data
+      - logs:/var/log/naki
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/naki-live-ctl", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    pids_limit: 256
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
+        compress: "true"
+        mode: non-blocking
+        max-buffer-size: "4m"
+  log-maintenance:
+    image: naki-live-transcode:local
+    profiles: [maintenance]
+    init: true
+    entrypoint: ["python3", "/usr/local/lib/naki/maintain-logs.py"]
+    command: ["--directory", "/var/log/naki", "--max-age-days", "7", "--max-total-bytes", "2147483648"]
+    volumes:
+      - logs:/var/log/naki
+volumes:
+  media:
+  logs:

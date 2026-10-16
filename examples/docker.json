@@ -1,0 +1,10 @@
+{
+  "input": "/data/input.mp4",
+  "output": "/data/output.ts",
+  "output_format": "mpegts",
+  "width": 640,
+  "height": 360,
+  "pace": true,
+  "frame_log": false,
+  "slow_frame_ms": 200
+}

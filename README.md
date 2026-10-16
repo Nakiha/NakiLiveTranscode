@@ -19,6 +19,10 @@ bash scripts/build-service.sh
 
 JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 libcurl。服务默认监听 `127.0.0.1:8090`。当前无音频、无在线规格切换；“端到端”指标指服务收到解封装包到转码包写出，不含采集端和播放器。
 
+默认每 10 秒输出状态 JSONL，逐帧明细按需开启。累计/窗口时延覆盖全部成功输出帧，包含分位数上界和 I 帧独立统计；独立日志线程使用有界队列，并轮转追踪文件。TCP/UDP socket 收发另有原子计数观测，不等同逐帧网络端到端时延。详见 [运维与观测](docs/operations.md)。
+
+容器运行：`docker compose up -d --build transcode`，见 [Docker 部署](docs/docker.md)。
+
 ## 目录
 
 | 路径 | 用途 |
@@ -39,7 +43,7 @@ git clone --recurse-submodules https://github.com/Nakiha/NakiLiveTranscode.git
 cd NakiLiveTranscode
 ```
 
-FFmpeg 固定在 `382492970c62d0c77ce0110d731d5ad78973b2b4`，来自 [Nakiha/FFmpeg](https://github.com/Nakiha/FFmpeg/tree/live/n7.0.3-async-early-output)。不要使用 `git submodule update --remote` 无意升级已测版本。
+FFmpeg 固定在 `cbf2341520725a4f8b217052f864aa7dd3028a8d`（异步解码 API 2 + TCP/UDP 观测 API 1），来自 [Nakiha/FFmpeg](https://github.com/Nakiha/FFmpeg/tree/live/n7.0.3-async-early-output)。不要使用 `git submodule update --remote` 无意升级已测版本。
 
 ## 原解码专项验证构建
 

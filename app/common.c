@@ -36,33 +36,57 @@ void json_int(yyjson_mut_doc *doc, const char *name, int64_t value) {
 void json_str(yyjson_mut_doc *doc, const char *name, const char *value) {
     if (doc) yyjson_mut_obj_add_strcpy(doc, yyjson_mut_doc_get_root(doc), name, value);
 }
-int log_json(FILE *file, yyjson_mut_doc *doc) {
-    if (!doc) return -1;
-    size_t len;
-    char *text = yyjson_mut_write(doc, 0, &len);
-    yyjson_mut_doc_free(doc);
-    if (!text) return -1;
-    flockfile(file);
-    int ret = fwrite(text, 1, len, file) == len && fputc('\n', file) != EOF && fflush(file) == 0 ? 0 : -1;
-    funlockfile(file);
-    free(text);
-    return ret;
-}
-void metric_add(Metric *metric, double ms) {
+void metric_add(Metric *metric, double ms, double slow_ms) {
     metric->count++; metric->sum_ms += ms;
     if (ms > metric->max_ms) metric->max_ms = ms;
+    if(ms>=slow_ms) metric->slow_count++;
+    int bin=ms<200 ? (int)ms : ms<1000 ? 200+(int)((ms-200)/20) : ms<16000 ? 240+(int)((ms-1000)/1000) : 255;
+    if(bin<0)bin=0;
+    metric->bins[bin]++;
 }
-static void add_metric(yyjson_mut_doc *doc, const char *key, const Metric *metric) {
+static double percentile(const Metric *metric, unsigned percent) {
+    if(!metric->count)return 0;
+    uint64_t rank=(metric->count*percent+99)/100, count=0;
+    for(int i=0;i<256;i++) {
+        count+=metric->bins[i];
+        if(count>=rank) return i<200 ? i+1 : i<240 ? 200+(i-199)*20 : i<255 ? 1000+(i-239)*1000 : NAN;
+    }
+    return NAN;
+}
+static yyjson_mut_val *metric_json(yyjson_mut_doc *doc, const Metric *metric) {
     yyjson_mut_val *obj = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_uint(doc, obj, "count", metric->count);
     yyjson_mut_obj_add_real(doc, obj, "mean_ms", metric->count ? metric->sum_ms / metric->count : 0);
     yyjson_mut_obj_add_real(doc, obj, "max_ms", metric->max_ms);
-    yyjson_mut_obj_add_val(doc, yyjson_mut_doc_get_root(doc), key, obj);
+    const char *names[]={"p50_upper_ms","p95_upper_ms","p99_upper_ms"};
+    const unsigned values[]={50,95,99};
+    for(int i=0;i<3;i++) {
+        double value=percentile(metric,values[i]);
+        if(isfinite(value)) yyjson_mut_obj_add_real(doc,obj,names[i],value);
+        else yyjson_mut_obj_add_null(doc,obj,names[i]);
+    }
+    yyjson_mut_obj_add_uint(doc,obj,"overflow_16s",metric->bins[255]);
+    yyjson_mut_obj_add_uint(doc,obj,"slow_count",metric->slow_count);
+    return obj;
 }
-yyjson_mut_doc *job_snapshot(Job *job) {
+static void add_latencies(yyjson_mut_doc *doc, yyjson_mut_val *obj, const Latencies *m) {
+#define ADD(name) yyjson_mut_obj_add_val(doc,obj,#name,metric_json(doc,&m->name))
+    ADD(demux_read); ADD(input_queue); ADD(decode); ADD(setup); ADD(filter); ADD(encode); ADD(mux);
+    ADD(ingress_to_mux); ADD(scheduled_to_mux); ADD(interleave_call); ADD(avio_flush);
+#undef ADD
+}
+static yyjson_mut_val *group_json(yyjson_mut_doc *doc,const FrameGroups *g) {
+    yyjson_mut_val *obj=yyjson_mut_obj(doc);
+#define ADD(name) yyjson_mut_obj_add_val(doc,obj,#name,metric_json(doc,&g->name))
+    ADD(i_frame); ADD(first_i); ADD(recurring_i); ADD(p_frame); ADD(b_frame); ADD(decoded_key); ADD(output_key);
+#undef ADD
+    return obj;
+}
+static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     yyjson_mut_doc *doc = new_event("status", job);
     if (!doc) return NULL;
     pthread_mutex_lock(&job->mutex);
+    if(report && !final && job->ended_us) {pthread_mutex_unlock(&job->mutex); yyjson_mut_doc_free(doc); return NULL;}
     json_str(doc, "state", job->state);
     json_str(doc, "error", job->error);
     json_str(doc, "log_path", job->log_path);
@@ -72,11 +96,36 @@ yyjson_mut_doc *job_snapshot(Job *job) {
     json_int(doc, "packets_out", job->packets_out);
     json_int(doc, "bytes_out", job->bytes_out);
     json_num(doc, "elapsed_ms", ((job->ended_us ? job->ended_us : now_us()) - job->started_us) / 1000.0);
-    add_metric(doc, "decode", &job->decode);
-    add_metric(doc, "filter", &job->filter);
-    add_metric(doc, "encode", &job->encode);
-    add_metric(doc, "mux", &job->mux);
-    add_metric(doc, "ingress_to_mux", &job->ingress_to_mux);
+    json_int(doc,"frame_log",job->config.frame_log);
+    json_int(doc,"slow_frame_ms",job->config.slow_frame_ms);
+    int64_t current=now_us(), end=job->ended_us ? job->ended_us : current;
+    if(job->last_output_us) json_num(doc,"last_output_age_ms",(current-job->last_output_us)/1000.0);
+    else yyjson_mut_obj_add_null(doc,yyjson_mut_doc_get_root(doc),"last_output_age_ms");
+    if(job->last_i_output_us) json_num(doc,"last_i_output_age_ms",(current-job->last_i_output_us)/1000.0);
+    else yyjson_mut_obj_add_null(doc,yyjson_mut_doc_get_root(doc),"last_i_output_age_ms");
+    json_num(doc,"write_in_progress_ms",job->write_started_us ? (current-job->write_started_us)/1000.0 : 0);
+    json_str(doc,"write_phase",job->write_phase);
+    json_num(doc,"auto_stats_age_ms",job->auto_updated_us ? (current-job->auto_updated_us)/1000.0 : 0);
+    add_latencies(doc,yyjson_mut_doc_get_root(doc),&job->lifetime);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"frame_types",group_json(doc,&job->groups));
+    yyjson_mut_val *i_stages=yyjson_mut_obj(doc);
+    add_latencies(doc,i_stages,&job->i_lifetime);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"i_frame_stages",i_stages);
+    yyjson_mut_val *window=yyjson_mut_obj(doc);
+    double seconds=(end-job->window_start_us)/1000000.0;
+    yyjson_mut_obj_add_real(doc,window,"duration_s",seconds>0 ? seconds : 0);
+    yyjson_mut_obj_add_real(doc,window,"input_fps",seconds>0 ? (job->packets_in-job->window_start_input)/seconds : 0);
+    yyjson_mut_obj_add_real(doc,window,"output_fps",seconds>0 ? (job->packets_out-job->window_start_output)/seconds : 0);
+    add_latencies(doc,window,&job->window);
+    yyjson_mut_obj_add_val(doc,window,"frame_types",group_json(doc,&job->window_groups));
+    i_stages=yyjson_mut_obj(doc); add_latencies(doc,i_stages,&job->i_window);
+    yyjson_mut_obj_add_val(doc,window,"i_frame_stages",i_stages);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"window",window);
+    if(report) {
+        memset(&job->window,0,sizeof(job->window)); memset(&job->window_groups,0,sizeof(job->window_groups));
+        memset(&job->i_window,0,sizeof(job->i_window));
+        job->window_start_us=end; job->window_start_input=job->packets_in; job->window_start_output=job->packets_out;
+    }
     yyjson_mut_val *a = yyjson_mut_obj(doc);
     yyjson_mut_obj_add_int(doc, a, "target", job->auto_stats.target);
     yyjson_mut_obj_add_int(doc, a, "peak_target", job->auto_stats.peak_target);
@@ -90,15 +139,28 @@ yyjson_mut_doc *job_snapshot(Job *job) {
     yyjson_mut_obj_add_uint(doc, a, "decreases", job->auto_stats.decreases);
     yyjson_mut_obj_add_val(doc, yyjson_mut_doc_get_root(doc), "auto", a);
     pthread_mutex_unlock(&job->mutex);
+    LoggerStats stats; logger_get_stats(job->logger,&stats);
+    yyjson_mut_val *logging=yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_uint(doc,logging,"queued",stats.queued);
+    yyjson_mut_obj_add_uint(doc,logging,"capacity",stats.capacity);
+    yyjson_mut_obj_add_uint(doc,logging,"high_water",stats.high_water);
+    yyjson_mut_obj_add_uint(doc,logging,"dropped_frames",stats.dropped_frames);
+    yyjson_mut_obj_add_uint(doc,logging,"dropped_status",stats.dropped_status);
+    yyjson_mut_obj_add_uint(doc,logging,"io_errors",stats.io_errors);
+    yyjson_mut_obj_add_uint(doc,logging,"rotations",stats.rotations);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"logging",logging);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"network",network_stats_json(doc,job->network,report));
     return doc;
 }
+yyjson_mut_doc *job_snapshot(Job *job) {return snapshot(job,0,0);}
+yyjson_mut_doc *job_report(Job *job,int final) {return snapshot(job,1,final);}
 static int bad(char *error, size_t cap, const char *message) { snprintf(error, cap, "%s", message); return -1; }
 int config_parse(const char *body, size_t size, Config *out, char *error, size_t cap) {
     yyjson_doc *doc = yyjson_read(body, size, 0);
     if (!doc) return bad(error, cap, "Invalid JSON");
     yyjson_val *root = yyjson_doc_get_root(doc);
     Config c = {.bitrate=1500000, .max_threads=12, .min_threads=2, .budget_slots=12,
-                .queue_capacity=4, .encoder_threads=2, .fps=25};
+                .queue_capacity=4, .encoder_threads=2, .fps=25, .frame_log_every=1, .slow_frame_ms=200};
     strcpy(c.output_format, "mpegts");
     int ret = -1;
     if (!yyjson_is_obj(root)) { bad(error, cap, "Expected a JSON object"); goto end; }
@@ -121,9 +183,10 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
                 strlen(yyjson_get_str(val)) != yyjson_get_len(val)) { bad(error,cap,"Invalid string field"); goto end; }
             strcpy(dest, yyjson_get_str(val)); continue;
         }
-        if (!strcmp(name,"pace")) {
-            if (!yyjson_is_bool(val)) { bad(error,cap,"pace must be boolean"); goto end; }
-            c.pace=yyjson_get_bool(val); continue;
+        if (!strcmp(name,"pace") || !strcmp(name,"frame_log")) {
+            if (!yyjson_is_bool(val)) { bad(error,cap,"Expected boolean"); goto end; }
+            if(!strcmp(name,"pace"))c.pace=yyjson_get_bool(val); else c.frame_log=yyjson_get_bool(val);
+            continue;
         }
         int *field = NULL, min=0, max=0;
         if (!strcmp(name,"width")) {field=&c.width; max=8192;}
@@ -135,6 +198,8 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         else if (!strcmp(name,"queue_capacity")) {field=&c.queue_capacity; min=1; max=64;}
         else if (!strcmp(name,"encoder_threads")) {field=&c.encoder_threads; min=1; max=16;}
         else if (!strcmp(name,"fps")) {field=&c.fps; min=1; max=240;}
+        else if (!strcmp(name,"frame_log_every")) {field=&c.frame_log_every; min=1; max=1000000;}
+        else if (!strcmp(name,"slow_frame_ms")) {field=&c.slow_frame_ms; min=1; max=600000;}
         else { bad(error,cap,"Unknown configuration key"); goto end; }
         if (!yyjson_is_int(val) || yyjson_get_sint(val)<min || yyjson_get_sint(val)>max) {bad(error,cap,"Integer out of range"); goto end;}
         *field=(int)yyjson_get_sint(val);

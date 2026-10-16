@@ -11,5 +11,7 @@
   "queue_capacity": 4,
   "encoder_threads": 2,
   "fps": 25,
-  "pace": true
+  "pace": true,
+  "frame_log": false,
+  "slow_frame_ms": 200
 }

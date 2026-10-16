@@ -10,5 +10,7 @@
   "budget_slots": 12,
   "queue_capacity": 4,
   "encoder_threads": 2,
-  "pace": false
+  "pace": false,
+  "frame_log": false,
+  "slow_frame_ms": 200
 }
