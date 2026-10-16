@@ -122,3 +122,25 @@ prepare 成功后通过有界消息发布 immutable layer set，媒体 owner 在
 第一版在 gate ready 后再打开直播输入和推流输出，避免等水印期间积攒压缩包/原始帧、推流端空等超时；request-to-first-frame 明确包含整个 asset wait。以后若要与输入打开/探测并行，必须另设计缓存上限与等待结束后的 keyframe/catch-up 策略，不能用无界缓存来缩短表面启动时间。
 
 运行中更新默认 keep_previous；没有旧资源的新增可选 layer 在新资源 ready 后才启用，期间视频继续。若客户要求“更新请求到达立即遮挡/停画，直到新图 ready”，那是另外的业务连续性策略，需单独配置并评估接收端超时，不能隐式套用到所有热更新。
+
+## 一入多出与缩放分支并行
+
+建议未来 JobSpec 用稳定 output/rendition id 的列表，视频 processing/encoder 归属于 rendition，交付 URL/封装归属于 destination。同分辨率、处理链、码率、编码/GOP 设置完全一致的多个推流目标可以共享编码，再按引用分发压缩包到各自 mux；不同规格/水印的 rendition 各自编码。不能只按尺寸相同就共享编码器，需要完整 effective spec 匹配且编码头/封装要求兼容。
+
+对真正多规格输出，先实现一进程内应用级 fan-out：demux 一次、decode 一次，公共处理后向每路有界 AVFrame 队列发独立引用，各路 owner 各自驱动 buffersrc→filter graph→encoder→live mux→I/O。同一 graph/codec/mux context 不能并发驱动。参考 [AVFrame 引用 API](https://ffmpeg.org/doxygen/trunk/group__lavu__frame.html) 和 [buffersrc 引用语义](https://ffmpeg.org/doxygen/trunk/group__lavfi__buffersrc.html)。
+
+当前 n9 的 vf_scale 已将 graph/filter 线程预算传给 SwsContext，并调用 sws_scale_frame；它的内部多线程与跨 split 分支并行是两件事。单张图的调度不应当作应用级分支并行保证。每路独立 graph/owner 可以复用原始 scale，通过应用并发运行分支，无须先侵入式改 async scale。先从 2～4 路固定 owner 线程开始；如果上百分支，改为有界调度池且同一分支最多一个计算任务在途，另隔离可能阻塞的输出 I/O，避免一个网络写占死共享计算池。
+
+解码帧由只读 AVBuffer 引用共享，每路独立 AVFrame 头和追踪 id。滤镜/编码器要写像素时必须遵守 make_writable/COW；不能共享可写 SwsContext 或 AVFrame 头。CPU 帧不通过现有 socket IPC 传输。当前 worker 进程隔离可保留为“一路输入会话”，内部各 rendition 线程；某路算法原生崩溃仍会影响同 worker 全部 rendition，如果未来要求进一步崩溃隔离，需另设计跨进程帧池和所有权，不能直接传 AVFrame 指针。
+
+每路同时限制队列帧数/字节/媒体时间及最大滞后，pending/encoder lookahead、滤镜缓存也计入总在途内存。1080p YUV420P10LE 一帧约 5.9MiB；仅四个队列项就约 23.7MiB，即使引用共享，慢分支也会延长原帧存活期。decode、每路 scale/filter、encoder 的内部线程共享总 CPU 预算，不能每路自动开满核；当 CPU 或内存带宽已经饱和，拆线程不能消除实际总计算量。
+
+慢分支必须显式选择：
+
+- `block_all`：所有输出逐帧完整，任一路持续跟不上最终反压输入，不能同时承诺其他路永不受影响。
+- `drop_raw_frames`：只对允许降级的分支，在入编码器前跳过过期原始帧；计数并保留单调 PTS，重新验证 GOP 和短组。不随意丢压缩参考包。强制满帧率/完整 3B 排列的分支未必允许此策略。
+- `fail_branch`：队列或滞后超限后失败这一输出，释放引用，其余继续；失败传播、客户端状态与后续重试规则要明确。
+
+音频压缩包也按引用 fan-out，由各自 mux owner 根据自己的参数、时间基和 DTS 水位追加晚音轨；某路拒绝编码或写出失败不能持锁阻塞所有分支。输出 GOP 若需 ABR 对齐，要从共同源 PTS 锚点决定目标关键帧，而不是各路第一张实际接收帧重新锚定；当前单路 VVenC wrapper 没有多路共同锚点接口，需另外实现并验证。共用水印资源缓存，但每路按自己的坐标/尺寸准备变体；required 水印起播门槛需明确是全任务 gate，还是各路独立起播。
+
+多输出日志增加 rendition_id/destination_id，保留同一个 input_sequence 及每路 frame_id；首帧、I/key、队列等待、filter/scale/encode/mux/I/O 和丢帧均按分支统计。公共解码耗时只计算一次，端到端按各路实际写出结束。回归必须验证 2/4 路真实并行区间、像素正确性、PTS/GOP、EOF，以及一条输出阻塞/慢速时其他路行为符合策略；不能只看到多个线程存在就宣称并行或吞吐提升。
