@@ -51,7 +51,7 @@ git clone --recurse-submodules https://github.com/Nakiha/NakiLiveTranscode.git
 cd NakiLiveTranscode
 ```
 
-FFmpeg 子模块固定到 [Nakiha/FFmpeg 的 n9.0.2 live 分支](https://github.com/Nakiha/FFmpeg/tree/live/n9.0.2-async-early-output) 的确切提交，以上游 `n9.0.2`（`946fcce07b6dcd0331c8cc609192aeff5e1924f8`）为基线。使用 `git submodule status` 查看当前 pin；不要使用 `git submodule update --remote` 无意升级已测版本。原 `cbf2341520725a4f8b217052f864aa7dd3028a8d` 仍保存在 n7.0.3 live 分支。
+FFmpeg 子模块固定到 [Nakiha/FFmpeg 的 n9.0.2 live 分支](https://github.com/Nakiha/FFmpeg/tree/live/n9.0.2-async-early-output) 的 `e21f4d609b4f79d2b61a567247a8989b529aa63e`，以上游 `n9.0.2`（`946fcce07b6dcd0331c8cc609192aeff5e1924f8`）为基线。不要使用 `git submodule update --remote` 无意升级已测版本。原 `cbf2341520725a4f8b217052f864aa7dd3028a8d` 仍保存在 n7.0.3 live 分支。
 
 ## 原解码专项验证构建
 
