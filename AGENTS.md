@@ -1,6 +1,7 @@
 # Project conventions
 
-- The application is an experimental Linux-only, video-only single-stream C service. Do not describe it as production-ready or claim audio/dynamic-format support.
+- The application is an experimental Linux-only C service with one H.264/HEVC video transcode and bounded AAC/MP3 audio passthrough. FLV/MPEG-TS support append-only late audio; MP4 remains video-only. Do not describe it as production-ready or claim audio transcoding, arbitrary audio codecs, dynamic video formats or stream removal.
+- The sole pipeline/mux owner registers output audio and writes packets. The demux reader snapshots audio parameters into bounded items; never read mutable input stream arrays from the mux thread. Live interleaving uses the fork's hard packet/byte limits and monotonic wall deadlines with periodic polls, exclusively followed by av_write_frame; do not mix its queue with av_interleaved_write_frame. Video latency is reported after actual write/flush, including queue residence. Late audio behind the output watermark is explicitly dropped and counted, never allowed to rewind the output timeline.
 - Build the service with `scripts/build-service.sh` in Linux/WSL. JSON is yyjson, HTTP server is libevent evhttp, and the CLI client uses libcurl. Preserve this separation from FFmpeg media protocols.
 - Trace latency using reference-counted opaque_ref through decode/filter and a bounded PTS ledger through encode. Missing mappings must fail explicitly. Never call service ingress-to-mux measurements source-to-screen latency.
 - Latency metrics sample every completed frame; only trace detail is sampled. Preserve separate input I/first I/recurring I and output-key classifications, histogram bounds, and nonoverlapping reporting windows.

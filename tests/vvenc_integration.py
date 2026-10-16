@@ -45,7 +45,7 @@ def run():
                         {"encoder": "libvvenc", "encoder_preset": "fast|medium"},
                         {"encoder": "libvvenc", "encoder_profile": "invalid"},
                         {"encoder": "libx264", "encoder_profile": "live_3b_2s"},
-                        {"encoder": "libvvenc", "output_format": "flv"}):
+                        {"output": "rtmp://localhost/live/test", "output_format": "mpegts"}):
             service.http(data={"input": "unused", "output": "unused", **invalid}, code=400)
         # Both decoder bit depths, resize and no resize, MPEG-TS and MP4, and short EOF.
         cases = [("h264", 8, "25", 175, "mpegts", True),

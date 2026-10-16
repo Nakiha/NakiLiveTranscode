@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "live.h"
+#include <libavformat/live_mux.h>
 #include "ipc.h"
 #include "crash.h"
 #include <errno.h>
@@ -345,7 +346,9 @@ static void handle_request(struct evhttp_request *req,void *opaque) {
     const char *uri=evhttp_request_get_uri(req); enum evhttp_cmd_type method=evhttp_request_get_command(req);
     if(!strcmp(uri,"/health") && method==EVHTTP_REQ_GET) {
         yyjson_mut_doc *doc=new_event("health",NULL);
-        json_str(doc,"status",s->shutting_down ? "stopping" : "ok"); json_str(doc,"version","0.7.0");
+        json_str(doc,"status",s->shutting_down ? "stopping" : "ok"); json_str(doc,"version","0.8.0");
+        json_int(doc,"srt_enabled",avio_find_protocol_name("srt://127.0.0.1:1")!=NULL);
+        json_int(doc,"live_mux_api",AVFORMAT_LIVE_MUX_VERSION);
         json_int(doc,"vvenc_enabled",avcodec_find_encoder_by_name("libvvenc")!=NULL);
         json_int(doc,"crash_collector_pid",crash_collector_pid());
         json_int(doc,"crash_capture_available",crash_client_enabled());

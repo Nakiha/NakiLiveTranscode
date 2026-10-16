@@ -1,7 +1,7 @@
 ARG FFMPEG_STAGE=ffmpeg-local
 FROM ubuntu:24.04 AS toolchain
 RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev \
+    build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev libevent-dev libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends libunwind-dev python3 \
     && rm -rf /var/lib/apt/lists/*
@@ -25,7 +25,7 @@ COPY scripts/build-service.sh scripts/archive-symbols.py scripts/
 COPY CMakeLists.txt ./
 COPY app/ app/
 COPY third_party/yyjson/src/ third_party/yyjson/src/
-COPY tests/logger_test.c tests/network_probe.c tests/crash_fixture.c tests/crash_unwind_stall.c tests/
+COPY tests/logger_test.c tests/network_probe.c tests/crash_fixture.c tests/crash_unwind_stall.c tests/live_mux_test.c tests/live_transport_fixture.c tests/
 RUN NAKI_SKIP_FFMPEG=1 bash scripts/build-service.sh
 ARG SOURCE_REVISION=unknown
 ARG DEPENDENCY_KEY=local
@@ -50,7 +50,7 @@ COPY --from=build /symbols/ /
 
 FROM ubuntu:24.04 AS runtime
 RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-    libevent-2.1-7t64 libcurl4t64 libx264-164 libunwind8 libstdc++6 ca-certificates python3 \
+    libevent-2.1-7t64 libcurl4t64 libx264-164 libsrt1.5-openssl libunwind8 libstdc++6 ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 naki && useradd --uid 10001 --gid 10001 --no-create-home naki \
     && mkdir -p /data /var/log/naki && chown 10001:10001 /data /var/log/naki

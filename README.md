@@ -4,12 +4,12 @@
 
 当前底座为 **FFmpeg n9.0.2 + 异步解码 API 2 / 网络观测 API 1**；保留原 7.0.3 分支与历史验证结果。历史子模块目录名 `ffmpeg-7.0.3` 暂不改名。源码修改与本地构建见 [FFmpeg 开发](docs/ffmpeg-development.md)。
 
-**当前状态：Linux 单路、纯视频 C 实验服务。** 已实现 H.264/HEVC 输入 → 异步自动调度解码 → 8/10-bit filter → H.264 或 VVC 编码 → 输出，以及 HTTP 控制和 JSONL 指标。VVC 请求示例见 [examples/vvc.json](examples/vvc.json)，编码器开发与时延边界见 [VVenC 接入](docs/vvenc.md)。完整用法见 [服务说明](docs/service.md)。
+**当前状态：Linux 单路 C 实验服务，版本 0.8.0。** H.264/HEVC 输入 → 异步自动调度解码 → 8/10-bit filter → H.264 或 VVC 输出。支持 RTMP/Enhanced FLV 和 SRT/MPEG-TS；AAC/MP3 音轨可以晚加入、原连接继续输出。音频为透传，不做转码；MP4 保持纯视频。见 [直播封装与动态音轨](docs/live-mux.md)、[服务说明](docs/service.md)、[OpenAPI](docs/openapi.json)。后续处理链的结构化请求草案见 [管线设计](docs/pipeline-design.md)，尚未实现。
 
 ## 运行服务（Linux / WSL）
 
 ```sh
-sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev libunwind-dev python3
+sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev libevent-dev libcurl4-openssl-dev libunwind-dev python3
 git submodule update --init --recursive
 bash scripts/build-service.sh
 ./out/bin/naki-live
@@ -19,7 +19,7 @@ bash scripts/build-service.sh
 ./out/bin/naki-live-ctl stop
 ```
 
-JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 libcurl。服务默认监听 `127.0.0.1:8090`。当前无音频、无在线规格切换；“端到端”指标指服务收到解封装包到转码包写出，不含采集端和播放器。
+JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 libcurl。服务默认监听 `127.0.0.1:8090`。当前无音频转码、无在线视频规格切换；“端到端”指标指服务收到解封装包到转码包写出，不含采集端和播放器。交织默认最多排队 50ms，媒体线程每 10ms 检查；网络写入另有 10 秒中断期限。
 
 默认每 10 秒输出状态 JSONL，逐帧明细按需开启。累计/窗口时延覆盖全部成功输出帧，包含分位数上界和 I 帧独立统计；独立日志线程使用有界队列，并轮转追踪文件。TCP/UDP socket 收发另有原子计数观测，不等同逐帧网络端到端时延。详见 [运维与观测](docs/operations.md)。
 
@@ -54,7 +54,7 @@ git clone --recurse-submodules https://github.com/Nakiha/NakiLiveTranscode.git
 cd NakiLiveTranscode
 ```
 
-FFmpeg 子模块固定到 [Nakiha/FFmpeg 的 n9.0.2 live 分支](https://github.com/Nakiha/FFmpeg/tree/live/n9.0.2-async-early-output) 的 `8eabad8e5820b58ec303772f777c034eb7bdb14c`，以上游 `n9.0.2`（`946fcce07b6dcd0331c8cc609192aeff5e1924f8`）为基线。不要使用 `git submodule update --remote` 无意升级已测版本。原 `cbf2341520725a4f8b217052f864aa7dd3028a8d` 仍保存在 n7.0.3 live 分支。
+FFmpeg 子模块固定到 [Nakiha/FFmpeg 的 n9.0.2 live 分支](https://github.com/Nakiha/FFmpeg/tree/live/n9.0.2-async-early-output)，精确提交以本仓库 gitlink 为准，以上游 `n9.0.2`（`946fcce07b6dcd0331c8cc609192aeff5e1924f8`）为基线。不要使用 `git submodule update --remote` 无意升级已测版本。原 `cbf2341520725a4f8b217052f864aa7dd3028a8d` 仍保存在 n7.0.3 live 分支。
 
 ## 原解码专项验证构建
 

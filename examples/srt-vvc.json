@@ -1,0 +1,9 @@
+{
+  "input": "srt://0.0.0.0:15000?mode=listener&latency=50000",
+  "output": "srt://receiver.example:15000?mode=caller&latency=50000",
+  "output_format": "mpegts",
+  "encoder": "libvvenc",
+  "encoder_profile": "live_3b_2s",
+  "audio_copy": true,
+  "mux_wait_ms": 50
+}

@@ -14,7 +14,7 @@ Ubuntu / WSL：
 
 ```sh
 sudo apt-get update
-sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libevent-dev libcurl4-openssl-dev libunwind-dev
+sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev libevent-dev libcurl4-openssl-dev libunwind-dev
 git submodule update --init --recursive
 bash scripts/build-service.sh
 ```
@@ -48,11 +48,15 @@ bash scripts/build-service.sh
 
 参数示例见 `examples/`。`input`、`output` 必填；相对路径以服务进程的工作目录为准。本地输出使用排他创建，已有文件不会被覆盖；失败或停止时可能保留部分输出。输出父目录需预先存在。
 
+机器可读接口规范见 [openapi.json](openapi.json)，包括全部当前路径、请求参数、范围和状态码。它是仓库静态文档，服务尚不提供 `/openapi.json` 或 Swagger UI。未来的有序滤镜、ROI 分析与颜色处理见 [处理链设计草案](pipeline-design.md)；草案字段当前会被拒绝。
+
 `width`、`height` 同时为正偶数时缩放；同时省略则保持输入尺寸，但转换为 YUV420P。`bitrate` 默认 1.5 Mbps；`encoder_threads` 默认 2。`max_threads` 默认 12，自动模式 `min_threads` 默认 2，`budget_slots` 默认 12；预算只约束解码任务，不含 filter 和编码器。`queue_capacity` 默认 4，此外有 8 个包的输入队列。`fps` 是缺失帧率时的回退值；不做帧率转换。`pace=true` 仅用于本地文件按 DTS 实时回放。
 
-本版只处理第一条可用视频流：原生 H.264/HEVC 软解 → null/scale + format filter → 编码 → 输出。默认 `encoder=libx264`，`encoder_preset=veryfast`，YUV420P、zerolatency、无输出 B 帧，支持 MPEG-TS / MP4 / FLV。选择 `encoder=libvvenc` 时默认 `encoder_preset=faster`、`encoder_profile=live_3b_2s`，强制 YUV420P10LE，支持 MPEG-TS / MP4；完整组为 I BBB P…，关键帧按首帧 PTS 锚定的 2 秒时间网格调度，边界及 EOF 允许 IP / IBP / IBBP。保留单遍码控前瞻与必要重排，单调变帧率及向前时间戳缺口不再因非 CFR 被拒绝；回退或重复 PTS 显式失败。其 preset 可用 faster/fast/medium/slow/slower，非法组合返回 400。详见 [VVenC](vvenc.md)。音频、字幕不处理。配置不接受未知或重复字段；请求体上限 16 KiB。
+本版转码第一条可用视频流：原生 H.264/HEVC 软解 → null/scale + format filter → 编码 → 输出。默认 `encoder=libx264`，`encoder_preset=veryfast`，YUV420P、zerolatency、无输出 B 帧，支持 MPEG-TS / MP4 / FLV。选择 `encoder=libvvenc` 时默认 `encoder_preset=faster`、`encoder_profile=live_3b_2s`，强制 YUV420P10LE，支持 MPEG-TS / MP4 / Enhanced FLV；完整组为 I BBB P…，关键帧按首帧 PTS 锚定的 2 秒时间网格调度，边界及 EOF 允许 IP / IBP / IBBP。保留单遍码控前瞻与必要重排，单调变帧率及向前时间戳缺口不再因非 CFR 被拒绝；回退或重复 PTS 显式失败。其 preset 可用 faster/fast/medium/slow/slower，非法组合返回 400。详见 [VVenC](vvenc.md)。配置不接受未知或重复字段；请求体上限 16 KiB。
 
-当前构建包含 file、UDP、TCP、RTP、HTTP、RTMP 和 RTSP 相关能力，不包含 HTTPS、SRT 或硬件编解码。协议编译可用不等于均已实流验收，检查下方验证记录。输入尺寸或像素格式变化时明确失败，暂不进行在线 filter/编码器重建。
+`audio_copy` 默认为 true：FLV/MPEG-TS 透传 AAC/MP3，晚出现的音轨直接注册到已打开的输出；MP4 仍只输出视频。上限 16 条输入音轨状态，非支持编码及参数变化拒绝该音轨并计数，视频继续。字幕和数据流不输出。过期/重复/无法恢复时间戳的音频显式丢弃并计数，不改写视频时间轴。`audio_copy=false` 禁用音频。`mux_wait_ms` 默认 50，范围 1..1000，控制有界墙钟交织排队，详见 [动态音轨](live-mux.md)。
+
+当前构建包含 file、UDP、TCP、RTP、HTTP、RTMP、RTSP、SRT 相关能力，不包含 HTTPS 或硬件编解码。RTMP 输出必须选择 flv，SRT 输出必须选择 mpegts；两者的 VVC 实流及晚音轨已纳入测试，其余协议的编译可用不等于均已实流验收。输入尺寸或像素格式变化时明确失败，暂不进行在线 filter/编码器重建。
 
 ## 进程、线程与停止
 
@@ -76,15 +80,18 @@ worker 默认每 10 秒生成 status，经其日志线程和非阻塞 IPC 交给
 | `setup_or_dispatch_ms` | 解码帧返回 → 送 filter；首帧包含 filter/编码器/输出初始化 |
 | `filter_ms` | 送 filter → 取出对应滤镜结果 |
 | `encode_ms` | 送编码器 → 对应输出包返回，包含计算和编码器排队 |
-| `mux_ms` | 封装写入及 avio_flush 调用 |
+| `mux_ms` | 编码包返回 → 交织排队 → 封装写入及 avio_flush 完成 |
+| `interleave_queue_ms` | 编码包返回 → 开始实际封装写入，逐帧日志字段 |
 | `ingress_to_mux_ms` | 服务收到解封装包 → 对应转码包完成输出写入 |
 | `scheduled_to_mux_ms` | 文件回放计划到达时间 → 写出，只有 pace=true 时出现，暴露反压积压 |
 
 `ingress_to_mux_ms` 是**服务内部端到端时延**，不是源端采集到播放器显示时延。它不含收到包之前的网络/探测缓冲，也不代表接收端已收到或显示；写文件完成不等于 fsync 持久化。`decoder_ready.startup_ms` 从完整 HTTP 请求进入业务回调开始，截止 async decoder 初始化；完整启动耗时看 `startup.request_to_first_video_mux_ms` / `request_to_first_key_mux_ms` 和无条件输出的 `first_frame` 事件。它们包含校验、进程等待/创建、IPC、输入打开探测和首帧各阶段，仍不包含 HTTP 上传之前/期间或接收端显示。摘要对已经输出的帧统计；失败或取消时未输出帧不进入耗时均值。
 
-时延统计覆盖每个成功输出帧，不受逐帧明细采样或日志队列丢弃影响。日志队列满时丢弃日志并计数，不阻塞媒体线程等待写盘。`bytes_out` 是 AVIO 累计写出字节，`encoded_bytes` 是单包 H.264 载荷大小。网络层另有 TCP/UDP socket API 观测，不与这些视频帧指标混用。
+时延统计覆盖每个成功输出视频帧，不受逐帧明细采样或日志队列丢弃影响。日志队列满时丢弃日志并计数，不阻塞媒体线程等待写盘。`bytes_out` 是所有音视频的 AVIO 累计写出字节，`encoded_bytes` 是单包视频编码载荷大小；`packets_in/out` 保持视频口径，音频另有 `audio_packets_out`。`interleave_call_ms` 包含交织排队和 mux/PES 写入，`avio_flush_ms` 单列。TCP/UDP socket API 观测不与逐帧指标混用，也不覆盖 libsrt 内部 UDP socket。
 
 ## 验证
+
+`python3 tests/live_mux_integration.py` 验证真实 RTMP、SRT 双向连接、VVC 独立解码、两条晚音轨、音频停顿恢复、未知晚数据流、交织墙钟/容量上限、MP3 透传、EOF 排空及关闭音频。见 [本轮记录](validation-live-mux-20261017.md)。
 
 `python3 tests/service_integration.py` 自动启动独立服务、生成合成输入并检查文件完整转码、HTTP 错误处理、停止、坏输入、已有输出保护，以及 UDP 输入。每次使用新的 `out/` 子目录，不覆盖冻结基线。测试需要系统 `ffmpeg`/`ffprobe`（仅用于生成和独立检查媒体）以及 Python 3；运行前先构建服务。
 

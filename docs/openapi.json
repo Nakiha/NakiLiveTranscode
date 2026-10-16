@@ -1,0 +1,109 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NakiLiveTranscode experimental control API",
+    "version": "0.8.0",
+    "description": "Current implemented API only. Linux, one active job. No authentication. This static document is not served by the application. URI matching is exact (query strings and trailing slashes are not supported). Media errors after acceptance appear in job state=failed, not in a later HTTP response. Unknown and duplicate configuration keys are rejected. Request limit 16384 bytes, header limit 8192 bytes, HTTP timeout 10s. Libevent framing/limit errors and allocation failures can return HTML instead of the application JSON error envelope. Future pipeline-design.md fields are not accepted."
+  },
+  "servers": [{"url": "http://127.0.0.1:8090"}],
+  "security": [],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Controller health, build capabilities and worker pool",
+        "responses": {"200": {"description": "Controller is reachable; inspect status and pool separately from media progress.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Health"}}}}, "default": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/v1/job": {
+      "get": {
+        "operationId": "getJob",
+        "summary": "Current job or last job; idle before any job",
+        "responses": {"200": {"$ref": "#/components/responses/Status"}, "default": {"$ref": "#/components/responses/Error"}}
+      },
+      "post": {
+        "operationId": "startJob",
+        "summary": "Start the single media job asynchronously",
+        "parameters": [{"in": "header", "name": "X-Request-ID", "required": false, "schema": {"type": "string", "maxLength": 128}, "description": "Correlation only, not an idempotency key. Missing or overlong values fall back to job_id; limit is 128 bytes."}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobConfig"}, "examples": {
+          "srtVvc": {"value": {"input": "srt://0.0.0.0:15000?mode=listener&latency=50000", "output": "srt://receiver.example:15000?mode=caller&latency=50000", "output_format": "mpegts", "encoder": "libvvenc", "audio_copy": true, "mux_wait_ms": 50}},
+          "rtmpVvc": {"value": {"input": "rtmp://source.example/live/input", "output": "rtmp://receiver.example/live/output", "output_format": "flv", "encoder": "libvvenc"}}
+        }}}},
+        "responses": {
+          "202": {"$ref": "#/components/responses/Status"},
+          "400": {"description": "Invalid JSON, fields, ranges or cross-field combination.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "409": {"description": "A job is already active.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "413": {"description": "Empty body or request body exceeds 16384 bytes. Libevent may return text/html."},
+          "503": {"description": "Shutting down, recovering workers, recovery conflict or no available worker. Retry after recovery; no Retry-After header is promised.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}},
+          "default": {"$ref": "#/components/responses/Error"}
+        }
+      }
+    },
+    "/v1/job/stop": {
+      "post": {
+        "operationId": "stopJob",
+        "summary": "Request cancellation; poll until stopped or failed",
+        "description": "Body is ignored; send {} or an empty body. Accepted cancellation can omit in-flight reordered frames. No running job returns 409, not an idempotent success.",
+        "responses": {"202": {"$ref": "#/components/responses/Status"}, "409": {"$ref": "#/components/responses/Error"}, "default": {"$ref": "#/components/responses/Error"}}
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Status": {"description": "Asynchronous job snapshot. Worker fields can be absent until the first snapshot. Retains last job after completion. No-store.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobStatus"}}}},
+      "Error": {"description": "Application JSON error (400/404/405/409/413/500/503 as applicable). Unknown URI=404, wrong method on an exact known URI=405. Libevent or allocation failures may return HTML.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}, "text/html": {"schema": {"type": "string"}}}}
+    },
+    "schemas": {
+      "JobConfig": {
+        "type": "object", "additionalProperties": false, "required": ["input", "output"],
+        "description": "UTF-8 strings must fit C buffers in bytes, exclude NUL. At most 32 keys; duplicates rejected before schema validation. min_threads<=max_threads. width/height are both zero/omitted or both positive even values. RTMP output requires flv; SRT requires mpegts. pace=true requires a local input. Encoder preset/profile must match the selected encoder; defaults are conditional.",
+        "properties": {
+          "input": {"type": "string", "minLength": 1, "maxLength": 2047, "description": "Local path or enabled FFmpeg input URL; maximum 2047 bytes. Video H.264/HEVC only."},
+          "output": {"type": "string", "minLength": 1, "maxLength": 2047, "description": "New local path (exclusive create), or udp://, tcp://, rtmp://, srt://, http:// URL. Parent directory must exist; maximum 2047 bytes."},
+          "output_format": {"type": "string", "enum": ["mpegts", "mp4", "flv"], "default": "mpegts"},
+          "encoder": {"type": "string", "enum": ["libx264", "libvvenc"], "default": "libx264"},
+          "encoder_preset": {"type": "string", "enum": ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"], "description": "x264 defaults to veryfast; VVenC defaults to faster and only accepts faster/fast/medium/slow/slower."},
+          "encoder_profile": {"type": "string", "enum": ["default", "reference", "live_3b_2s", "live_3b_2s_no_mctf"], "description": "x264 only default. VVenC defaults to live_3b_2s, also accepts reference/live_3b_2s_no_mctf. Live profiles use a PTS-anchored 2s CRA grid, full 3B groups and shorter boundary/tail groups."},
+          "width": {"type": "integer", "minimum": 0, "maximum": 8192, "multipleOf": 2, "default": 0},
+          "height": {"type": "integer", "minimum": 0, "maximum": 8192, "multipleOf": 2, "default": 0},
+          "bitrate": {"type": "integer", "minimum": 10000, "maximum": 100000000, "default": 1500000, "description": "Video bits per second."},
+          "max_threads": {"type": "integer", "minimum": 2, "maximum": 64, "default": 12},
+          "min_threads": {"type": "integer", "minimum": 1, "maximum": 64, "default": 2},
+          "budget_slots": {"type": "integer", "minimum": 1, "maximum": 256, "default": 12, "description": "Adaptive decoder budget, not an overall CPU quota."},
+          "queue_capacity": {"type": "integer", "minimum": 1, "maximum": 64, "default": 4, "description": "Async decoder queue; independent from reader and mux queues."},
+          "encoder_threads": {"type": "integer", "minimum": 1, "maximum": 16, "default": 2},
+          "fps": {"type": "integer", "minimum": 1, "maximum": 240, "default": 25, "description": "Fallback nominal rate, not frame-rate conversion."},
+          "pace": {"type": "boolean", "default": false, "description": "Local input file DTS-paced replay."},
+          "frame_log": {"type": "boolean", "default": false},
+          "frame_log_every": {"type": "integer", "minimum": 1, "maximum": 1000000, "default": 1, "description": "Detail sampling only; metrics still count every written video frame. I/key/slow frames override sampling."},
+          "slow_frame_ms": {"type": "integer", "minimum": 1, "maximum": 600000, "default": 200},
+          "audio_copy": {"type": "boolean", "default": true, "description": "Bounded AAC/MP3 passthrough for FLV/TS; MP4 always video-only. No audio encoding."},
+          "mux_wait_ms": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50, "description": "FLV/TS monotonic wall interleaving wait; polled every 10ms. Excludes encode, scheduling stalls and blocking network I/O."}
+        }
+      },
+      "Error": {"type": "object", "required": ["event", "error"], "properties": {"event": {"const": "error"}, "error": {"type": "string"}, "unix_us": {"type": "integer"}, "monotonic_us": {"type": "integer"}, "process_id": {"type": "integer"}}},
+      "Health": {
+        "type": "object", "required": ["event", "status", "version", "pool"],
+        "properties": {"event": {"const": "health"}, "status": {"enum": ["ok", "stopping"]}, "version": {"type": "string"}, "srt_enabled": {"enum": [0, 1]}, "vvenc_enabled": {"enum": [0, 1]}, "live_mux_api": {"type": "integer"}, "async_api": {"type": "integer"}, "network_observer_api": {"type": "integer"}, "ffmpeg_version": {"type": "string"}, "execution_mode": {"const": "process_pool"}, "pool": {"$ref": "#/components/schemas/Pool"}},
+        "additionalProperties": true
+      },
+      "Metric": {"type": "object", "properties": {"count": {"type": "integer"}, "mean_ms": {"type": "number"}, "max_ms": {"type": "number"}, "p50_upper_ms": {"type": ["number", "null"]}, "p95_upper_ms": {"type": ["number", "null"]}, "p99_upper_ms": {"type": ["number", "null"]}, "overflow_16s": {"type": "integer"}, "slow_count": {"type": "integer"}}},
+      "Pool": {"type": "object", "properties": {"spare_target": {"type": "integer"}, "ready": {"type": "integer"}, "warming": {"type": "integer"}, "recovering": {"type": "integer"}, "error": {"type": "string"}, "workers": {"type": "array", "items": {"type": "object", "properties": {"pid": {"type": "integer"}, "state": {"enum": ["busy", "ready", "warming"]}}}}}},
+      "JobStatus": {
+        "type": "object", "required": ["event", "state", "supervisor", "pool"],
+        "description": "Extensible snapshot; see service.md, operations.md and live-mux.md for remaining telemetry. Non-required media fields are absent before the first worker snapshot. Latencies end at local mux/AVIO completion, not peer display.",
+        "properties": {
+          "event": {"const": "status"}, "state": {"enum": ["idle", "starting", "running", "stopping", "finishing", "completed", "stopped", "failed"]},
+          "job_id": {"type": "string"}, "request_id": {"type": "string"}, "error": {"type": "string"}, "log_path": {"type": "string"},
+          "packets_in": {"type": "integer", "description": "Video packets only."}, "packets_out": {"type": "integer", "description": "Successfully written video packets only."}, "frames_decoded": {"type": "integer"}, "frames_filtered": {"type": "integer"}, "bytes_out": {"type": "integer", "description": "All media AVIO bytes; not wire bytes."},
+          "audio_tracks": {"type": "integer"}, "audio_packets_out": {"type": "integer"}, "audio_dropped": {"type": "integer"}, "audio_unsupported": {"type": "integer"},
+          "mux_wait_ms": {"type": "integer"}, "mux_queued_packets": {"type": "integer"}, "mux_queued_bytes": {"type": "integer"}, "mux_high_water_packets": {"type": "integer"}, "mux_timeout_releases": {"type": "integer"}, "mux_pressure_releases": {"type": "integer"}, "mux_forced_releases": {"type": "integer"},
+          "write_phase": {"type": "string"}, "write_in_progress_ms": {"type": "number"}, "ingress_to_mux": {"$ref": "#/components/schemas/Metric"}, "mux": {"$ref": "#/components/schemas/Metric"},
+          "startup": {"type": "object", "description": "Checkpoints from complete HTTP handler entry; first-output fields null until written.", "additionalProperties": true},
+          "supervisor": {"type": "object", "properties": {"pid": {"type": "integer"}, "worker_pid": {"type": "integer"}, "active": {"type": "boolean"}, "recovered": {"type": "boolean"}, "snapshot_age_ms": {"type": ["number", "null"]}, "exit_status_known": {"type": "boolean"}, "exit_code": {"type": "integer"}, "exit_signal": {"type": "integer"}, "core_dumped": {"type": ["boolean", "null"]}}},
+          "pool": {"$ref": "#/components/schemas/Pool"}
+        }, "additionalProperties": true
+      }
+    }
+  }
+}

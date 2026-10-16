@@ -1,0 +1,9 @@
+{
+  "input": "rtmp://source.example/live/input",
+  "output": "rtmp://receiver.example/live/output",
+  "output_format": "flv",
+  "encoder": "libvvenc",
+  "encoder_profile": "live_3b_2s",
+  "audio_copy": true,
+  "mux_wait_ms": 50
+}

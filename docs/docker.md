@@ -34,6 +34,8 @@ docker compose exec transcode naki-live-ctl stop
 
 如果 cp 后文件所有权或权限不适合 UID 10001，需在宿主机/卷初始化时修正。改成 bind mount 时也要预先设置可写目录。容器内部 UDP 输入使用 `udp://0.0.0.0:15000`，不要绑定到容器回环地址后期望接收端口映射的数据。
 
+0.8.0 运行层包含 SRT。接收 SRT 可用 `srt://0.0.0.0:15000?mode=listener&latency=50000`，沿用现有 UDP 端口映射；主动 SRT 推出使用接收服务器可达地址并选择 `output_format=mpegts`。RTMP 拉流/推流使用外部服务器地址及 `output_format=flv`；容器内的 127.0.0.1 指容器自身。示例见 [直播链路](live-mux.md)。当前服务不是多客户端 RTMP 发布服务器。
+
 stdout 是每 10 秒汇总及生命周期 JSONL，由 Docker local 驱动轮转和压缩（20 MiB × 5，非阻塞缓存 4 MiB）。Docker 的缓存也可能丢日志，这部分不包含在应用 logging.dropped_* 中。Docker 内部日志文件不是可直接管理的 JSONL 追踪目录，不要由外部脚本改写。
 
 启用逐帧明细时，应用对 logs 卷中的追踪文件轮转；外部定期执行一次维护：

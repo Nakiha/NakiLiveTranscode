@@ -56,12 +56,14 @@ docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt --target symbols \
 
 当前基于 n9.0.2，历史目录名暂时保留。迁移和本地源码开发见 [FFmpeg 开发](ffmpeg-development.md)。已启用独立 pin 的 VVenC v1.14.0 和 libvvenc 封装，见 [VVenC 接入](vvenc.md)。SDK 键同时包含 VVenC gitlink 与构建脚本；VVenC 改动会触发依赖重建，单纯应用改动继续复用 SDK。
 
-- H.264/HEVC/VVC decoder/parser，libx264/libvvenc encoder；GPL 构建。VVC decoder 用于独立验收输出，服务入口仍只接受 H.264/HEVC。
-- mov/mpegts/h264/hevc/flv/rtsp demuxer；mpegts/mp4/flv muxer。
-- file/pipe/udp/tcp/rtp/http/rtmp protocol，network/pthreads。
+- H.264/HEVC/VVC、AAC/MP3 decoder/parser，libx264/libvvenc encoder；GPL 构建。VVC decoder 用于独立验收输出，服务视频入口仍只接受 H.264/HEVC；音频 decoder 只做有界参数探测与测试，不是音频转码管线。
+- mov/mpegts/h264/hevc/flv/rtsp/aac/mp3 demuxer；mpegts/mp4/flv muxer，以及自动选择的 ADTS/LATM 依赖；aac_adtstoasc/extract_extradata BSF。
+- file/pipe/udp/tcp/rtp/http/rtmp/libsrt protocol，network/pthreads。SRT 链接发行版 libsrt-openssl；构建安装 libsrt-openssl-dev 和 libssl-dev，运行层安装 libsrt1.5-openssl。
 - buffer/buffersink/null/scale/format filter，以及 FFmpeg 自动选择的必需依赖。
 - 无自动探测、硬件加速、音频转码链路；协议/封装被编译进去不等于已完成现网兼容性验证。
 
 完整启用清单以 SDK 中的 `config.h`、`config.mak` 为准。发行版提供的 x264、libc、libevent、libunwind 等库的 DWARF **不包含**在自有符号包中；这些模块需按报告中的 Build ID 另取匹配的发行版 debug 包，不能用其他版本代替。
+
+直播测试使用本地 RTMP/SRT 监听器与真实协议连接，不依赖外部媒体服务器；验证器持续发现新流并独立解码，而不是只统计探流时已存在的轨道。两条晚 AAC 音轨、停顿恢复、MP3/EOF 和交织硬上限均在 Service CI 中运行；证据保存到 `out/live-mux-*`。
 
 参考：[GitHub workflow 产物下载](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts?tool=cli)、[Docker 镜像导出](https://docs.docker.com/build/ci/github-actions/export-docker/)。

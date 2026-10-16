@@ -121,6 +121,13 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_str(doc,"encoder_profile",job->config.encoder_profile);
     json_int(doc,"crash_collector_pid",crash_collector_pid());
     json_int(doc,"slow_frame_ms",job->config.slow_frame_ms);
+    json_int(doc,"audio_tracks",job->audio_tracks); json_int(doc,"audio_packets_out",job->audio_packets_out);
+    json_int(doc,"audio_dropped",job->audio_dropped); json_int(doc,"audio_unsupported",job->audio_unsupported);
+    json_int(doc,"mux_wait_ms",job->config.mux_wait_ms);
+    json_int(doc,"mux_queued_packets",job->mux_queued_packets); json_int(doc,"mux_queued_bytes",job->mux_queued_bytes);
+    json_int(doc,"mux_high_water_packets",job->mux_high_water); json_int(doc,"mux_timeout_releases",job->mux_timeouts);
+    json_int(doc,"mux_pressure_releases",job->mux_pressure);
+    json_int(doc,"mux_forced_releases",job->mux_forced);
     int64_t current=now_us(), end=job->ended_us ? job->ended_us : current;
     if(job->last_output_us) json_num(doc,"last_output_age_ms",(current-job->last_output_us)/1000.0);
     else yyjson_mut_obj_add_null(doc,yyjson_mut_doc_get_root(doc),"last_output_age_ms");
@@ -188,7 +195,8 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if (!doc) return bad(error, cap, "Invalid JSON");
     yyjson_val *root = yyjson_doc_get_root(doc);
     Config c = {.bitrate=1500000, .max_threads=12, .min_threads=2, .budget_slots=12,
-                .queue_capacity=4, .encoder_threads=2, .fps=25, .frame_log_every=1, .slow_frame_ms=200};
+                .queue_capacity=4, .encoder_threads=2, .fps=25, .frame_log_every=1, .slow_frame_ms=200,
+                .audio_copy=1, .mux_wait_ms=50};
     strcpy(c.output_format, "mpegts");
     strcpy(c.encoder, "libx264");
     int ret = -1;
@@ -215,9 +223,11 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
                 strlen(yyjson_get_str(val)) != yyjson_get_len(val)) { bad(error,cap,"Invalid string field"); goto end; }
             strcpy(dest, yyjson_get_str(val)); continue;
         }
-        if (!strcmp(name,"pace") || !strcmp(name,"frame_log")) {
+        if (!strcmp(name,"pace") || !strcmp(name,"frame_log") || !strcmp(name,"audio_copy")) {
             if (!yyjson_is_bool(val)) { bad(error,cap,"Expected boolean"); goto end; }
-            if(!strcmp(name,"pace"))c.pace=yyjson_get_bool(val); else c.frame_log=yyjson_get_bool(val);
+            if(!strcmp(name,"pace"))c.pace=yyjson_get_bool(val);
+            else if(!strcmp(name,"audio_copy"))c.audio_copy=yyjson_get_bool(val);
+            else c.frame_log=yyjson_get_bool(val);
             continue;
         }
         int *field = NULL, min=0, max=0;
@@ -232,6 +242,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         else if (!strcmp(name,"fps")) {field=&c.fps; min=1; max=240;}
         else if (!strcmp(name,"frame_log_every")) {field=&c.frame_log_every; min=1; max=1000000;}
         else if (!strcmp(name,"slow_frame_ms")) {field=&c.slow_frame_ms; min=1; max=600000;}
+        else if (!strcmp(name,"mux_wait_ms")) {field=&c.mux_wait_ms; min=1; max=1000;}
         else { bad(error,cap,"Unknown configuration key"); goto end; }
         if (!yyjson_is_int(val) || yyjson_get_sint(val)<min || yyjson_get_sint(val)>max) {bad(error,cap,"Integer out of range"); goto end;}
         *field=(int)yyjson_get_sint(val);
@@ -246,12 +257,15 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     const char *presets=vvc ? "|faster|fast|medium|slow|slower|" : "|ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|";
     char preset_key[20]; snprintf(preset_key,sizeof(preset_key),"|%s|",c.encoder_preset);
     if (strchr(c.encoder_preset,'|') || !strstr(presets,preset_key)) {bad(error,cap,"Invalid preset for selected encoder"); goto end;}
-    if (vvc && !strcmp(c.output_format,"flv")) {bad(error,cap,"libvvenc output requires mpegts or mp4"); goto end;}
     if (c.min_threads>c.max_threads || (!!c.width != !!c.height) || c.width%2 || c.height%2) {bad(error,cap,"Invalid thread limits or dimensions (use two even dimensions)"); goto end;}
     if (strcmp(c.output_format,"mpegts") && strcmp(c.output_format,"mp4") && strcmp(c.output_format,"flv")) {bad(error,cap,"output_format must be mpegts, mp4 or flv"); goto end;}
     if (strchr(c.output,':') && strncmp(c.output,"udp://",6) && strncmp(c.output,"tcp://",6) &&
-        strncmp(c.output,"rtmp://",7) && strncmp(c.output,"http://",7)) {
-        bad(error,cap,"Use a local output path or udp://, tcp://, rtmp://, http:// URL"); goto end;
+        strncmp(c.output,"rtmp://",7) && strncmp(c.output,"srt://",6) && strncmp(c.output,"http://",7)) {
+        bad(error,cap,"Use a local output path or udp://, tcp://, rtmp://, srt://, http:// URL"); goto end;
+    }
+    if ((!strncmp(c.output,"rtmp://",7) && strcmp(c.output_format,"flv")) ||
+        (!strncmp(c.output,"srt://",6) && strcmp(c.output_format,"mpegts"))) {
+        bad(error,cap,"rtmp output requires flv; srt output requires mpegts"); goto end;
     }
     if (c.pace && strstr(c.input, "://")) {bad(error,cap,"pace is for local file replay only"); goto end;}
     *out=c; ret=0;

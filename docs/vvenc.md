@@ -6,7 +6,7 @@
 
 运行请求见 [vvc.json](../examples/vvc.json)：`encoder=libvvenc`、`encoder_preset=faster`、默认 `encoder_profile=live_3b_2s`，1.5 Mbps、2 个编码线程。应用、HTTP 控制、IPC、崩溃采集仍为 C；VVenC 是独立 C++ 共享库，容器含 libstdc++。filter 根据编码器协商 YUV420P10LE，覆盖 8-bit 转 10-bit 与原生 10-bit 输入；这不等于把 SDR 自动转换为 HDR，色彩元数据从输入传递。
 
-当前开放 MPEG-TS（含 UDP）和本地 MP4，VVC + FLV 在请求阶段拒绝。普通 MP4 要在 EOF/trailer 后完成索引，不适合直接作为持续直播交付格式。仍是纯视频、固定规格实验；输入编码限 H.264/HEVC，不接受 VVC 回灌。
+0.8.0 开放 MPEG-TS（含 UDP/SRT）、Enhanced FLV（含 RTMP）和本地 MP4。FLV/TS 支持 AAC/MP3 透传与晚音轨追加，见 [直播封装](live-mux.md)。普通 MP4 要在 EOF/trailer 后完成索引，不适合直接作为持续直播交付格式，当前仍只输出视频。输入视频限 H.264/HEVC，不接受 VVC 回灌；在线视频规格重建与音频转码尚未实现。
 
 ## 时间与帧关联
 

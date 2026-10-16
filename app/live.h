@@ -16,6 +16,7 @@ typedef struct Config {
     int width, height, bitrate, max_threads, min_threads, budget_slots;
     int queue_capacity, encoder_threads, fps, pace;
     int frame_log, frame_log_every, slow_frame_ms;
+    int audio_copy, mux_wait_ms;
 } Config;
 typedef struct Metric {
     uint64_t count;
@@ -48,6 +49,8 @@ typedef struct Job {
     int prewarmed;
     yyjson_mut_doc *first_chain[2]; /* Bounded checkpoints for replay after controller loss. */
     uint64_t packets_in, frames_decoded, frames_filtered, packets_out, bytes_out;
+    uint64_t audio_tracks, audio_packets_out, audio_dropped, audio_unsupported;
+    uint64_t mux_queued_packets, mux_queued_bytes, mux_high_water, mux_timeouts, mux_pressure, mux_forced;
     Latencies lifetime, window;
     Latencies i_lifetime, i_window;
     Latencies key_lifetime, key_window;
