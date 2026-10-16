@@ -77,7 +77,12 @@ def run(repeats=2):
             sender.terminate(); sender.wait(timeout=5)
         decoded=decode_frames(PROBE,output)
         assert len(decoded)==state["packets_out"]
-        structure=check_structure(decoded,50)
+        # Cancellation can leave a future P anchor without its trailing B
+        # packets. Verify the complete first GOP plus the next key frame;
+        # normal EOF tests above still validate every decoded frame strictly.
+        assert len(decoded)>=51
+        structure=check_structure(decoded[:51],50)
+        structure["cancel_tail_frames_not_validated"]=len(decoded)-51
         (run/"live-input.state.json").write_text(json.dumps(state,indent=2))
         (run/"live-input.structure.json").write_text(json.dumps(structure,indent=2))
         print("live UDP input first_ms",state["startup"]["request_to_first_video_mux_ms"],
