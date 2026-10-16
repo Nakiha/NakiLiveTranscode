@@ -1,0 +1,3 @@
+[submodule "experiments/decoder-20261016/ffmpeg-7.0.3"]
+	path = experiments/decoder-20261016/ffmpeg-7.0.3
+	url = https://github.com/Nakiha/FFmpeg.git

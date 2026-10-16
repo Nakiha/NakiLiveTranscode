@@ -1,0 +1,7 @@
+/out/
+/experiments/decoder-20261016/*
+!/experiments/decoder-20261016/ffmpeg-7.0.3/
+!/experiments/decoder-20261016/README.md
+__pycache__/
+*.pyc
+.DS_Store
