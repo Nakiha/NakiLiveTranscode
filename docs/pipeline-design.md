@@ -1,6 +1,6 @@
 # 可扩展处理链草案（未实现）
 
-当前实现和可发送字段只以 [OpenAPI 0.8.0](openapi.json) 为准。当前仅支持 null/scale/format，没有这里的任意滤镜、ROI、HDR 转换或动态更新接口。以下是后续开发建议，不应复制到 `/v1/job` 试运行。
+当前实现和可发送字段以 [OpenAPI](openapi.json) 为准。固定 2–4 路与固定输出动态输入适配已按本轮用户确认接入，见[实现边界](branching-contract.md)；下文更广的 `/v2/jobs` 仍是草案。主链支持 null/scale/format；单水印 v1 的实现边界见 [水印接口](watermark.md)，正在验证。这里的通用 `/v2/jobs`、任意滤镜、ROI、HDR 转换和规格重建仍是草案，不能复制到 `/v1/job` 试运行。
 
 直播客户的过载抽帧、随源/固定周期/随源+最大间隔 I 帧、PTS 与 UNKNOWN SEI 合同见 [帧策略草案](live-frame-policy.md)。已确认源 PTS 自身的空洞可以保留，不补帧、不因此终止；源 I 和到期需强制 I 的画面必须先于抽帧决策受到保护。
 
@@ -81,6 +81,8 @@ ROI 检测属于分析支路：低分辨率采样可降低成本，结果记录�
 落地顺序建议：模块搬运和 JobSpec → crop/pad/scale/sharpen 保帧链 → 追踪一对多后接解交错/fps → 完整颜色模型与 HDR→SDR → ROI 分支和编码器适配 → 在线 revision 更新。每一步补实际像素/色彩/时间戳、EOF 和缓存上限验证，不用只检查滤镜名能否找到。
 
 ## 可热更新的图片/动画水印
+
+以下保留早期设计讨论，不是 v1 请求结构。用户现已确认单水印 `/v1/job/watermark`、完整 revision 替换、required 起播失败及热更失败保留旧图；当前实现和资源限制以 [单水印 v1](watermark.md) 为准。百分比、多水印、HDR 和其他列出的候选策略没有随本批开放。
 
 需求包括中途从无到有、更新 URI、锚点、偏移和宽高，支持 JPEG/PNG/GIF。建议复用 libavformat/libavcodec 解码与 libswscale/libavfilter 缩放/合成，把原先“大滤镜”的网络和资源生命周期拆出去，保留一个职责窄的常驻合成节点。媒体 owner 不下载、不等待资源、不持有跨线程可变解码器。
 

@@ -87,12 +87,12 @@ def make_flv(full, late):
     late.write_bytes(b"".join(result))
 
 
-def create(run, ffmpeg):
+def create(run, ffmpeg, duration=8):
     full=run/"full.ts"
     command=["ffmpeg","-v","error","-f","lavfi","-i","testsrc2=size=256x144:rate=25",
              "-f","lavfi","-i","sine=frequency=440:sample_rate=48000",
              "-f","lavfi","-i","sine=frequency=880:sample_rate=48000","-map","0:v","-map","1:a","-map","2:a",
-             "-t","8","-c:v","libx264","-preset","ultrafast","-threads","2",
+             "-t",str(duration),"-c:v","libx264","-preset","ultrafast","-threads","2",
              "-x264-params","bframes=3:b-adapt=0:keyint=25:scenecut=0","-c:a","aac","-ac","2","-b:a","64k",
              "-streamid","0:256","-streamid","1:257","-streamid","2:258",
              "-mpegts_pmt_start_pid","4096","-muxrate","1000000","-pcr_period","20",str(full)]

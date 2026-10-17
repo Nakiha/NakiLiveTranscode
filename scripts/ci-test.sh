@@ -2,6 +2,18 @@
 set -euo pipefail
 mkdir -p out
 # These tests generate media and exercise real sockets/processes; no archived test clips are needed.
+python3 tests/sdk_identity_test.py
+python3 tests/sdk_build_integration.py
+out/bin/naki-frame-policy-test
+out/bin/naki-frame-policy-config-test
+out/bin/naki-watermark-config-test
+out/bin/naki-branch-queue-test
+out/bin/naki-video-filter-test
+python3 tests/watermark_integration.py
+python3 tests/watermark_review_integration.py
+python3 tests/multi_output_integration.py
+python3 tests/frame_policy_integration.py
+python3 tests/probe_integration.py
 python3 tests/decoder_integration.py
 python3 tests/service_integration.py
 python3 tests/vvenc_integration.py

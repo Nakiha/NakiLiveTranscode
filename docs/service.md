@@ -1,4 +1,4 @@
-# Linux 单路转码实验服务
+# Linux 单输入转码实验服务
 
 ## 依赖和构建
 
@@ -14,7 +14,7 @@ Ubuntu / WSL：
 
 ```sh
 sudo apt-get update
-sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev libevent-dev libcurl4-openssl-dev libunwind-dev
+sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev zlib1g-dev libevent-dev libcurl4-openssl-dev libunwind-dev
 git submodule update --init --recursive
 bash scripts/build-service.sh
 ```
@@ -43,14 +43,15 @@ bash scripts/build-service.sh
 | --- | --- |
 | `GET /health` | 版本与健康状态 |
 | `POST /v1/job` | JSON 启动一个任务，返回 202；忙时 409；接管中或 worker 不可用时 503 |
-| `GET /v1/job` | idle / starting / running / stopping / finishing / completed / stopped / failed，计数与耗时摘要 |
+| `GET /v1/job` | idle / starting / waiting_assets / running / stopping / finishing / completed / stopped / failed，计数与耗时摘要 |
+| `POST /v1/job/watermark` | 单水印完整 revision 热更；202 仅代表 worker 接受，查询状态确认 applied 或失败；见[接口边界](watermark.md) |
 | `POST /v1/job/stop` | 取消运行中的任务，返回 202；通过 status 等待 stopped |
 
 参数示例见 `examples/`。`input`、`output` 必填；相对路径以服务进程的工作目录为准。本地输出使用排他创建，已有文件不会被覆盖；失败或停止时可能保留部分输出。输出父目录需预先存在。
 
 机器可读接口规范见 [openapi.json](openapi.json)，包括全部当前路径、请求参数、范围和状态码。它是仓库静态文档，服务尚不提供 `/openapi.json` 或 Swagger UI。未来的有序滤镜、ROI 分析与颜色处理见 [处理链设计草案](pipeline-design.md)；草案字段当前会被拒绝。
 
-过载抽帧、I 帧/PTS/任意 SEI 透传尚未实现，后续合同与冲突处理见 [直播帧策略](live-frame-policy.md)。当前 PTS 追踪与 VFR GOP 支持不代表线上原始 PTS 逐刻度透传。
+工作区已加入可选的 `timestamps`、`intra` 和 `frame_selection`，见 [单路帧策略](frame-policy.md) 与[本地验证](validation-frame-policy.md)，尚待独立源码复审。未提供这三组时保留 legacy 路径。`source_all` 只承诺 demux 后显示时间轴的换算与容器量化，缺失/重复/回退明确失败；source_i_anchors、自动时间戳修复和任意 SEI 透传仍未实现。完整后续合同见 [直播帧策略设计](live-frame-policy.md)。
 
 内网业务可编译接入 [内部媒体 hook](media-hooks.md)，观察音频和编码后的视频包；默认空实现，没有新增 HTTP 参数，也没有启用响度检测或 SEI 注入。
 
@@ -60,7 +61,7 @@ bash scripts/build-service.sh
 
 `audio_copy` 默认为 true：FLV/MPEG-TS 透传 AAC/MP3，晚出现的音轨直接注册到已打开的输出；MP4 仍只输出视频。上限 16 条输入音轨状态，非支持编码及参数变化拒绝该音轨并计数，视频继续。字幕和数据流不输出。过期/重复/无法恢复时间戳的音频显式丢弃并计数，不改写视频时间轴。`audio_copy=false` 禁用音频。`mux_wait_ms` 默认 50，范围 1..1000，控制有界墙钟交织排队，详见 [动态音轨](live-mux.md)。
 
-当前构建包含 file、UDP、TCP、RTP、HTTP、RTMP、RTSP、SRT 相关能力，不包含 HTTPS 或硬件编解码。RTMP 输出必须选择 flv，SRT 输出必须选择 mpegts；两者的 VVC 实流及晚音轨已纳入测试，其余协议的编译可用不等于均已实流验收。输入尺寸或像素格式变化时明确失败，暂不进行在线 filter/编码器重建。
+当前构建包含 file、UDP、TCP、RTP、HTTP、RTMP、RTSP、SRT 相关能力，不包含 HTTPS 或硬件编解码。RTMP 输出必须选择 flv，SRT 输出必须选择 mpegts；两者的 VVC 实流及晚音轨已纳入测试，其余协议的编译可用不等于均已实流验收。输入分辨率及 yuv420p/yuv420p10le 变化可重建滤镜适配固定输出；encoder、连接、时间基准和输出规格保持。primaries/transfer 变化及其他未支持格式明确失败，不做 HDR tone mapping。固定 2–4 路接口、独立预算/失败终态和 output_id 水印热更见[本批合同](branching-contract.md)。
 
 ## 进程、线程与停止
 

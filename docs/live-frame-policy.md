@@ -1,6 +1,6 @@
-# 直播抽帧、I 帧、PTS 与 SEI 策略草案（未实现）
+# 直播帧策略合同与后续设计（部分已实现）
 
-这是对客户合同和后续实现的设计补充，不是 0.8.0 已有能力。当前接口仍以 [OpenAPI](openapi.json) 为准；本页字段不可发送到现有 `/v1/job`。管线整体结构见 [处理链草案](pipeline-design.md)。
+这是对客户合同和后续实现的设计补充，不代表整份合同已经实现或发布。工作区已实现的单路子集为 source_all、三种普通 I 策略及显式过载抽帧，具体可发送字段以 [OpenAPI](openapi.json) 和[单路帧策略](frame-policy.md)为准；本地验证见[第二批记录](validation-frame-policy.md)，当前等待独立源码复审。本页完整配置示例还包含未支持的字段，不可整体发送到 `/v1/job`。source_i_anchors、时间戳修复、SEI 及 SCTE-35 仍未实现，整体请求结构见 [处理链草案](pipeline-design.md)。
 
 ## 已确认的业务语义
 
@@ -98,9 +98,9 @@ planner 按显示 PTS 次序处理，强制请求需在编码器的 GOP/lookahea
 
 源 PTS 不能用 packet 到达顺序简单判断回绕：B 帧会使 packet PTS 正常前后跳。TS 33-bit 90kHz 约每 26.5 小时回绕，应结合 DTS/程序时钟展开 epoch，再相对该 epoch 解释 PTS；音视频共享时钟域。输出按目标协议重新折回有限位宽。向前空洞允许保留；真正 discontinuity 的策略独立。不能把所有负差值都加一整圈。
 
-当前 process_frame 优先使用 best_effort_timestamp，缺失时合成 PTS，编码/封装还有 time_base 转换，因此现有测试通过不等于线上 raw PTS 逐刻度保留。严格模式需要在通用推断/修正前记录源时间；若公共 API 已丢失原值，再增加窄范围、显式启用的 fork hook。先审查 [correct_ts_overflow、avoid_negative_ts、output_ts_offset](https://ffmpeg.org/ffmpeg-formats.html#Format-Options) 及各 muxer 的偏移，不全局删掉 FFmpeg 的时间戳处理；禁用其中一个选项不会自动关掉其他补算/平移。
+legacy 的 process_frame 仍优先使用 best_effort_timestamp，缺失时合成 PTS；新 source_all 路径启用输入 NOFILLIN，保存 demux 后包与解码画面的原字段，检查显示顺序并关闭输出负时间自动平移。编码/封装仍有 time_base 转换，因此不承诺线上 raw PTS 逐刻度保留。若后续合同需要已被公共 API 丢弃的线级原值，需再增加窄范围、显式启用的 fork hook。继续逐项审查 [correct_ts_overflow、avoid_negative_ts、output_ts_offset](https://ffmpeg.org/ffmpeg-formats.html#Format-Options) 及各 muxer 的偏移，不全局删掉 FFmpeg 的时间戳处理。
 
-当前 flvenc.put_timestamp 还屏蔽 extended timestamp 高位，长时间/跨回绕的实际线上行为需要专门验收；内部换成 int64_t 不代表输出文件/协议已经正确。缺失 PTS 的严格透传默认失败，允许合成时必须标记 provenance，不能把合成值当作原始值。保留时序不代表现有 VVenC DTS FIFO 已覆盖任意程度的抽帧，仍需新增稀疏/不规则 PTS 与强制 I 的组合回归。
+当前 flvenc.put_timestamp 还屏蔽 extended timestamp 高位；source_all 对负预滚、超过 INT32_MAX 毫秒或有符号 24-bit composition offset 的视频明确失败。本轮已验证负预滚拒绝及稀疏/VFR PTS 与强制 I，但没有证明任意长时钟、多次回绕或任意抽帧强度的 FLV/音视频时钟行为。内部换成 int64_t 不代表线上协议已经正确。legacy 允许合成时仍标记 provenance，不能把合成值当作原始值。
 
 ## 不干净的输入与“尽量接近”的 DTS/PTS
 

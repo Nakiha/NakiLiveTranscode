@@ -4,7 +4,9 @@
 
 当前底座为 **FFmpeg n9.0.2 + 异步解码 API 2 / 网络观测 API 1**；保留原 7.0.3 分支与历史验证结果。历史子模块目录名 `ffmpeg-7.0.3` 暂不改名。源码修改与本地构建见 [FFmpeg 开发](docs/ffmpeg-development.md)。
 
-**当前状态：Linux 单路 C 实验服务，版本 0.8.0。** H.264/HEVC 输入 → 异步自动调度解码 → 8/10-bit filter → H.264 或 VVC 输出。支持 RTMP/Enhanced FLV 和 SRT/MPEG-TS；AAC/MP3 音轨可以晚加入、原连接继续输出。音频为透传，不做转码；MP4 保持纯视频。见 [直播封装与动态音轨](docs/live-mux.md)、[服务说明](docs/service.md)、[OpenAPI](docs/openapi.json)。后续处理链的结构化请求草案见 [管线设计](docs/pipeline-design.md)，尚未实现。
+**当前状态：Linux 单输入、最多 4 路固定输出 C 实验服务，版本 0.9.0。** H.264/HEVC 输入 → 异步自动调度解码 → 8/10-bit filter → H.264 或 VVC 输出。支持 RTMP/Enhanced FLV 和 SRT/MPEG-TS；AAC/MP3 音轨可以晚加入、原连接继续输出。音频为透传，不做转码；MP4 保持纯视频。见 [直播封装与动态音轨](docs/live-mux.md)、[服务说明](docs/service.md)、[OpenAPI](docs/openapi.json)。后续处理链的结构化请求草案见 [管线设计](docs/pipeline-design.md)，尚未实现。
+
+可选的[单路帧策略](docs/frame-policy.md)包括严格 `source_all`、随源/周期/最大间隔 I、保护帧及显式过载抽帧，已通过第二批独立复审并保存本地检查点；见[第二批记录](docs/validation-frame-policy.md)。已实现[单水印 v1](docs/watermark.md)：JPEG/PNG/GIF、required 起播等待、资源和布局 revision 热更；[第三批本地验证](docs/validation-watermark.md)及源码复审通过；本轮 23 项本地复审通过，1 项外部 HTTPS 成功路径未完成。工作区已接入[固定多输出与动态输入适配](docs/branching-contract.md)，[第四批本地验证](docs/validation-multi-output.md)的 15 项新实流场景及相关完整功能回归已通过，独立源码复审已通过；任意 SEI/SCTE-35 和时间戳修复仍未实现。
 
 ## 运行服务（Linux / WSL）
 

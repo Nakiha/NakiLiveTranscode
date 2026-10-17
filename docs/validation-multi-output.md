@@ -1,0 +1,49 @@
+# 固定多输出与动态输入适配：本地验证（2026-10-17）
+
+当前实现基于已确认的[固定输出合同](branching-contract.md)。本轮 15 项多输出实流场景、13 套 Python 功能回归、5 个 C 单测、12 项 SDK 身份单测及符号回归均返回 0；**23 项水印本地复审通过，1 项公共可信 HTTPS 成功路径未完成**。没有把未运行项算作本轮全绿。新的完整接入已通过独立源码复审，按授权保存本地完整提交，不推送。
+
+最新证据目录：`out/multi-output-acceptance-20261017T1430/`。精确退出码、源码快照/摘要、git 状态、完整 binary-safe 差异、匹配 Build ID/DWARF、媒体与接管证据见其中 `ACCEPTANCE.json`。基线 HEAD 为 `5052d203bc438dd1796bfb5273c1d82a5013ea77`；FFmpeg `d8303fa436059a96bb773df8566a73c6253c8159`、VVenC `29e3dc57a91d03833ead6370f5cd03f6d61242a5` 未改。SDK 身份保持 `952134bb13b47fe2de5099abebc8e156b0f35c9c67d395fdce05989517f084e1`；应用 21 个 ELF 的匹配 DWARF 为本轮新归档，FFmpeg/VVenC 复用相同 Build ID 的 6+1 个归档。
+
+| 功能证据 | 实际检查 |
+| --- | --- |
+| 一次输入、两/四路 | 125 张共同 decoded frame、decode 样本 125；四路各写出 125 包，共 500 条带 output_id 的帧记录；各路实际首/末 mux 区间存在共同交集 |
+| 私有帧头与 COW | 四路分别红水印、蓝水印、裸帧及 10-bit VVC；独立同步解码器核对每路尺寸、颜色、背景、帧数和 VVC 的实际 B 帧；没有跨路水印污染 |
+| 音频 | AAC payload 为源序列的有序子序列；实际写出包数与状态计数一致，写出+明确丢弃等于全部输入音频包数，unsupported=0；另有单路对照，不以任意保留百分比定义成功 |
+| 独立热更 | 两路各自 revision 2，更新一路时另一 accepted_revision 保持 1；未知/缺失 output_id、已失败路拒绝；required 首/末帧均有水印 |
+| 队列/全部失败 | 单路字节预算不足，另一仍完整写出 125 包，终态 completed_partial；坏目标+超限使全部失败，任务 failed；所有队列/在途计数归零 |
+| 真实慢路 | TCP 接收端已连接但完全不读，接收/发送缓冲缩小；300ms I/O 预算使该路失败，健康路同一 worker 完整写出 125 包 |
+| 动态输入 | 单个 HEVC 流 64×48/8-bit→96×64/8-bit→128×96/10-bit→64×48/8-bit，共 80 张；四路固定 MP4/FLV/TS/H.264/VVC 输出，各 4 代滤镜、80 包；逐帧 PTS（FLV 允许毫秒量化）、画面和水印正确，encoder/连接未重开 |
+| 源 PTS 空洞 | 8 帧源中插入 5 秒空洞，400ms 队列名义处理预算不把它当作积压；两路保持全部 PTS 和帧数 |
+| 起播门禁 | required HTTP 资源未就绪时 input_open_started 为空；释放后共同读入。一路资源失败时只失败该路；全部门禁失败时不存在的输入从未打开 |
+| 必需水印重检 | 中途 SDR→HDR 明确失败各分支；失败前的 MP4 前缀逐帧均有水印，没有裸流兜底或假 tone mapping |
+| 接管/取消 | 控制进程 SIGKILL 后两路文件继续增长；新控制进程接管同一 worker、状态和帧数继续，output_id 热更有效，再停止后所有分支 stopped 且引用计数归零 |
+
+独立基础审查提出的 P2 一并修复：`avcodec_parameters_copy` 分配的 custom `ch_layout.u.map` 按 `nb_channels*sizeof(AVChannelCustom)` 计入音频保留预算，检查乘加溢出；单测真实复制映射、先释放源参数，再验证独立副本、单项/累计超限以及失败时调用方所有权。延后音频队列也使用完整保留计费，不只计算 payload/extradata。
+
+开发时的失败证据保留在 `out/multi-output-dev-20261017T1400/` 各独立 attempt。动态水印曾因初始图和新图色彩协商不一致失败；现在显式声明 buffersrc 矩阵/范围，编码器使用 sink 协商属性，新图转换至固定属性。旧 graph 先排空，之后才交换 source/sink 和更新输入规格；旧帧使用原 Stamp/generation，不按新输入宽高解释。部分成功曾被控制面误报异常退出，现已将 completed_partial 纳入正式终态并实流覆盖。
+
+分支停止不在共同输入循环里 join；先取消该路并清空引用，继续处理健康路，只在整个任务收尾时等待 owner。I/O 打开、写出、trailer/close 保留截止及 cancel 回调；单次不可抢占 native 调用仍不具硬实时终止保证。原生崩溃影响同一 worker 全部输出，区别于可返回错误/队列压力的分支隔离。
+
+本轮没有修改 FFmpeg/VVenC、安装依赖、改变安全设置、推送或部署。AGENTS.md 保持用户原文；本批范围以本轮明确确认的固定输出合同为准，不扩大成任意动态输出规格。未运行 Docker 镜像构建、远端 CI、ASan/TSan、容量/时延基准及长期高规格稳定性测试；不能把功能验收描述为生产能力证明。
+
+收尾静态核对后又加固了线程创建失败的终态及共享 reader 的提前唤醒：没有 owner 启动时直接标为 failed；取消/错误在私有输出清理前先广播 reader ring。13 套完整回归窗口保留不覆盖；这项局部修改后重跑受影响的 15 项多输出实流、process_integration 和当前符号回归，证据位于同目录 terminal-state-check。其他运行源码未变，当前源文件快照和应用 DWARF 以该子目录为准；不能把此前完整窗口说成在修改后重跑。
+
+## 远端 CI：SDK 归档与成功夹具边界修正
+
+已发布父仓 PR #1（初始 head `6177baec6633d2c15ec38eaf4f6594930e4c13aa`）及两个依赖 PR。用户直接批准唯一依赖 SDK prerelease 后，SDK run `39012342945` 成功：tag `ffmpeg-linux-amd64-3e31b2c0ee1e6a9018ddb6d2` 指向该父仓 SHA，压缩包 SHA-256 为 `4746b401c5b8cf02232586ad4bb625e739f1a615b5bf971f7815d140c3b531aa`，与下载的 checksum 文件及 GitHub asset digest 一致。包内源码身份仍为上述 `952134bb...`，FFmpeg/VVenC 的精确 SHA 和 6+1 个符号清单均匹配。本次仅创建依赖归档，没有应用发版、合并或部署。
+
+原 Service CI run `39011803458` 第 2 次运行通过 SDK 门禁、下载及应用/符号 Docker 构建，随后在四路成功夹具失败：FLV 和 VVC 分支报 `branch audio admission budget: EAGAIN`，其余两路完成。不能把后续跳过的测试算作通过。原 TS 夹具使用默认 mux 延迟，独立包序诊断显示连续 16 个 AAC 包；加上尚未消费的视频会触及视频/音频合计 16 项的既有硬预算。原本的成功期望依赖 owner 是否及时获调度，不构成该突发能无条件成功的合同。
+
+修正仅在测试和 CI 证据收集：成功夹具显式设置 `-muxdelay 0 -muxpreload 0` 并新增连续音频包不超过 4 的前置断言，保留全部四路完成、500 帧、像素/PTS/B 帧及音频写出+显式丢弃闭合断言。两份诊断夹具的 125 个视频包、236 个音频包的压缩 payload SHA-256 序列逐包相同；封装起始时刻和交织改变后仍按当前输入时间轴验收，不把它当作真实网络突发承载能力证据。队列上限、运行时满队列失败策略及压力场景断言均未放宽。新增确定性单测将一张视频及 15 个音频项填满 16 槽，第 16 个音频明确 EAGAIN、保留调用方所有权，并验证 FIFO 与全部引用释放。CI 另收集 watermark/multi-output 目录，终态断言前保存 JSON，失败时也能取回源夹具/日志。
+
+本地使用原 SDK、最多 2 编译任务重新构建，通过混合队列单测及绑定 CPU 0–3 的完整多输出回归：`out/multi-output-5on_va2f/COMPLETE.json`，含原 15 项功能场景及新增包序前置检查，四路各 125 包。FLV/TS 音频各写 235、明确丢 1；VVC 写 236、丢 0，均与源 236 包闭合。日志、包序/逐包摘要诊断及 SDK 校验记录见 `out/pr-publication-20261017/`。本地最初内联启动器在编译完成后记录退出码时出现引号错误，已改为独立脚本重新取得构建/单测/完整回归退出码 0，旧错误保留；不把该启动器错误说成源码编译失败。远端修正后的 CI 结果以 PR 最新运行实际状态为准。
+
+## 后续 CI 暴露的 SDK 安装时间戳缺陷
+
+测试/证据补丁 `46dea079cc6b88682e1f58990cccb607b88adc1a` 的 run `39013371468` 通过同一 SDK 门禁和 Docker 构建，却在更早的 SDK 缓存回归失败，尚未执行到修正后的多输出用例。上传证据的 `sdk-build-ssl6lon6/same-mtime-vvenc.log` 显示 VVenC 对象和 DSO 确实重编译，`cmake --install` 却将已安装 DSO 判作 Up-to-date；新身份被 seal 后消费到的仍是旧 marker 11，预期应为 12。这是安装层的真实内容绑定漏洞，不能用重跑或 sleep 将其掩盖。
+
+`build-vvenc.sh` 现仅在安装命令上设置 `CMAKE_INSTALL_ALWAYS=1`，强制更新已构建的库及头文件；没有删除缓存、放宽凭据校验、修改库 pin 或更改媒体运行时。[CMake 3.28.3 安装器源码](https://raw.githubusercontent.com/Kitware/CMake/v3.28.3/Source/cmFileInstaller.cxx) 的环境变量分支提供这一行为。新增测试在链接后主动将旧安装库的 mtime 对齐到新库，同时保留旧 mtime 修改同尺寸头文件；既不依赖机器速度，也不延迟测试。夹具设置调用方 CMAKE_INSTALL_ALWAYS=0，验证构建入口的局部强制安装确实覆盖它。
+
+对未修构建脚本，确定性夹具重现旧 DSO 和旧头文件被错误 seal，见 `out/pr-publication-20261017/sdk-install-before.log`（退出 1，预期复现）。修复后完整原 SDK 缓存回归通过，包含 same-mtime 重建/skip、部分编译失败、SIGTERM/SIGKILL、seal 失败及 configure 失败/信号恢复，见 `out/sdk-build-6v_q92i1/COMPLETE.json` 和 `sdk-install-after.log`（退出 0）；原 12 项 SDK 身份单测亦通过，未跳过断言。
+
+该修复改变依赖配方，必须使用新的 release key 和匹配 SDK/DWARF。已有 `3e31b2c0ee1e6a9018ddb6d2` 归档是旧配方的全新空缓存构建，保持原样，不覆盖、不冒充新配方。新配方的真实 SDK 构建、归档发布和完整远端 service 验证仍待执行；新增依赖归档须获得针对其具体 tag 的授权。不能将上述小型夹具回归说成真实媒体 SDK 已重建或远端 CI 已通过。

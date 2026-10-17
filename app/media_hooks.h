@@ -7,7 +7,7 @@
 #include <libavutil/avutil.h>
 #include <libavutil/rational.h>
 
-#define NAKI_MEDIA_HOOK_API 1
+#define NAKI_MEDIA_HOOK_API 2
 #define NAKI_MEDIA_HOOK_MAX_ADDED_BYTES 65536
 struct Config;
 
@@ -15,6 +15,7 @@ typedef struct NakiMediaJobInfo {
     const char *job_id, *request_id;
     const struct Config *config;
     int64_t request_us;
+    const char *output_id; /* NULL for the shared input owner / legacy single output. */
 } NakiMediaJobInfo;
 
 typedef struct NakiAudioPacketEvent {
@@ -31,6 +32,9 @@ typedef struct NakiVideoEncodedEvent {
     AVRational time_base; /* encoder time base; packet has not been rescaled */
     int64_t encoded_us;   /* immediately after successful receive_packet */
     int64_t input_sequence;
+    int64_t frame_id, source_pts;
+    AVRational source_time_base;
+    unsigned generation;
     enum AVPictureType input_picture_type;
     /* NONE if encoder statistics do not report it. Key != all intra pictures. */
     enum AVPictureType output_picture_type;
@@ -41,15 +45,21 @@ typedef struct NakiMediaEnd {
     int cancelled;
     int error_code; /* 0 on completion, negative AVERROR on failure */
     const char *stage;
+    int output_failures; /* Shared owner sees failed branches on partial completion. */
 } NakiMediaEnd;
 
 /* Internal, compile-time extension API, not a stable binary/plugin ABI.
- * All callbacks run serially on the pipeline owner, without application locks.
+ * Callbacks run serially on their private owner, without application locks.
+ * Multi-output opens one shared input instance and one independent instance per
+ * output_id. Input audio is observed once on the input instance; encoded video
+ * is observed on each output instance. Instances can run concurrently and must
+ * not share mutable private state without their own bounded synchronization.
  * Event pointers/strings/frames/parameters are borrowed until return. Retain
  * packets with av_packet_clone and parameters with avcodec_parameters_copy.
  * Packet callbacks must be bounded and nonblocking: no network/file I/O, joins
  * or waits for analysis. Any asynchronous work needs its own bounded queue.
- * Return 0 or a negative AVERROR; errors fail the job, never silently fallback.
+ * Return 0 or a negative AVERROR; shared-input errors fail the job, private
+ * output errors fail that branch. Never silently fallback.
  * close is called once on graceful cleanup, including open failure if set;
  * fatal signals/process termination do not guarantee callbacks.
  */

@@ -78,9 +78,9 @@ fork 新增 `libavformat/network_observer.h`，API 1 / libavformat 61.2.100。�
 
 ## 封装交织的边界
 
-当前仍是单路纯视频，没有音频流可等待。`av_interleaved_write_frame` 内部也可能执行阻塞 I/O；耗时长不一定意味着在等待另一流。日志区分该调用与显式 flush，另提供网络发送数据用于排查，但没有添加丢包、强制越序或异步无限写队列。
+FLV/TS 已支持有界 AAC/MP3 passthrough 和原连接上的晚音轨追加；MP4 仍只输出视频。pipeline owner 独占注册与写出，经 fork 的 live mux 包数/字节硬上限、单调墙钟期限和定期 poll 后，只调用 `av_write_frame`，不混用 `av_interleaved_write_frame` 的内部队列。落后于输出水位的晚音频显式丢弃并计数，不能倒退输出时间轴；详见 [直播封装](live-mux.md)。
 
-以后增加音频时，应专项验证缺包、断流、时间戳跳变及封装队列；为 interleave delta、输出 I/O 超时和有界背压制定策略。FFmpeg 的 `max_interleave_delta=0` 表示关闭按时间戳差强制冲刷的限制，不是“零等待”；当前值在单视频场景不证明多流直播安全。该选项约束时间戳跨度，也不是严格的墙钟超时。
+`interleave_queue_ms` 包含实际排队，mux/write 与 AVIO flush 仍可能阻塞；每帧时延在写出/flush 后结算，不能把调用耗时解释成纯队列等待。`max_interleave_delta` 约束时间戳跨度，并非墙钟超时，不能代替 fork 的有界队列与轮询期限。可选过载策略由独立 worker 循环监视，在持续预算耗尽时请求取消；不是任意不可抢占驱动下的硬实时终止保证，见 [单路帧策略](frame-policy.md)。
 
 ## 7×24 小时的进程结构
 

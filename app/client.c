@@ -8,9 +8,9 @@ int main(int argc, char **argv) {
     int i=1;
     if (i<argc && !strcmp(argv[i],"--url") && i+1<argc) {base=argv[i+1]; i+=2;}
     if (i<argc) action=argv[i++];
-    if (action && !strcmp(action,"start") && i<argc) file=argv[i++];
-    if (!action || i!=argc || (strcmp(action,"status") && strcmp(action,"health") && strcmp(action,"stop") && strcmp(action,"start")) || (!strcmp(action,"start")&&!file)) {
-        fprintf(stderr,"Usage: naki-live-ctl [--url http://127.0.0.1:8090] health|status|stop|start config.json\n"); return 2;
+    if (action && (!strcmp(action,"start")||!strcmp(action,"watermark")) && i<argc) file=argv[i++];
+    if (!action || i!=argc || (strcmp(action,"status") && strcmp(action,"health") && strcmp(action,"stop") && strcmp(action,"start") && strcmp(action,"watermark")) || ((!strcmp(action,"start")||!strcmp(action,"watermark"))&&!file)) {
+        fprintf(stderr,"Usage: naki-live-ctl [--url http://127.0.0.1:8090] health|status|stop|start config.json|watermark update.json\n"); return 2;
     }
     char *body=NULL; size_t size=0;
     if (file) {
@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
     CURL *curl=curl_easy_init();
     if (!curl) {free(body); curl_global_cleanup(); return 1;}
     char url[4096];
-    int n=snprintf(url,sizeof(url),"%s%s",base,!strcmp(action,"health")?"/health":!strcmp(action,"stop")?"/v1/job/stop":"/v1/job");
+    int n=snprintf(url,sizeof(url),"%s%s",base,!strcmp(action,"health")?"/health":!strcmp(action,"stop")?"/v1/job/stop":!strcmp(action,"watermark")?"/v1/job/watermark":"/v1/job");
     if (n<0 || n>=(int)sizeof(url)) {fprintf(stderr,"URL too long\n"); curl_easy_cleanup(curl); curl_global_cleanup(); free(body); return 1;}
     curl_easy_setopt(curl,CURLOPT_URL,url);
     curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT,3L);

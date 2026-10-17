@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "NakiLiveTranscode experimental control API",
-    "version": "0.8.0",
+    "version": "0.9.0",
     "description": "Current implemented API only. Linux, one active job. No authentication. This static document is not served by the application. URI matching is exact (query strings and trailing slashes are not supported). Media errors after acceptance appear in job state=failed, not in a later HTTP response. Unknown and duplicate configuration keys are rejected. Request limit 16384 bytes, header limit 8192 bytes, HTTP timeout 10s. Libevent framing/limit errors and allocation failures can return HTML instead of the application JSON error envelope. Future pipeline-design.md fields are not accepted."
   },
   "servers": [{"url": "http://127.0.0.1:8090"}],
@@ -39,6 +39,41 @@
         }
       }
     },
+    "/v1/job/watermark": {
+      "post": {
+        "operationId": "replaceWatermark",
+        "summary": "Prepare and atomically replace the single watermark",
+        "description": "Full replacement. Revision must equal worker accepted_revision+1; initial revision=1. 202 acknowledges worker acceptance, not preparation/application. Poll watermark status. 2s ACK timeout returns 503 with uncertain outcome; inspect worker revision before retrying. Required cannot be disabled; startup.required immutable. Body 1..8192 bytes.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatermarkUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Worker accepted candidate; inspect preparation/application separately."
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Revision conflict, immutable required policy, no active assigned worker, pending ACK, or unsupported video canvas."
+          },
+          "413": {
+            "description": "Empty or over 8192 bytes."
+          },
+          "503": {
+            "description": "Worker unavailable, shutdown, or uncertain ACK timeout; inspect accepted revision."
+          }
+        }
+      }
+    }
+,
     "/v1/job/stop": {
       "post": {
         "operationId": "stopJob",
@@ -55,7 +90,7 @@
     },
     "schemas": {
       "JobConfig": {
-        "type": "object", "additionalProperties": false, "required": ["input", "output"],
+        "type": "object", "additionalProperties": false, "required": ["input"], "oneOf": [{"required":["output"],"not":{"required":["outputs"]}},{"required":["outputs"],"not":{"anyOf":[{"required":["output"]},{"required":["watermark"]}]}}],
         "description": "UTF-8 strings must fit C buffers in bytes, exclude NUL. At most 32 keys; duplicates rejected before schema validation. min_threads<=max_threads. width/height are both zero/omitted or both positive even values. RTMP output requires flv; SRT requires mpegts. pace=true requires a local input. Encoder preset/profile must match the selected encoder; defaults are conditional.",
         "properties": {
           "input": {"type": "string", "minLength": 1, "maxLength": 2047, "description": "Local path or enabled FFmpeg input URL; maximum 2047 bytes. Video H.264/HEVC only."},
@@ -78,13 +113,488 @@
           "frame_log_every": {"type": "integer", "minimum": 1, "maximum": 1000000, "default": 1, "description": "Detail sampling only; metrics still count every written video frame. I/key/slow frames override sampling."},
           "slow_frame_ms": {"type": "integer", "minimum": 1, "maximum": 600000, "default": 200},
           "audio_copy": {"type": "boolean", "default": true, "description": "Bounded AAC/MP3 passthrough for FLV/TS; MP4 always video-only. No audio encoding."},
-          "mux_wait_ms": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50, "description": "FLV/TS monotonic wall interleaving wait; polled every 10ms. Excludes encode, scheduling stalls and blocking network I/O."}
+          "mux_wait_ms": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50, "description": "FLV/TS monotonic wall interleaving wait; polled every 10ms. Excludes encode, scheduling stalls and blocking network I/O."},
+          "timestamps": {"$ref": "#/components/schemas/TimestampPolicy"},
+          "intra": {"$ref": "#/components/schemas/IntraPolicy"},
+          "frame_selection": {"$ref": "#/components/schemas/FrameSelection"},
+          "watermark": {"$ref": "#/components/schemas/Watermark"},
+          "outputs": {"type":"array","minItems":2,"maxItems":4,"items":{"$ref":"#/components/schemas/OutputConfig"}}
+        },
+        "allOf": [
+          {"if": {"required": ["intra"]}, "then": {"required": ["timestamps"], "properties": {"timestamps": {"properties": {"mode": {"const": "source_all"}}}}}},
+          {"if": {"required": ["frame_selection"], "properties": {"frame_selection": {"required": ["mode"], "properties": {"mode": {"const": "live_drop_only"}}}}}, "then": {"required": ["timestamps", "intra"]}},
+          {"not": {"required": ["timestamps", "encoder", "encoder_profile"], "properties": {"encoder": {"const": "libvvenc"}, "encoder_profile": {"const": "reference"}, "timestamps": {"required": ["mode"], "properties": {"mode": {"const": "source_all"}}}}}}
+        ]
+      },
+      "OutputConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "output"
+        ],
+        "description": "Fixed startup branch. Unique ASCII id and destination. Other media fields inherit top-level defaults; top-level output/watermark are forbidden with outputs. Width/height pair and area <=4096*2160; zero uses first decoded canvas then freezes it. Encoder threads across branches sum <=16. Decoder is shared; branch pressure/I/O deadline fails only this branch, no automatic retry or compressed-packet dropping. queue_media_ms charges nominal video work duration, not PTS gaps. inflight_bytes reserves retained source plus encoder-input buffers through actual mux, max 128 frames; not an RSS bound. Codec internals, watermark assets/canvases and bounded mux/deferred audio have separate caps.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "output": {
+            "$ref": "#/components/schemas/JobConfig/properties/output"
+          },
+          "output_format": {
+            "$ref": "#/components/schemas/JobConfig/properties/output_format"
+          },
+          "encoder": {
+            "$ref": "#/components/schemas/JobConfig/properties/encoder"
+          },
+          "encoder_preset": {
+            "$ref": "#/components/schemas/JobConfig/properties/encoder_preset"
+          },
+          "encoder_profile": {
+            "$ref": "#/components/schemas/JobConfig/properties/encoder_profile"
+          },
+          "width": {
+            "$ref": "#/components/schemas/JobConfig/properties/width"
+          },
+          "height": {
+            "$ref": "#/components/schemas/JobConfig/properties/height"
+          },
+          "bitrate": {
+            "$ref": "#/components/schemas/JobConfig/properties/bitrate"
+          },
+          "encoder_threads": {
+            "$ref": "#/components/schemas/JobConfig/properties/encoder_threads"
+          },
+          "audio_copy": {
+            "$ref": "#/components/schemas/JobConfig/properties/audio_copy"
+          },
+          "mux_wait_ms": {
+            "$ref": "#/components/schemas/JobConfig/properties/mux_wait_ms"
+          },
+          "watermark": {
+            "$ref": "#/components/schemas/JobConfig/properties/watermark"
+          },
+          "queue_items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16,
+            "default": 16
+          },
+          "queue_bytes": {
+            "type": "integer",
+            "minimum": 4096,
+            "maximum": 268435456,
+            "default": 134217728
+          },
+          "queue_media_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30000,
+            "default": 5000
+          },
+          "max_lag_ms": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 30000,
+            "default": 10000
+          },
+          "io_timeout_ms": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 10000,
+            "default": 5000
+          },
+          "inflight_bytes": {
+            "type": "integer",
+            "minimum": 1048576,
+            "maximum": 1073741824,
+            "default": 536870912
+          }
         }
       },
+      "OutputStatus": {
+        "type": "object",
+        "description": "Private output owner summary; all per-frame latency metrics end at actual local write/flush. output_id also labels trace and unconditional startup checkpoints. On teardown queued/inflight counters return to zero.",
+        "properties": {
+          "output_id": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "waiting_assets",
+              "running",
+              "failing",
+              "failed",
+              "stopped",
+              "completed"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "watermark": {
+            "$ref": "#/components/schemas/WatermarkStatus"
+          },
+          "ingress_to_mux": {
+            "$ref": "#/components/schemas/Metric"
+          },
+          "branch_queue": {
+            "$ref": "#/components/schemas/Metric"
+          }
+        },
+        "additionalProperties": true
+      },
+      "TimestampPolicy": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"const": "legacy"}}},
+          {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {
+            "mode": {"const": "source_all"}, "missing_pts": {"const": "fail"}, "discontinuity": {"const": "fail"},
+            "unwrap": {"const": "source_program_clock"}, "output_precision": {"const": "container_quantized"}
+          }}
+        ],
+        "description": "Omission preserves legacy best-effort/synthetic behavior. source_all rejects missing/duplicate/backward display PTS, permits source gaps and identifiable clock wrap; output quantization must remain monotonic. No I-anchor retiming or dirty timestamp repair."
+      },
+      "IntraPolicy": {
+        "type": "object", "additionalProperties": false, "required": ["mode"],
+        "description": "Requires timestamps.mode=source_all. VVenC reference profile is rejected. Source I matches decoded picture type, not packet key. Startup remains IDR; later requested I are ordinary I, with actual encoder type confirmation. Missing optional constraints use the single accepted behavior below.",
+        "properties": {
+          "mode": {"enum": ["follow_source", "periodic_pts_grid", "follow_source_with_max_gap"]},
+          "period_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+          "max_gap_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+          "source_match": {"const": "decoded_intra_picture"}, "source_pts_holes": {"const": "allow"},
+          "refresh_type": {"const": "encoder_intra"}, "protect_from_drop": {"const": true}
+        },
+        "allOf": [
+          {"if": {"properties": {"mode": {"const": "periodic_pts_grid"}}}, "then": {"required": ["period_ms"], "not": {"required": ["max_gap_ms"]}}},
+          {"if": {"properties": {"mode": {"const": "follow_source_with_max_gap"}}}, "then": {"required": ["max_gap_ms"], "not": {"required": ["period_ms"]}}},
+          {"if": {"properties": {"mode": {"const": "follow_source"}}}, "then": {"not": {"anyOf": [{"required": ["period_ms"]}, {"required": ["max_gap_ms"]}]}}}
+        ]
+      },
+      "FrameSelection": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"const": "all"}}},
+          {"type": "object", "additionalProperties": false, "required": ["mode", "overload"], "properties": {"mode": {"const": "live_drop_only"}, "overload": {"$ref": "#/components/schemas/Overload"}}}
+        ],
+        "description": "Omission keeps all decoded pictures. live_drop_only requires explicit source_all and intra policies; first/source-I/due-I pictures are protected. No default overload thresholds."
+      },
+      "Overload": {
+        "type": "object", "additionalProperties": false,
+        "required": ["signal", "levels", "recover_below_ms", "recover_sustain_ms", "max_continuous_degraded_ms", "on_exhausted"],
+        "properties": {
+          "signal": {"const": "oldest_inflight_ingress_age_ms"},
+          "levels": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "object", "additionalProperties": false, "required": ["enter_ms", "sustain_ms", "keep_one_in"], "properties": {
+            "enter_ms": {"type": "integer", "minimum": 1, "maximum": 3600000}, "sustain_ms": {"type": "integer", "minimum": 0, "maximum": 3600000}, "keep_one_in": {"type": "integer", "minimum": 2, "maximum": 256}
+          }}},
+          "recover_below_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+          "recover_sustain_ms": {"type": "integer", "minimum": 0, "maximum": 3600000},
+          "max_continuous_degraded_ms": {"type": "integer", "minimum": 1, "maximum": 86400000}, "on_exhausted": {"const": "fail_task"}
+        },
+        "description": "Server also checks strictly increasing enter_ms and keep_one_in, positive recover_below_ms below level 1, and max_continuous_degraded_ms greater than recover_sustain_ms. Recovery must complete strictly before the continuous degraded deadline; exhaustion wins equality, including late polls. Worker polls about every 50ms independently of mux/control connection. No hard realtime guarantee across an uninterruptible codec call. Inflight metadata cap is 512; overflow fails."
+      },
       "Error": {"type": "object", "required": ["event", "error"], "properties": {"event": {"const": "error"}, "error": {"type": "string"}, "unix_us": {"type": "integer"}, "monotonic_us": {"type": "integer"}, "process_id": {"type": "integer"}}},
+
+      "Watermark": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": false
+          },
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "uri": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2047,
+                "description": "Local regular path or HTTP/HTTPS URI; byte limit is 2047. Only built-in JPEG/PNG/GIF decoders."
+              },
+              "load_timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30000,
+                "default": 3000
+              }
+            }
+          },
+          "startup": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "required": {
+                "type": "boolean",
+                "default": false
+              },
+              "timeout_ms": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30000,
+                "default": 5000
+              },
+              "on_timeout": {
+                "const": "fail"
+              }
+            }
+          },
+          "update": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "on_error": {
+                "const": "keep_previous"
+              },
+              "apply_at": {
+                "const": "next_frame"
+              }
+            }
+          },
+          "placement": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "space": {
+                "const": "output_canvas"
+              },
+              "anchor": {
+                "enum": [
+                  "top_left",
+                  "top_center",
+                  "top_right",
+                  "center_left",
+                  "center",
+                  "center_right",
+                  "bottom_left",
+                  "bottom_center",
+                  "bottom_right"
+                ],
+                "default": "bottom_right"
+              },
+              "offset": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "x": {
+                    "type": "integer",
+                    "minimum": -8192,
+                    "maximum": 8192,
+                    "default": 0
+                  },
+                  "y": {
+                    "type": "integer",
+                    "minimum": -8192,
+                    "maximum": 8192,
+                    "default": 0
+                  },
+                  "unit": {
+                    "const": "px"
+                  }
+                }
+              },
+              "size": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2048,
+                    "default": 160
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2048,
+                    "default": 80
+                  },
+                  "unit": {
+                    "const": "px"
+                  },
+                  "fit": {
+                    "enum": [
+                      "contain",
+                      "stretch"
+                    ],
+                    "default": "contain"
+                  }
+                }
+              },
+              "opacity": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "default": 1
+              }
+            }
+          },
+          "animation": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "clock": {
+                "const": "media_pts"
+              },
+              "loop": {
+                "const": "forever"
+              },
+              "restart_on_replace": {
+                "const": true
+              }
+            }
+          }
+        },
+        "description": "Single SDR watermark. Enabled requires resource.uri. startup.required requires enabled and is immutable within a job; full replacement must repeat true for required jobs. Fixed 8MiB encoded, 2097152 source pixels, 128 frames, 60s animation, 64MiB raw per generation, two generations. Canvas <=4096x2160. Reject zero-delay animated GIF, APNG, HDR and unsupported PNG profiles/compressed ancillary metadata. See watermark.md.",
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "const": true
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "resource"
+              ],
+              "properties": {
+                "resource": {
+                  "required": [
+                    "uri"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "startup"
+              ],
+              "properties": {
+                "startup": {
+                  "required": [
+                    "required"
+                  ],
+                  "properties": {
+                    "required": {
+                      "const": true
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "const": true
+                }
+              }
+            }
+          }
+        ]
+      }
+,
+      "WatermarkUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "output_id": {"type":"string","minLength":1,"maxLength":32,"description":"Required for multi-output; forbidden on legacy single output. Revision belongs to the selected branch."},
+          "watermark": {
+            "$ref": "#/components/schemas/Watermark"
+          }
+        },
+        "required": [
+          "revision",
+          "watermark"
+        ]
+      }
+,
+      "WatermarkStatus": {
+        "type": "object",
+        "properties": {
+          "accepted_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "prepared_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "applied_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failed_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_frames": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_raw_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "encoded_limit_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "generation_raw_limit_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "frame_limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error": {
+            "type": "string"
+          },
+          "content_sha256": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "preparing",
+              "prepared",
+              "applied",
+              "failed"
+            ]
+          },
+          "video_properties_known": {"type": "boolean"},
+        "video_compatible": {"type": "boolean", "description": "Only meaningful when video_properties_known is true. An incompatible optional pre-first-frame enable fails its revision while keeping the initial disabled stream."},
+        "applied_source_pts_us": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      }
+,
       "Health": {
         "type": "object", "required": ["event", "status", "version", "pool"],
-        "properties": {"event": {"const": "health"}, "status": {"enum": ["ok", "stopping"]}, "version": {"type": "string"}, "srt_enabled": {"enum": [0, 1]}, "vvenc_enabled": {"enum": [0, 1]}, "live_mux_api": {"type": "integer"}, "async_api": {"type": "integer"}, "network_observer_api": {"type": "integer"}, "ffmpeg_version": {"type": "string"}, "execution_mode": {"const": "process_pool"}, "pool": {"$ref": "#/components/schemas/Pool"}},
+        "properties": {"event": {"const": "health"}, "status": {"enum": ["ok", "stopping"]}, "version": {"type": "string"}, "srt_enabled": {"enum": [0, 1]}, "vvenc_enabled": {"enum": [0, 1]}, "live_mux_api": {"type": "integer"}, "watermark_api": {"const": 1}, "max_outputs":{"const":4}, "dynamic_video":{"const":"fixed_output_filter_rebuild"}, "media_hooks_api":{"const":2}, "watermark_codecs": {"enum": [0, 1]}, "async_api": {"type": "integer"}, "network_observer_api": {"type": "integer"}, "ffmpeg_version": {"type": "string"}, "execution_mode": {"const": "process_pool"}, "pool": {"$ref": "#/components/schemas/Pool"}},
         "additionalProperties": true
       },
       "Metric": {"type": "object", "properties": {"count": {"type": "integer"}, "mean_ms": {"type": "number"}, "max_ms": {"type": "number"}, "p50_upper_ms": {"type": ["number", "null"]}, "p95_upper_ms": {"type": ["number", "null"]}, "p99_upper_ms": {"type": ["number", "null"]}, "overflow_16s": {"type": "integer"}, "slow_count": {"type": "integer"}}},
@@ -93,9 +603,12 @@
         "type": "object", "required": ["event", "state", "supervisor", "pool"],
         "description": "Extensible snapshot; see service.md, operations.md and live-mux.md for remaining telemetry. Non-required media fields are absent before the first worker snapshot. Latencies end at local mux/AVIO completion, not peer display.",
         "properties": {
-          "event": {"const": "status"}, "state": {"enum": ["idle", "starting", "running", "stopping", "finishing", "completed", "stopped", "failed"]},
+          "watermark": {"$ref": "#/components/schemas/WatermarkStatus"},
+          "outputs": {"type":"array","minItems":2,"maxItems":4,"items":{"$ref":"#/components/schemas/OutputStatus"}},
+          "outputs_failed":{"type":"integer","minimum":0,"maximum":4}, "outputs_completed":{"type":"integer","minimum":0,"maximum":4},
+          "event": {"const": "status"}, "state": {"enum": ["idle", "starting", "waiting_assets", "running", "stopping", "finishing", "completed", "completed_partial", "stopped", "failed"]},
           "job_id": {"type": "string"}, "request_id": {"type": "string"}, "error": {"type": "string"}, "log_path": {"type": "string"},
-          "packets_in": {"type": "integer", "description": "Video packets only."}, "packets_out": {"type": "integer", "description": "Successfully written video packets only."}, "frames_decoded": {"type": "integer"}, "frames_filtered": {"type": "integer"}, "bytes_out": {"type": "integer", "description": "All media AVIO bytes; not wire bytes."},
+          "packets_in": {"type": "integer", "description": "Video packets only."}, "packets_out": {"type": "integer", "description": "Successfully written video packets only."}, "frames_decoded": {"type": "integer", "description":"Shared input decoded once, not sum of renditions."}, "frames_filtered": {"type": "integer", "description":"Sum of output submissions for multi-output."}, "bytes_out": {"type": "integer", "description": "All media AVIO bytes; not wire bytes."},
           "audio_tracks": {"type": "integer"}, "audio_packets_out": {"type": "integer"}, "audio_dropped": {"type": "integer"}, "audio_unsupported": {"type": "integer"},
           "mux_wait_ms": {"type": "integer"}, "mux_queued_packets": {"type": "integer"}, "mux_queued_bytes": {"type": "integer"}, "mux_high_water_packets": {"type": "integer"}, "mux_timeout_releases": {"type": "integer"}, "mux_pressure_releases": {"type": "integer"}, "mux_forced_releases": {"type": "integer"},
           "write_phase": {"type": "string"}, "write_in_progress_ms": {"type": "number"}, "ingress_to_mux": {"$ref": "#/components/schemas/Metric"}, "mux": {"$ref": "#/components/schemas/Metric"},

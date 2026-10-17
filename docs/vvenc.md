@@ -8,6 +8,12 @@
 
 0.8.0 开放 MPEG-TS（含 UDP/SRT）、Enhanced FLV（含 RTMP）和本地 MP4。FLV/TS 支持 AAC/MP3 透传与晚音轨追加，见 [直播封装](live-mux.md)。普通 MP4 要在 EOF/trailer 后完成索引，不适合直接作为持续直播交付格式，当前仍只输出视频。输入视频限 H.264/HEVC，不接受 VVC 回灌；在线视频规格重建与音频转码尚未实现。
 
+## 显式普通 I（工作区扩展，待独立复审）
+
+可选 app `intra` 策略在现有 live profile 上启用 FFmpeg wrapper 的 `live-frame-intra=1`。匹配 VVenC fork 通过 `VVENC_LIVE_FRAME_INTRA_VERSION=1`、`m_liveFrameIntra` 和每张输入的 `forceIntra` 接收请求，在 PreProcess 的 PTS-group 决策之前关闭隐含周期 CRA、截断前一短组，并把后续请求编码为普通 TRAIL I；启动仍保留 IDR。GOP4 / 3B、PTS/DTS FIFO、one-pass JSON lookahead RC 的既有边界保持，reference profile 不接受该选项。
+
+FFmpeg `libvvenc.c` 将实际 access unit 的 sliceType 提供为 I/P/B 统计，媒体 hook 和追踪不再把全部 VVC 类型记为未知。实际码流 NAL、显示顺序 I 位置和逐帧类型均由独立解码核对，见 [单路帧策略](frame-policy.md) 及[验证记录](validation-frame-policy.md)。不提供新策略的请求仍使用下面原有的周期 profile。新 ABI 字段要求匹配本地 SDK；库修改尚未提交，父 gitlink 尚未更新。
+
 ## 时间与帧关联
 
 0.7.0 的默认 VVC profile 是 `live_3b_2s`：完整 4 帧组的显示顺序 `I BBB P BBB P…`、编码顺序 P4/B2/B1/B3。关键帧按首个编码输入 PTS 锚定的 `+2s、+4s、+6s…` 时间网格调度，选择达到目标的第一帧；不以实际关键帧位置重新推算下一目标，避免累积漂移。到边界时先用 P 结束前一组，再单独编码 CRA，完整组仍为 3B；边界及 EOF 可为 IP / IBP / IBBP。若输入向前跳过多个周期，只为新占用区间插一次 CRA，不连续补 I 帧。没有恰好处在目标时间的帧时，实际关键帧会迟于目标，不能保证任意 VFR 输入每段精确 2.000 秒或最大 GOP 时长。名义帧率及 `IntraPeriod=round(2×fps)` 只保留为 RC 提示；名义周期小于 4 帧仍拒绝。`STA=0` 禁止场景切换额外插 I，`POC0IDR=1` 使首输出从首画面开始，不强制源 PTS 归零；后续关键帧为 CRA，未承诺闭合 IDR。
