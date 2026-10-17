@@ -62,11 +62,12 @@ int naki_branch_queue_init(NakiBranchQueue *q,unsigned capacity,uint64_t bytes,i
     if(ret)pthread_mutex_destroy(&q->mutex);
     return ret?AVERROR(ret):0;
 }
-int naki_branch_queue_push(NakiBranchQueue *q,NakiBranchItem *i,int64_t now) {
+static int push(NakiBranchQueue *q,NakiBranchItem *i,int64_t now,int64_t grace) {
     int ret=naki_branch_item_charge(i);if(ret<0)return ret;
     pthread_mutex_lock(&q->mutex);
     if(q->aborted)ret=AVERROR(ECANCELED);
     else if(q->eof)ret=AVERROR_EOF;
+    else if(q->admission_deadline_us&&now>=q->admission_deadline_us) {q->admission_timeouts++;ret=AVERROR(ETIMEDOUT);}
     else if(i->charged_bytes>q->byte_limit||i->media_us>(uint64_t)q->media_limit_us)ret=AVERROR(EFBIG);
     else {
         int64_t ingress=i->ingress_us;
@@ -77,7 +78,13 @@ int naki_branch_queue_push(NakiBranchQueue *q,NakiBranchItem *i,int64_t now) {
         if(now<ingress)ret=AVERROR(EINVAL);
         else if((uint64_t)now-(uint64_t)ingress>(uint64_t)q->lag_limit_us)ret=AVERROR(ETIMEDOUT);
         else if(q->count==q->capacity||i->charged_bytes>q->byte_limit-q->bytes||
-                i->media_us>(uint64_t)q->media_limit_us-q->media_us)ret=AVERROR(EAGAIN);
+                i->media_us>(uint64_t)q->media_limit_us-q->media_us) {
+            ret=AVERROR(EAGAIN);
+            if(grace) {
+                if(!q->admission_deadline_us)q->admission_deadline_us=now+grace;
+                q->admission_retries++;
+            }
+        }
         else {
             q->items[(q->head+q->count)%q->capacity]=*i;q->count++;q->bytes+=i->charged_bytes;q->media_us+=i->media_us;*i=(NakiBranchItem){0};
             if(q->count>q->high_water)q->high_water=q->count;
@@ -86,6 +93,33 @@ int naki_branch_queue_push(NakiBranchQueue *q,NakiBranchItem *i,int64_t now) {
         }
     }
     pthread_mutex_unlock(&q->mutex);return ret;
+}
+int naki_branch_queue_push(NakiBranchQueue *q,NakiBranchItem *i,int64_t now) {
+    return push(q,i,now,0);
+}
+int naki_branch_queue_admit(NakiBranchQueue *q,NakiBranchItem *i,int64_t now,int64_t grace) {
+    if(grace<1||grace>1000000||now<0||now>INT64_MAX-grace)return AVERROR(EINVAL);
+    return push(q,i,now,grace);
+}
+int naki_branch_admit_many(NakiBranchOffer *offers,unsigned count,int64_t grace,
+    int (*check)(void *),void *opaque) {
+    if(!offers||!count||count>4||grace<1||grace>1000000)return AVERROR(EINVAL);
+    for(unsigned i=0;i<count;i++)
+        if(offers[i].queue&&offers[i].result==AVERROR(EAGAIN)&&!offers[i].item)return AVERROR(EINVAL);
+    for(;;) {
+        int ret=check?check(opaque):0;
+        if(ret<0) {
+            for(unsigned i=0;i<count;i++)if(offers[i].queue&&offers[i].result==AVERROR(EAGAIN))offers[i].result=ret;
+            return ret;
+        }
+        int pending=0;
+        for(unsigned i=0;i<count;i++)if(offers[i].queue&&offers[i].result==AVERROR(EAGAIN)) {
+            offers[i].result=naki_branch_queue_admit(offers[i].queue,offers[i].item,av_gettime_relative(),grace);
+            pending+=offers[i].result==AVERROR(EAGAIN);
+        }
+        if(!pending)return 0;
+        av_usleep(1000);
+    }
 }
 int naki_branch_queue_pop(NakiBranchQueue *q,NakiBranchItem *i,int64_t deadline) {
     if(!i||i->frame||i->packet||i->parameters||deadline<0)return AVERROR(EINVAL);
@@ -101,11 +135,15 @@ int naki_branch_queue_pop(NakiBranchQueue *q,NakiBranchItem *i,int64_t deadline)
     else if(!ret) {
         *i=q->items[q->head];q->items[q->head]=(NakiBranchItem){0};q->head=(q->head+1)%q->capacity;
         q->count--;q->bytes-=i->charged_bytes;q->media_us-=i->media_us;
+        if(q->admission_deadline_us&&q->count<=(q->capacity-1)/2&&q->bytes<=(q->byte_limit-1)/2&&
+           q->media_us<=((uint64_t)q->media_limit_us-1)/2&&av_gettime_relative()<q->admission_deadline_us)
+            q->admission_deadline_us=0;
     }
     pthread_mutex_unlock(&q->mutex);return ret;
 }
 int naki_branch_queue_check(NakiBranchQueue *q,int64_t now) {
     pthread_mutex_lock(&q->mutex);int ret=q->aborted?AVERROR(ECANCELED):0;
+    if(!ret&&q->admission_deadline_us&&now>=q->admission_deadline_us)ret=AVERROR(ETIMEDOUT);
     for(unsigned n=0;!ret&&n<q->count;n++) {
         int64_t ingress=q->items[(q->head+n)%q->capacity].ingress_us;
         if(now<ingress)ret=AVERROR(EINVAL);

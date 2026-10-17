@@ -62,7 +62,8 @@ static int inspect(const char *path) {
 int main(int argc,char **argv) {
     if(argc==3 && !strcmp(argv[1],"inspect"))return inspect(argv[2]);
     if(argc!=5)return 2;
-    int serve=!strcmp(argv[1],"serve");
+    int pause_source=!strcmp(argv[1],"serve-pause");
+    int serve=!strcmp(argv[1],"serve")||pause_source;
     FILE *file=fopen(argv[3],serve ? "rb" : "wb");
     if(!file)return 3;
     AVIOContext *io=NULL;AVDictionary *options=NULL;
@@ -91,11 +92,15 @@ int main(int argc,char **argv) {
         }
     } else if(serve) {
         int rate=atoi(argv[4]);if(rate<=0)return 8;
-        size_t n;
+        size_t n;int paused=0;
         while((n=fread(buffer,1,1316,file))) {
-            pace(epoch+(int64_t)(total*1000000/rate));
+            if(!pause_source)pace(epoch+(int64_t)(total*1000000/rate));
             avio_write(io,buffer,n);avio_flush(io);total+=n;
             if(io->error<0){ret=io->error;break;}
+            if(pause_source&&!paused&&total>=1000000) {
+                paused=1;puts("SOURCE_PAUSED");fflush(stdout);av_usleep(1200000);
+                puts("SOURCE_RESUMED");fflush(stdout);
+            }
         }
     } else {
         while((ret=avio_read_partial(io,buffer,sizeof(buffer)))>0) {

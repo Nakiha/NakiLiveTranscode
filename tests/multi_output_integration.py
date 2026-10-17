@@ -66,17 +66,16 @@ def main():
     sample=RUN/'sample.ts'
     command(['ffmpeg','-v','error','-f','lavfi','-i','color=black:size=320x180:rate=25:duration=5','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=5',
              '-c:v','libx264','-preset','ultrafast','-threads','2','-g','25','-bf','0','-c:a','aac','-b:a','64k',
-             '-muxdelay','0','-muxpreload','0','-f','mpegts',sample])
-    # A success fixture must not rely on owner scheduling to absorb a full
-    # 16-packet audio PES burst plus queued video in the shared 16-item budget.
-    # Keep all media and assert the packet-order precondition; pressure cases
-    # below and the mixed-queue unit test retain the hard admission contract.
+             '-f','mpegts',sample])
+    # Exercise the original default TS packaging, including an audio PES burst
+    # that fills the shared 16-item queue. Runtime admission must recover its
+    # transient pressure without increasing the hard queue limits or dropping.
     packets=json.loads(command(['ffprobe','-v','error','-show_packets','-show_entries','packet=codec_type','-of','json',sample]))['packets']
     burst=longest=0
     for packet in packets:
         burst=burst+1 if packet['codec_type']=='audio' else 0;longest=max(longest,burst)
-    assert longest<=4,longest
-    results['success-fixture-audio-burst']={'longest_consecutive_audio_packets':longest,'limit':4}
+    assert longest>=16,longest
+    results['success-fixture-audio-burst']={'longest_consecutive_audio_packets':longest,'minimum':16}
     s=socket.socket();s.bind(('127.0.0.1',0));port=s.getsockname()[1];s.close();base=f'http://127.0.0.1:{port}';server=None;logs=[]
     def api(body=None,path='/v1/job',code=200):
         req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json'})

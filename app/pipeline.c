@@ -29,6 +29,11 @@
 #define READER_CAPACITY 8
 #define LEDGER_CAPACITY 256
 #define IO_TIMEOUT_US 10000000
+#define BRANCH_ADMISSION_GRACE_US 100000
+
+#if !defined(AVFORMAT_LIVE_INPUT_POLL_VERSION) || AVFORMAT_LIVE_INPUT_POLL_VERSION != 1
+#error "The matching FFmpeg resumable live input poll API 1 is required"
+#endif
 
 typedef struct Stamp {
     int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
@@ -151,15 +156,16 @@ static int event_log(Pipeline *p, const char *event) {
 static void *reader_main(void *opaque) {
     (void)crash_thread_init();
     Pipeline *p=opaque; Job *job=p->job;
-    int ret=0; int64_t seq=0, first_ts=AV_NOPTS_VALUE, epoch=0;
+    int ret=0; int64_t seq=0, first_ts=AV_NOPTS_VALUE, epoch=0, read_started=0;
     while (!atomic_load(&job->cancel)) {
         AVPacket *packet=av_packet_alloc();
         if (!packet) {ret=AVERROR(ENOMEM); break;}
-        int64_t began=now_us();
+        if(!read_started)read_started=now_us();
+        int64_t began=read_started;
         atomic_store(&p->read_interrupt.deadline,began+IO_TIMEOUT_US);
         ret=av_read_frame(p->input,packet);
         int64_t finished=now_us();
-        atomic_store(&p->read_interrupt.deadline,0);
+        if(ret!=AVERROR(EAGAIN)) {atomic_store(&p->read_interrupt.deadline,0);read_started=0;}
         if (ret<0) {
             av_packet_free(&packet);
             if (ret==AVERROR(EAGAIN)) {av_usleep(1000); continue;}
@@ -1050,7 +1056,11 @@ static int initialize_decoder(Pipeline *p) {
     if (ret<0) return ret;
     p->stream_index=ret;
     checkpoint(p,&p->job->input_probe_done_us);
-    if((ret=avformat_live_input_probe_limit(p->input,100000))<0)return ret;
+    p->stage="bounded live input initialization";
+    if(avformat_version()<AV_VERSION_INT(63,3,104))return AVERROR(ENOSYS);
+    ret=!strcmp(p->input->iformat->name,"mpegts") ?
+        avformat_live_input_probe_poll(p->input,100000) : avformat_live_input_probe_limit(p->input,100000);
+    if(ret<0)return ret;
     AVStream *stream=p->input->streams[p->stream_index];
     if (stream->codecpar->codec_id!=AV_CODEC_ID_H264 && stream->codecpar->codec_id!=AV_CODEC_ID_HEVC) return AVERROR(ENOSYS);
     p->input_tb=stream->time_base;
@@ -1190,7 +1200,29 @@ static int start_branches(Pipeline *p) {
     }
     return check_branches(p,0);
 }
+static int admission_check(void *opaque) {
+    Pipeline *p=opaque;
+    return atomic_load(&p->job->cancel)?AVERROR_EXIT:check_branches(p,0);
+}
+static int admit_branch_items(Pipeline *p,NakiBranchItem *items) {
+    NakiBranchOffer offers[4]={0};
+    for(int i=0;i<p->branch_count;i++)if(items[i].frame||items[i].packet)
+        offers[i]=(NakiBranchOffer){.queue=&p->branches[i].queue,.item=&items[i],.result=AVERROR(EAGAIN)};
+    naki_branch_admit_many(offers,(unsigned)p->branch_count,BRANCH_ADMISSION_GRACE_US,admission_check,p);
+    for(int i=0;i<p->branch_count;i++) {
+        Branch *b=&p->branches[i];Job *j=b->pipeline.job;
+        if(items[i].frame) {
+            Stamp *s=(Stamp *)items[i].frame->opaque_ref->data;
+            naki_branch_release(j,(uint64_t)s->frame_id,s->branch_charge);
+        }
+        if(offers[i].queue&&offers[i].result<0&&!atomic_load(&p->job->cancel)&&!atomic_load(&j->done))
+            fail_branch(b,offers[i].result,"branch bounded admission");
+        naki_branch_item_free(&items[i]);branch_queue_stats(b);
+    }
+    return check_branches(p,0);
+}
 static int fanout_frame(Pipeline *p,AVFrame *frame) {
+    NakiBranchItem items[4]={0};
     int ret=prepare_decoded_frame(p,frame);if(ret<0)return ret;Stamp *source=(Stamp *)frame->opaque_ref->data;
     pthread_mutex_lock(&p->job->mutex);p->job->frames_decoded++;p->job->frame_id_last=source->frame_id;p->job->timestamp_wraps=p->timeline.wraps;
     metric_add(&p->job->lifetime.decode,(source->decoded_us-source->submitted_us)/1000.0,p->job->config.slow_frame_ms);
@@ -1221,14 +1253,15 @@ static int fanout_frame(Pipeline *p,AVFrame *frame) {
         } else if(ret>=0)ret=output_bytes<0?output_bytes:AVERROR(EINVAL);
         if(ret>=0) {
             Stamp *stamp=(Stamp *)item.frame->opaque_ref->data;stamp->branch_charge=reservation;stamp->branch_enqueued_us=now_us();
-            ret=naki_branch_queue_push(&b->queue,&item,now_us());
+            items[i]=item;item=(NakiBranchItem){0};
         }
         if(ret<0) {if(reserved)naki_branch_release(j,(uint64_t)source->frame_id,reservation);fail_branch(b,ret,"branch frame admission budget");}
         naki_branch_item_free(&item);branch_queue_stats(b);
     }
-    return check_branches(p,0);
+    return admit_branch_items(p,items);
 }
 static int fanout_audio(Pipeline *p,const InputItem *audio) {
+    NakiBranchItem items[4]={0};
     for(int i=0;i<p->branch_count;i++) {
         Branch *b=&p->branches[i];Job *j=b->pipeline.job;
         if(!b->started||atomic_load(&j->done)||atomic_load(&j->cancel)||!j->config.audio_copy||!strcmp(j->config.output_format,"mp4"))continue;
@@ -1238,11 +1271,11 @@ static int fanout_audio(Pipeline *p,const InputItem *audio) {
         int64_t duration=audio->packet->duration>0?av_rescale_q(audio->packet->duration,audio->tb,AV_TIME_BASE_Q):0;
         if(duration<=0)duration=audio->params->sample_rate>0?av_rescale(1152,1000000,audio->params->sample_rate):40000;
         item.media_us=duration>0?(uint64_t)duration:1;
-        if(ret>=0)ret=naki_branch_queue_push(&b->queue,&item,now_us());
+        if(ret>=0) {items[i]=item;item=(NakiBranchItem){0};}
         if(ret<0)fail_branch(b,ret,"branch audio admission budget");
         naki_branch_item_free(&item);branch_queue_stats(b);
     }
-    return check_branches(p,0);
+    return admit_branch_items(p,items);
 }
 static int finish_branches(Pipeline *p,int aborting) {
     for(int i=0;i<p->branch_count;i++)if(p->branches[i].initialized) {

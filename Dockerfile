@@ -34,6 +34,7 @@ COPY tests/watermark_state_test.c tests/
 COPY tests/branch_queue_test.c tests/
 COPY tests/video_filter_test.c tests/
 COPY tests/output_video_probe.c tests/
+COPY tests/live_input_poll_test.c tests/
 COPY tests/multi_output_integration.py tests/
 ARG NAKI_MEDIA_HOOK_SOURCE=
 RUN NAKI_SKIP_FFMPEG=1 NAKI_MEDIA_HOOK_SOURCE="$NAKI_MEDIA_HOOK_SOURCE" bash scripts/build-service.sh

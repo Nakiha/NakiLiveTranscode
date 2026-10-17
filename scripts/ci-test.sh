@@ -19,6 +19,7 @@ python3 tests/service_integration.py
 python3 tests/vvenc_integration.py
 python3 tests/vvenc_pts_integration.py
 python3 tests/live_mux_integration.py
+python3 tests/live_input_stability_integration.py
 python3 tests/media_hooks_integration.py
 python3 tests/vvenc_latency.py --repeats 1
 python3 tests/observability_integration.py

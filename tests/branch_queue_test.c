@@ -18,6 +18,94 @@ static void *consumer(void *opaque) {
     NakiBranchItem i={0};int ret=naki_branch_queue_pop(opaque,&i,av_gettime_relative()+2000000);
     assert(ret==AVERROR(ECANCELED));return NULL;
 }
+typedef struct AdmissionTest {
+    NakiBranchQueue *blocked,*healthy;
+    int calls,drain,cancel;
+} AdmissionTest;
+static int admission_schedule(void *opaque) {
+    AdmissionTest *test=opaque;
+    if(++test->calls==2) {
+        /* Every branch was offered its item before the producer waited. */
+        assert(test->healthy->count==1&&test->blocked->count==16);
+        if(test->cancel)return AVERROR_EXIT;
+        if(test->drain) {
+            NakiBranchItem item={0};
+            for(int n=0;n<9;n++) {
+                assert(!naki_branch_queue_pop(test->blocked,&item,0)&&item.sequence==n);
+                naki_branch_item_free(&item);
+            }
+        }
+    }
+    return 0;
+}
+static void admission_tests(void) {
+    for(int mode=0;mode<3;mode++) {
+        NakiBranchQueue queues[2];NakiBranchItem pending[2];NakiBranchOffer offers[2];
+        for(int b=0;b<2;b++) {
+            assert(!naki_branch_queue_init(&queues[b],16,1000000,1000000,10000000));
+            pending[b]=frame(16+b);pending[b].ingress_us=av_gettime_relative();
+            offers[b]=(NakiBranchOffer){&queues[b],&pending[b],AVERROR(EAGAIN)};
+        }
+        for(int n=0;n<16;n++) {
+            NakiBranchItem item=frame(n);item.ingress_us=av_gettime_relative();
+            assert(!naki_branch_queue_push(&queues[0],&item,av_gettime_relative()));
+        }
+        AdmissionTest test={.blocked=&queues[0],.healthy=&queues[1],.drain=mode==0,.cancel=mode==2};
+        int64_t began=av_gettime_relative();
+        int ret=naki_branch_admit_many(offers,2,20000,admission_schedule,&test);
+        assert(offers[1].result==0&&!pending[1].frame&&queues[1].count==1);
+        if(mode==0) {
+            assert(!ret&&!offers[0].result&&!pending[0].frame&&!queues[0].admission_deadline_us);
+            NakiBranchItem item={0};
+            for(int n=9;n<=16;n++) {
+                assert(!naki_branch_queue_pop(&queues[0],&item,0)&&item.sequence==n);
+                naki_branch_item_free(&item);
+            }
+        } else {
+            assert(pending[0].frame&&queues[0].count==16);
+            if(mode==1)assert(!ret&&offers[0].result==AVERROR(ETIMEDOUT)&&av_gettime_relative()-began>=20000);
+            else assert(ret==AVERROR_EXIT&&offers[0].result==AVERROR_EXIT&&test.calls==2);
+            assert(pending[0].charged_bytes<=queues[0].byte_limit&&pending[0].media_us<=(uint64_t)queues[0].media_limit_us);
+            naki_branch_item_free(&pending[0]);
+            if(mode==1) {
+                /* The slow branch has exhausted its one pressure window.
+                 * Retire it and keep delivering subsequent fast-branch items,
+                 * rather than demonstrating fairness for only its first item. */
+                naki_branch_queue_abort(&queues[0]);NakiBranchItem received={0};
+                assert(!naki_branch_queue_pop(&queues[1],&received,0)&&received.sequence==17);
+                naki_branch_item_free(&received);
+                for(int n=18;n<82;n++) {
+                    NakiBranchItem next=frame(n);next.ingress_us=av_gettime_relative();
+                    NakiBranchOffer subsequent[2]={{0},{&queues[1],&next,AVERROR(EAGAIN)}};
+                    assert(!naki_branch_admit_many(subsequent,2,20000,NULL,NULL)&&!subsequent[1].result&&!next.frame);
+                    assert(!naki_branch_queue_pop(&queues[1],&received,0)&&received.sequence==n);
+                    naki_branch_item_free(&received);
+                }
+                assert(!queues[1].count&&!queues[1].admission_deadline_us);
+            }
+        }
+        assert(queues[0].high_water==16&&queues[1].high_water==1);
+        for(int b=0;b<2;b++)naki_branch_queue_destroy(&queues[b]);
+    }
+    /* A single free slot is not recovery: sustained pressure keeps the same
+     * deadline even when the producer can transfer one item in between. */
+    for(int capacity=2;capacity<=16;capacity+=14) {
+        NakiBranchQueue q;assert(!naki_branch_queue_init(&q,capacity,1000000,1000000,10000000));
+        int64_t now=av_gettime_relative();
+        for(int n=0;n<capacity;n++) {NakiBranchItem item=frame(n);item.ingress_us=now;assert(!naki_branch_queue_push(&q,&item,now));}
+        NakiBranchItem next=frame(capacity),item={0};next.ingress_us=now;
+        assert(naki_branch_queue_admit(&q,&next,now,100000)==AVERROR(EAGAIN));
+        int64_t deadline=q.admission_deadline_us;
+        for(int n=0;n<4;n++) {
+            assert(!naki_branch_queue_pop(&q,&item,0));naki_branch_item_free(&item);
+            assert(!naki_branch_queue_admit(&q,&next,now+n+1,100000)&&q.admission_deadline_us==deadline);
+            next=frame(capacity+n+1);next.ingress_us=now;
+            assert(naki_branch_queue_admit(&q,&next,now+n+2,100000)==AVERROR(EAGAIN));
+        }
+        assert(naki_branch_queue_admit(&q,&next,deadline,100000)==AVERROR(ETIMEDOUT)&&next.frame);
+        naki_branch_item_free(&next);naki_branch_queue_destroy(&q);
+    }
+}
 int main(void) {
     NakiBranchQueue q;assert(!naki_branch_queue_init(&q,2,1000000,100,1000));
     NakiBranchItem a=frame(0),b=frame(40),c=frame(80),item={0};
@@ -97,5 +185,6 @@ int main(void) {
     assert(!naki_branch_queue_init(&q,2,2*custom[0].charged_bytes-1,100,1000));
     assert(!naki_branch_queue_push(&q,&custom[0],100));assert(naki_branch_queue_push(&q,&custom[1],100)==AVERROR(EAGAIN)&&custom[1].packet);
     naki_branch_item_free(&custom[1]);naki_branch_queue_destroy(&q);
-    assert(atomic_load(&released)==atomic_load(&created));puts("branch queue: ownership, COW, count/byte/media/lag bounds, legal PTS gaps, EOF, timed wait and cancellation passed");return 0;
+    admission_tests();
+    assert(atomic_load(&released)==atomic_load(&created));puts("branch queue: ownership, COW, unchanged bounds, FIFO admission recovery, branch fairness, sustained pressure, EOF and cancellation passed");return 0;
 }
