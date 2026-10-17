@@ -42,7 +42,9 @@ if [[ $previous_key != "$object_key" ]]; then
     clean=(--clean-first)
 fi
 cmake --build "$cache/vvenc" "${clean[@]}" -j"${FFMPEG_LIVE_BUILD_JOBS:-8}"
-cmake --install "$cache/vvenc"
+# A fresh build can have the same install timestamp as the old DSO/header.
+# Force CMake's file(INSTALL) copy path rather than sealing stale installed bytes.
+CMAKE_INSTALL_ALWAYS=1 cmake --install "$cache/vvenc"
 # Archive before stripping; the runtime never needs DWARF. Keep exact Build IDs.
 if [[ -n ${NAKI_VVENC_SYMBOLS:-} ]]; then
     python3 "$root/scripts/archive-symbols.py" --output "$NAKI_VVENC_SYMBOLS" \

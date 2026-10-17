@@ -37,3 +37,13 @@
 修正仅在测试和 CI 证据收集：成功夹具显式设置 `-muxdelay 0 -muxpreload 0` 并新增连续音频包不超过 4 的前置断言，保留全部四路完成、500 帧、像素/PTS/B 帧及音频写出+显式丢弃闭合断言。两份诊断夹具的 125 个视频包、236 个音频包的压缩 payload SHA-256 序列逐包相同；封装起始时刻和交织改变后仍按当前输入时间轴验收，不把它当作真实网络突发承载能力证据。队列上限、运行时满队列失败策略及压力场景断言均未放宽。新增确定性单测将一张视频及 15 个音频项填满 16 槽，第 16 个音频明确 EAGAIN、保留调用方所有权，并验证 FIFO 与全部引用释放。CI 另收集 watermark/multi-output 目录，终态断言前保存 JSON，失败时也能取回源夹具/日志。
 
 本地使用原 SDK、最多 2 编译任务重新构建，通过混合队列单测及绑定 CPU 0–3 的完整多输出回归：`out/multi-output-5on_va2f/COMPLETE.json`，含原 15 项功能场景及新增包序前置检查，四路各 125 包。FLV/TS 音频各写 235、明确丢 1；VVC 写 236、丢 0，均与源 236 包闭合。日志、包序/逐包摘要诊断及 SDK 校验记录见 `out/pr-publication-20261017/`。本地最初内联启动器在编译完成后记录退出码时出现引号错误，已改为独立脚本重新取得构建/单测/完整回归退出码 0，旧错误保留；不把该启动器错误说成源码编译失败。远端修正后的 CI 结果以 PR 最新运行实际状态为准。
+
+## 后续 CI 暴露的 SDK 安装时间戳缺陷
+
+测试/证据补丁 `46dea079cc6b88682e1f58990cccb607b88adc1a` 的 run `39013371468` 通过同一 SDK 门禁和 Docker 构建，却在更早的 SDK 缓存回归失败，尚未执行到修正后的多输出用例。上传证据的 `sdk-build-ssl6lon6/same-mtime-vvenc.log` 显示 VVenC 对象和 DSO 确实重编译，`cmake --install` 却将已安装 DSO 判作 Up-to-date；新身份被 seal 后消费到的仍是旧 marker 11，预期应为 12。这是安装层的真实内容绑定漏洞，不能用重跑或 sleep 将其掩盖。
+
+`build-vvenc.sh` 现仅在安装命令上设置 `CMAKE_INSTALL_ALWAYS=1`，强制更新已构建的库及头文件；没有删除缓存、放宽凭据校验、修改库 pin 或更改媒体运行时。[CMake 3.28.3 安装器源码](https://raw.githubusercontent.com/Kitware/CMake/v3.28.3/Source/cmFileInstaller.cxx) 的环境变量分支提供这一行为。新增测试在链接后主动将旧安装库的 mtime 对齐到新库，同时保留旧 mtime 修改同尺寸头文件；既不依赖机器速度，也不延迟测试。夹具设置调用方 CMAKE_INSTALL_ALWAYS=0，验证构建入口的局部强制安装确实覆盖它。
+
+对未修构建脚本，确定性夹具重现旧 DSO 和旧头文件被错误 seal，见 `out/pr-publication-20261017/sdk-install-before.log`（退出 1，预期复现）。修复后完整原 SDK 缓存回归通过，包含 same-mtime 重建/skip、部分编译失败、SIGTERM/SIGKILL、seal 失败及 configure 失败/信号恢复，见 `out/sdk-build-6v_q92i1/COMPLETE.json` 和 `sdk-install-after.log`（退出 0）；原 12 项 SDK 身份单测亦通过，未跳过断言。
+
+该修复改变依赖配方，必须使用新的 release key 和匹配 SDK/DWARF。已有 `3e31b2c0ee1e6a9018ddb6d2` 归档是旧配方的全新空缓存构建，保持原样，不覆盖、不冒充新配方。新配方的真实 SDK 构建、归档发布和完整远端 service 验证仍待执行；新增依赖归档须获得针对其具体 tag 的授权。不能将上述小型夹具回归说成真实媒体 SDK 已重建或远端 CI 已通过。

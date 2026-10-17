@@ -83,7 +83,8 @@ def run(expect_stale=False):
     # Exact whole-second times survive DrvFS/NTFS timestamp precision too.
     for path in (source, vvenc_source, ffmpeg_broken, vvenc_broken, configure):
         os.utime(path, ns=(1700000000000000000, 1700000000000000000))
-    (vvenc / "marker.h").write_text("int vvenc_marker(void);\n")
+    vvenc_header = vvenc / "marker.h"
+    vvenc_header.write_text("int vvenc_marker(void); /* 11 */\n")
     (vvenc / "CMakeLists.txt").write_text(textwrap.dedent('''\
         cmake_minimum_required(VERSION 3.16)
         project(VVenCCacheFixture LANGUAGES C)
@@ -115,6 +116,14 @@ def run(expect_stale=False):
         #!/usr/bin/python3
         import os, pathlib, signal, subprocess, sys
         code = subprocess.call(['gcc', *sys.argv[1:]])
+        # Force the install timestamp collision seen on the fast Linux CI
+        # runner, without sleeping or changing the rebuilt DSO's bytes.
+        installed = os.environ.get('SDK_TEST_ALIGN_INSTALL_TIMES')
+        if code == 0 and installed and '-o' in sys.argv[1:]:
+            output = pathlib.Path(sys.argv[sys.argv.index('-o') + 1])
+            if output.name == 'libvvenc.so' and pathlib.Path(installed).exists():
+                stamp = output.stat()
+                os.utime(installed, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
         target = os.environ.get('SDK_TEST_TARGET')
         if code == 0 and target and target in sys.argv[1:]:
             pathlib.Path(os.environ['SDK_TEST_BARRIER']).write_text('object complete\\n')
@@ -125,7 +134,8 @@ def run(expect_stale=False):
     compiler.chmod(0o755)
     environment = dict(os.environ, NAKI_BUILD_ROOT=str(cache), FFMPEG_LIVE_BUILD_JOBS="1",
                        NAKI_SKIP_FFMPEG="0", NAKI_FFMPEG_ONLY="0", NAKI_MEDIA_HOOK_SOURCE="",
-                       CC=str(compiler), CMAKE_GENERATOR="Unix Makefiles")
+                       CC=str(compiler), CMAKE_GENERATOR="Unix Makefiles", CMAKE_INSTALL_ALWAYS="0",
+                       SDK_TEST_ALIGN_INSTALL_TIMES=str(cache / "install/lib/libvvenc.so"))
     environment.pop("NAKI_VVENC_SYMBOLS", None)
     environment.pop("LD_LIBRARY_PATH", None)
     for name in ("SDK_TEST_TARGET", "SDK_TEST_BARRIER", "SDK_TEST_MUTATE_SOURCE", "SDK_TEST_CONFIGURE_MODE"):
@@ -171,10 +181,14 @@ def run(expect_stale=False):
     vvenc_source.write_text("int vvenc_marker(void) { return 12; }\n")
     os.utime(vvenc_source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
     assert vvenc_source.stat().st_mtime_ns == stamp.st_mtime_ns
+    header_stamp = vvenc_header.stat()
+    vvenc_header.write_text("int vvenc_marker(void); /* 12 */\n")
+    os.utime(vvenc_header, ns=(header_stamp.st_atime_ns, header_stamp.st_mtime_ns))
     changed_vvenc = build("same-mtime-vvenc")
     final_skip = build("same-mtime-vvenc-skip", skip=True)
+    installed_header = (cache / "install/include/vvenc/marker.h").read_text()
     report = {"first": first, "ffmpeg_changed": changed_ffmpeg, "ffmpeg_skip": ffmpeg_skip,
-              "vvenc_changed": changed_vvenc, "final_skip": final_skip}
+              "vvenc_changed": changed_vvenc, "final_skip": final_skip, "vvenc_header": installed_header}
     (result / "observations.json").write_text(json.dumps(report, indent=2) + "\n")
     assert first["identity"] != changed_ffmpeg["identity"] != changed_vvenc["identity"]
     if expect_stale:
@@ -185,6 +199,7 @@ def run(expect_stale=False):
     else:
         assert changed_ffmpeg["marker"] == ffmpeg_skip["marker"] == [2, 11], report
         assert changed_vvenc["marker"] == final_skip["marker"] == [2, 12], report
+        assert installed_header == vvenc_header.read_text(), report
         print("PASS same-mtime source changes rebuild actual FFmpeg/VVenC DSOs, seal and skip:", result, flush=True)
 
     baseline = {path: (path.read_bytes(), path.stat().st_mtime_ns)
