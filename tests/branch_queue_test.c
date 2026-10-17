@@ -61,6 +61,24 @@ int main(void) {
     assert(a.packet&&a.parameters&&!av_new_packet(a.packet,100)&&!avcodec_parameters_copy(a.parameters,original));
     original->codec_id=AV_CODEC_ID_MP3;assert(!naki_branch_queue_push(&q,&a,100));avcodec_parameters_free(&original);
     assert(!naki_branch_queue_pop(&q,&item,0)&&item.parameters->codec_id==AV_CODEC_ID_AAC);naki_branch_item_free(&item);naki_branch_queue_destroy(&q);
+    /* A default TS audio PES can yield 16 consecutive audio packets. One
+     * retained video plus that burst must still obey the combined 16-item
+     * bound, independently of how quickly a consumer happens to be scheduled. */
+    assert(!naki_branch_queue_init(&q,NAKI_BRANCH_QUEUE_MAX,1000000,1000000,1000));a=frame(0);
+    assert(!naki_branch_queue_push(&q,&a,100));
+    for(int n=0;n<NAKI_BRANCH_QUEUE_MAX;n++) {
+        a=(NakiBranchItem){.packet=av_packet_alloc(),.parameters=avcodec_parameters_alloc(),.ingress_us=100,.media_us=40};
+        assert(a.packet&&a.parameters&&!av_new_packet(a.packet,100));a.packet->pts=n;a.parameters->codec_id=AV_CODEC_ID_AAC;
+        int pushed=naki_branch_queue_push(&q,&a,100);
+        if(n<NAKI_BRANCH_QUEUE_MAX-1)assert(!pushed&&!a.packet&&!a.parameters);
+        else {assert(pushed==AVERROR(EAGAIN)&&a.packet&&a.parameters);naki_branch_item_free(&a);}
+    }
+    assert(q.count==NAKI_BRANCH_QUEUE_MAX&&q.high_water==NAKI_BRANCH_QUEUE_MAX);
+    assert(!naki_branch_queue_pop(&q,&item,0)&&item.frame);naki_branch_item_free(&item);
+    for(int n=0;n<NAKI_BRANCH_QUEUE_MAX-1;n++) {
+        assert(!naki_branch_queue_pop(&q,&item,0)&&item.packet&&item.packet->pts==n);naki_branch_item_free(&item);
+    }
+    assert(!q.count&&!q.bytes&&!q.media_us);naki_branch_queue_destroy(&q);
     NakiBranchItem custom[2];uint64_t baseline;
     for(int k=0;k<2;k++) {
         custom[k]=(NakiBranchItem){.packet=av_packet_alloc(),.parameters=avcodec_parameters_alloc(),.ingress_us=100,.media_us=40};

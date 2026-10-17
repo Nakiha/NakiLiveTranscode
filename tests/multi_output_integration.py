@@ -65,7 +65,18 @@ def main():
     results={};red=RUN/'red.png';blue=RUN/'blue.png';png(red,(255,0,0));png(blue,(0,0,255))
     sample=RUN/'sample.ts'
     command(['ffmpeg','-v','error','-f','lavfi','-i','color=black:size=320x180:rate=25:duration=5','-f','lavfi','-i','sine=frequency=440:sample_rate=48000:duration=5',
-             '-c:v','libx264','-preset','ultrafast','-threads','2','-g','25','-bf','0','-c:a','aac','-b:a','64k','-f','mpegts',sample])
+             '-c:v','libx264','-preset','ultrafast','-threads','2','-g','25','-bf','0','-c:a','aac','-b:a','64k',
+             '-muxdelay','0','-muxpreload','0','-f','mpegts',sample])
+    # A success fixture must not rely on owner scheduling to absorb a full
+    # 16-packet audio PES burst plus queued video in the shared 16-item budget.
+    # Keep all media and assert the packet-order precondition; pressure cases
+    # below and the mixed-queue unit test retain the hard admission contract.
+    packets=json.loads(command(['ffprobe','-v','error','-show_packets','-show_entries','packet=codec_type','-of','json',sample]))['packets']
+    burst=longest=0
+    for packet in packets:
+        burst=burst+1 if packet['codec_type']=='audio' else 0;longest=max(longest,burst)
+    assert longest<=4,longest
+    results['success-fixture-audio-burst']={'longest_consecutive_audio_packets':longest,'limit':4}
     s=socket.socket();s.bind(('127.0.0.1',0));port=s.getsockname()[1];s.close();base=f'http://127.0.0.1:{port}';server=None;logs=[]
     def api(body=None,path='/v1/job',code=200):
         req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json'})
@@ -86,6 +97,7 @@ def main():
         cfg=dict(input=str(source),outputs=outputs,pace=True,timestamps={'mode':'source_all'},frame_log=True);cfg.update(kw);return api(cfg,code=202)
     def done(expected='completed',timeout=20):
         state=wait(lambda:(v if (v:=api())['state'] in ('completed','completed_partial','failed','stopped') else None),timeout)
+        (RUN/f"terminal-{state['job_id']}.json").write_text(json.dumps(state,indent=2)+'\n')
         assert state['state']==expected,state;released(state);return state
     def traces(state):
         prefix=pathlib.Path(state['log_path']);paths=wait(lambda:list(prefix.parent.glob(prefix.name+'.*.jsonl')))
