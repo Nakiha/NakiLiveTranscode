@@ -6,6 +6,9 @@ python3 tests/sdk_identity_test.py
 python3 tests/sdk_build_integration.py
 out/bin/naki-frame-policy-test
 out/bin/naki-frame-policy-config-test
+out/bin/naki-watermark-config-test
+python3 tests/watermark_integration.py
+python3 tests/watermark_review_integration.py
 python3 tests/frame_policy_integration.py
 python3 tests/probe_integration.py
 python3 tests/decoder_integration.py

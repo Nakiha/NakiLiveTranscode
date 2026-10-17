@@ -1,6 +1,8 @@
 #define _GNU_SOURCE
 #include "live.h"
 #include "ipc.h"
+#include "watermark.h"
+#include <curl/curl.h>
 #include "crash.h"
 #include <errno.h>
 #include <poll.h>
@@ -56,6 +58,8 @@ static int start_job(Job *job, yyjson_doc *doc) {
     job->worker_received_us=now_us(); job->window_start_us=job->started_us;
     job->prewarmed=yyjson_get_bool(yyjson_obj_get(root,"prewarmed"));
     if(job->config.frame_log && !(job->trace=logger_trace_open(job->logger,job->log_path)))return -1;
+    job->watermark=naki_watermark_open(&job->config.watermark,job->started_us,&job->cancel);
+    if(!job->watermark)return -1;
     return pthread_create(&job->thread,NULL,pipeline_main,job) ? -1 : 0;
 }
 
@@ -86,11 +90,12 @@ int main(int argc,char **argv) {
     atomic_init(&job->cancel,0); atomic_init(&job->done,0);
     network_stats_reset(&network);
     avformat_set_network_observer(network_observe,&network);
-    if(avformat_network_init()<0)return 1;
+    if(avformat_network_init()<0||curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK)return 1;
     job->worker_ready_us=now_us();
     int running=0,joined=0,final_ack=0,result=0;
     int64_t next_snapshot=now_us()+250000,next_report=0;
     yyjson_doc *assignment=NULL;
+    yyjson_mut_doc *watermark_reply=NULL;
     int64_t disconnected_us=0,outage_us=0;
     uint64_t reconnects=0;
     uint64_t dropped=0;
@@ -130,6 +135,16 @@ int main(int argc,char **argv) {
                     running=1; next_snapshot=0; next_report=now_us()+(int64_t)status_interval*1000000;
                 } else if(ipc_kind(doc,"stop")) {
                     if(running)request_stop(job); else stopping=1;
+                } else if(ipc_kind(doc,"watermark")&&running&&!joined&&!watermark_reply) {
+                    yyjson_val *root=yyjson_doc_get_root(doc);
+                    NakiWatermarkConfig config;uint64_t revision=0;char error[256]={0};
+                    int ret=naki_watermark_update(yyjson_obj_get(root,"update"),&config,&revision,error,sizeof(error));
+                    if(!ret)ret=naki_watermark_request(job->watermark,&config,revision,error,sizeof(error));
+                    watermark_reply=ipc_message("watermark_ack");
+                    json_int(watermark_reply,"token",yyjson_get_sint(yyjson_obj_get(root,"token")));
+                    json_int(watermark_reply,"revision",(int64_t)revision);
+                    json_int(watermark_reply,"accepted",!ret);json_str(watermark_reply,"error",error);
+                    next_snapshot=0;
                 } else if(ipc_kind(doc,"ack") && joined)final_ack=1;
                 else channel_close(&channel);
                 if(doc)yyjson_doc_free(doc);
@@ -137,6 +152,9 @@ int main(int argc,char **argv) {
         }
         if(fds[0].revents&(POLLERR|POLLHUP|POLLNVAL))channel_close(&channel);
         int64_t current=now_us();
+        if(watermark_reply&&channel.fd>=0&&!channel_send(&channel,watermark_reply)) {
+            yyjson_mut_doc_free(watermark_reply);watermark_reply=NULL;
+        }
         if(running && !joined)naki_policy_tick(job,current);
         if(channel.fd<0 && !disconnected_us)disconnected_us=current;
         if(running && !joined && atomic_load(&job->done)) {
@@ -151,6 +169,7 @@ int main(int argc,char **argv) {
         if(channel.fd>=0 && current>=next_snapshot) {
             yyjson_mut_doc *doc=running ? job_snapshot(job) : ipc_message("ready");
             if(running) {
+                naki_watermark_status(job->watermark,doc);
                 json_int(doc,"ipc_version",IPC_VERSION);
                 json_str(doc,"ipc_kind",joined ? "finished" : "snapshot");
                 json_int(doc,"ipc_snapshots_coalesced",(int64_t)dropped);
@@ -171,7 +190,10 @@ int main(int argc,char **argv) {
         /* Losing control does not cancel media. Keep final state until a controller acknowledges it. */
     }
     if(running && !joined) {request_stop(job); pthread_join(job->thread,NULL);}
+    naki_watermark_close(&job->watermark);
+    if(watermark_reply)yyjson_mut_doc_free(watermark_reply);
     avformat_set_network_observer(NULL,NULL); avformat_network_deinit();
+    curl_global_cleanup();
     logger_trace_release(job->logger,job->trace);
     logger_stop(job->logger);
     if(assignment)yyjson_doc_free(assignment);

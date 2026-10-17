@@ -6,7 +6,7 @@ cache=${NAKI_BUILD_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/naki-live-transcode-n9}
 prefix="$cache/install"
 build="$cache/ffmpeg"
 source_root="$root/experiments/decoder-20261016/ffmpeg-7.0.3"
-pkg-config --exists x264 srt
+pkg-config --exists x264 srt zlib
 mkdir -p "$build" "$prefix"
 snapshot=$(mktemp "$build/.source-inputs.XXXXXX.json")
 committed=0
@@ -48,14 +48,14 @@ if [[ $reconfigure == 1 ]]; then
         --enable-shared --disable-static --enable-gpl --enable-libx264 --enable-libvvenc --enable-libsrt --enable-rpath \
         --disable-autodetect --disable-everything --disable-doc --disable-ffplay \
         --disable-hwaccels --disable-avdevice \
-        --enable-network --enable-pthreads \
-        --enable-decoder=h264,hevc,vvc,aac,mp3 --enable-parser=h264,hevc,vvc,aac,mpegaudio \
+        --enable-network --enable-pthreads --enable-zlib \
+        --enable-decoder=h264,hevc,vvc,aac,mp3,png,mjpeg,gif --enable-parser=h264,hevc,vvc,aac,mpegaudio,gif \
         --enable-bsf=aac_adtstoasc,extract_extradata \
         --enable-encoder=libx264,libvvenc \
-        --enable-demuxer=mov,mpegts,h264,hevc,flv,rtsp,aac,mp3 \
+        --enable-demuxer=mov,mpegts,h264,hevc,flv,rtsp,aac,mp3,png_pipe,jpeg_pipe,gif \
         --enable-muxer=mpegts,mp4,flv \
         --enable-protocol=file,pipe,udp,tcp,rtp,http,rtmp,libsrt \
-        --enable-filter=buffer,buffersink,null,scale,format \
+        --enable-filter=buffer,buffersink,null,scale,format,overlay \
         --extra-ldflags=-Wl,--build-id=sha1 --enable-debug=2
     printf '%s\n' "$configure_key" > .naki-configure-key.pending
     mv -f -- .naki-configure-key.pending .naki-configure-key

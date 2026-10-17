@@ -13,11 +13,11 @@
 
 第一批的早期源码备份仍在 `out/probe-before-implementation-*`，完整媒体及探流预算证据见 [第一批复审记录](validation-buffered-probe-review.md)。后续对象/配置凭据失败恢复的 P1/P2 已实测修复：12 项单测、真实对象/configure 失败、SIGTERM/SIGKILL、封存失败恢复、默认构建与 skip 全部通过，见 [失败恢复记录](validation-sdk-failure-recovery.md)。这些是各次对应源码的证据，不代替当前 SDK 校验。
 
-第二批已实现 source_all、三种普通 I、保护帧、因果抽帧与独立过载监视，见 [单路帧策略](frame-policy.md)。匹配 SDK 为 `78da00f3106213fe4da08eb14d13aae83c9901836b200e0711e23dbde612bf5a`；媒体 hook 的旧未知帧型预期已更新，加入逐帧独立解码对照。首次独立复审发现的 4 项 P2 已复现、修复，最终 24 个帧策略场景、10 个 hook 场景、两项 C 单测和 8 套默认媒体回归重新通过；详见 [第二批验证记录](validation-frame-policy.md)。当前等待修复后的独立源码复审，不再受此前 WSL 审批阻塞。
+第二批已实现 source_all、三种普通 I、保护帧、因果抽帧与独立过载监视，见 [单路帧策略](frame-policy.md)。当批匹配 SDK 为 `78da00f3106213fe4da08eb14d13aae83c9901836b200e0711e23dbde612bf5a`；媒体 hook 的旧未知帧型预期已更新，加入逐帧独立解码对照。首次独立复审发现的 4 项 P2 已复现、修复，最终 24 个帧策略场景、10 个 hook 场景、两项 C 单测和 8 套默认媒体回归重新通过；详见 [第二批验证记录](validation-frame-policy.md)。后续独立复审已确认修复，下面记录本地检查点；不再受此前 WSL 审批阻塞。
 
-当前没有提交或推送，第三批水印保持暂停。第二批修复后仍留出独立源码复审窗口，不自行合并、发布或进入下一批。尚未实现 source_i_anchors、脏时间戳修复、任意 SEI/SCTE-35、多输出和在线规格重建。
+第二批修复已通过后续独立源码复审。按用户要求保存本地检查点：VVenC `29e3dc57`（`codex/live-frame-intra`，原 live 分支未移动）、FFmpeg `d8303fa4`、父仓 `4ebf6eed`；没有推送。第三批[单水印 v1](watermark.md)已完成本地功能验证和最终独立源码复审；本轮 23 项本地复审通过，1 项外部 HTTPS 成功路径未完成。按授权保存本地完整功能提交，不推送或部署。尚未实现 source_i_anchors、脏时间戳修复、任意 SEI/SCTE-35、多输出和在线规格重建。
 
-## 计划提交顺序（尚未执行）
+## 历史提交拆分建议（已由用户确认的上述完整检查点取代）
 
 1. 先在 FFmpeg 提交第一批的 buffered probe/预算/错误传播及对应 avformat 版本，父仓第一批再引用该精确 gitlink，并提交 SDK 凭据、探流接入和验收；此中间状态继续使用原 VVenC，不提前引入第二批的类型合同。
 2. 第二批先在 VVenC 的 `live/v1.14.0` 提交逐帧 forceIntra/短组普通 I；再在 FFmpeg 提交 `live-frame-intra` 两个 wrapper、实际类型统计与 avcodec 版本。

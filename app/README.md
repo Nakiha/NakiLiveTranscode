@@ -6,6 +6,7 @@
 - `frame_policy.c` / `frame_policy.h`：纯策略核心，包含严格时间轴、接受后推进的 I 调度、因果选择和有界在途身份。
 - `frame_policy_config.c` / `frame_policy_config.h`：可选帧策略组的严格 JSON 合同；缺省兼容 legacy，过载阈值必须显式提供。
 - `frame_policy_runtime.c`：worker 独立轮询、在途年龄和过载失败；媒体 owner 仍独占 filter/encoder/mux。
+- `watermark_config.c` / `watermark.c`：单水印严格配置、后台有界资源准备、required 门槛及 SDR 8/10-bit 合成；资源线程不接触主媒体 graph/encoder/mux。
 - `common.c` / `live.h`：yyjson 配置、JSONL 日志、状态与耗时摘要。
 - `logger.c` / `logger.h`：独立日志线程、有界队列、丢弃计数和追踪文件轮转。
 - `netstats.c` / `netstats.h`：FFmpeg TCP/UDP observer 的无日志原子计数与报表。

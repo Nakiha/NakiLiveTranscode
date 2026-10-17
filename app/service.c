@@ -22,6 +22,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <libavformat/avformat.h>
+#include <libavfilter/avfilter.h>
 #include <libavutil/log.h>
 #include <libavutil/time.h>
 
@@ -45,6 +46,10 @@ typedef struct Service {
     pid_t last_pid;
     int64_t request_us,assigned_us,snapshot_us,next_spawn_us;
     uint64_t forwarded_logs,invalid_logs;
+    struct evhttp_request *watermark_request;
+    int64_t watermark_request_us;
+    uint64_t watermark_request_revision;
+    uint64_t watermark_token;
 } Service;
 
 static void set_str(yyjson_mut_doc *doc,const char *key,const char *value) {
@@ -240,6 +245,17 @@ static void read_worker(Service *s,Worker *w) {
                 w->ready=1; w->ready_us=yyjson_get_sint(yyjson_obj_get(yyjson_doc_get_root(doc),"ready_us"));
                 worker_event(s,w,"worker_ready");
             }
+        } else if(ipc_kind(doc,"watermark_ack")) {
+            yyjson_val *root=yyjson_doc_get_root(doc);
+            if(w==s->active&&s->watermark_request&&yyjson_get_uint(yyjson_obj_get(root,"revision"))==s->watermark_request_revision&&
+               yyjson_get_uint(yyjson_obj_get(root,"token"))==s->watermark_token) {
+                yyjson_mut_doc *answer=yyjson_doc_mut_copy(doc,NULL);
+                yyjson_mut_val *answer_root=yyjson_mut_doc_get_root(answer);
+                yyjson_mut_obj_remove_key(answer_root,"ipc_version");yyjson_mut_obj_remove_key(answer_root,"ipc_kind");yyjson_mut_obj_remove_key(answer_root,"token");
+                json_str(answer,"event",yyjson_get_sint(yyjson_obj_get(root,"accepted"))?"watermark_accepted":"watermark_rejected");json_str(answer,"job_id",s->job_id);
+                reply(s->watermark_request,yyjson_get_sint(yyjson_obj_get(root,"accepted"))?202:409,answer);
+                s->watermark_request=NULL;
+            }
         } else if(ipc_kind(doc,"snapshot") || ipc_kind(doc,"finished")) {
             if(w->needs_info && !w->assigned && recover_job(s,w,doc)) {yyjson_doc_free(doc); break;}
             w->needs_info=0;
@@ -255,7 +271,7 @@ static void read_worker(Service *s,Worker *w) {
                 strcpy(s->state,"finishing");
             } else if(!s->stopping) {
                 const char *state=yyjson_get_str(yyjson_obj_get(yyjson_doc_get_root(s->snapshot),"state"));
-                strcpy(s->state,state && !strcmp(state,"running") ? "running" : "starting");
+                strcpy(s->state,state && !strcmp(state,"running") ? "running" : state && !strcmp(state,"waiting_assets") ? "waiting_assets" : "starting");
             }
         } else {
             yyjson_doc_free(doc); break;
@@ -308,6 +324,10 @@ static void reap_worker(Service *s,Worker *w,int result) {
 }
 static void tick(evutil_socket_t fd,short flags,void *opaque) {
     (void)fd; (void)flags; Service *s=opaque; int64_t current=now_us();
+    if(s->watermark_request&&current-s->watermark_request_us>=2000000) {
+        error_reply(s->watermark_request,503,"Worker acknowledgement timed out; inspect accepted_revision before retrying");
+        s->watermark_request=NULL;
+    }
     for(int i=0;i<MAX_WORKERS;i++) {
         Worker *w=&s->workers[i]; if(!w->pid)continue;
         read_worker(s,w);
@@ -360,6 +380,9 @@ static void handle_request(struct evhttp_request *req,void *opaque) {
         json_str(doc,"http_library",event_get_version()); json_str(doc,"json_library",YYJSON_VERSION_STRING);
         json_int(doc,"async_api",AVCODEC_ASYNC_API_VERSION); json_int(doc,"network_observer_api",AVFORMAT_NETWORK_OBSERVER_VERSION);
         json_int(doc,"frame_policy_api",1);
+        json_int(doc,"watermark_api",1);
+        json_int(doc,"watermark_codecs",avcodec_find_decoder(AV_CODEC_ID_PNG)&&avcodec_find_decoder(AV_CODEC_ID_MJPEG)&&
+            avcodec_find_decoder(AV_CODEC_ID_GIF)&&avfilter_get_by_name("overlay"));
 #ifdef AVCODEC_LIVE_FRAME_INTRA_VERSION
         json_int(doc,"frame_intra_api",AVCODEC_LIVE_FRAME_INTRA_VERSION);
 #else
@@ -369,6 +392,23 @@ static void handle_request(struct evhttp_request *req,void *opaque) {
         pool_json(s,doc); reply(req,200,doc); return;
     }
     if(!strcmp(uri,"/v1/job") && method==EVHTTP_REQ_GET) {reply(req,200,status(s)); return;}
+    if(!strcmp(uri,"/v1/job/watermark")&&method==EVHTTP_REQ_POST) {
+        if(!s->active||!s->active->assigned||s->active->finished||s->stopping||s->shutting_down) {error_reply(req,409,"No running assigned job");return;}
+        if(s->watermark_request) {error_reply(req,409,"Watermark acknowledgement pending");return;}
+        struct evbuffer *input=evhttp_request_get_input_buffer(req);size_t size=evbuffer_get_length(input);
+        if(!size||size>8192) {error_reply(req,413,"Body must contain 1..8192 bytes");return;}
+        const char *body=(const char *)evbuffer_pullup(input,-1);yyjson_doc *parsed=yyjson_read(body,size,0);
+        NakiWatermarkConfig config;uint64_t revision;char error[256];
+        if(!parsed||naki_watermark_update(yyjson_doc_get_root(parsed),&config,&revision,error,sizeof(error))) {
+            error_reply(req,400,parsed?error:"Invalid JSON");if(parsed)yyjson_doc_free(parsed);return;
+        }
+        yyjson_mut_doc *message=ipc_message("watermark");
+        s->watermark_token=FFMAX(s->watermark_token+1,(uint64_t)received);json_int(message,"token",(int64_t)s->watermark_token);
+        yyjson_mut_obj_add_val(message,yyjson_mut_doc_get_root(message),"update",yyjson_val_mut_copy(message,yyjson_doc_get_root(parsed)));
+        int sent=ipc_send(s->active->fd,message);yyjson_mut_doc_free(message);yyjson_doc_free(parsed);
+        if(sent) {error_reply(req,503,"Worker unavailable; update not queued");return;}
+        evhttp_request_own(req);s->watermark_request=req;s->watermark_request_us=received;s->watermark_request_revision=revision;return;
+    }
     if(!strcmp(uri,"/v1/job/stop") && method==EVHTTP_REQ_POST) {
         if(!s->active) {error_reply(req,409,"No running job"); return;}
         s->stopping=1; strcpy(s->state,"stopping"); request_worker_stop(s,s->active); reply(req,202,status(s)); return;
@@ -409,7 +449,7 @@ static void handle_request(struct evhttp_request *req,void *opaque) {
         dispatch(s,w);
         reply(req,202,status(s)); return;
     }
-    if(!strcmp(uri,"/health") || !strcmp(uri,"/v1/job") || !strcmp(uri,"/v1/job/stop"))error_reply(req,405,"Method not allowed");
+    if(!strcmp(uri,"/health") || !strcmp(uri,"/v1/job") || !strcmp(uri,"/v1/job/stop") || !strcmp(uri,"/v1/job/watermark"))error_reply(req,405,"Method not allowed");
     else error_reply(req,404,"Unknown endpoint");
 }
 static void report_status(evutil_socket_t fd,short flags,void *opaque) {
@@ -555,6 +595,7 @@ int main(int argc,char **argv) {
     json_str(doc,"execution_mode","process_pool"); logger_submit(s->logger,NULL,doc);
     if(recover_workers(s)) {fprintf(stderr,"Cannot recover private worker endpoints\n"); return 1;}
     tick(-1,0,s); event_base_dispatch(s->base);
+    if(s->watermark_request) {error_reply(s->watermark_request,503,"Controller is shutting down; inspect worker revision after recovery");s->watermark_request=NULL;}
     evhttp_free(http); event_free(term); event_free(intr); event_free(timer); event_free(watch); event_base_free(s->base);
     if(s->config)yyjson_doc_free(s->config);
     if(s->snapshot)yyjson_doc_free(s->snapshot);

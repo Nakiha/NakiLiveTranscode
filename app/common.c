@@ -226,7 +226,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         for (size_t i=0; i<count; i++) if (!strcmp(seen[i], name)) { bad(error, cap, "Duplicate key"); goto end; }
         if (count == 32) { bad(error, cap, "Too many keys"); goto end; }
         seen[count++] = name;
-        if(!strcmp(name,"timestamps") || !strcmp(name,"intra") || !strcmp(name,"frame_selection"))continue;
+        if(!strcmp(name,"timestamps") || !strcmp(name,"intra") || !strcmp(name,"frame_selection") || !strcmp(name,"watermark"))continue;
         char *dest = NULL; size_t len = 0;
         if (!strcmp(name,"input")) { dest=c.input; len=sizeof(c.input); }
         else if (!strcmp(name,"output")) { dest=c.output; len=sizeof(c.output); }
@@ -265,6 +265,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     }
     if (!*c.input || !*c.output) {bad(error,cap,"input and output are required"); goto end;}
     if(naki_policy_config_parse(root,&c.policy,error,cap))goto end;
+    if(naki_watermark_config(yyjson_obj_get(root,"watermark"),&c.watermark,error,cap))goto end;
     int vvc=!strcmp(c.encoder,"libvvenc");
     if (!vvc && strcmp(c.encoder,"libx264")) {bad(error,cap,"encoder must be libx264 or libvvenc"); goto end;}
     if(!*c.encoder_profile) strcpy(c.encoder_profile,vvc ? "live_3b_2s" : "default");

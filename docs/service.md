@@ -14,7 +14,7 @@ Ubuntu / WSL：
 
 ```sh
 sudo apt-get update
-sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev libevent-dev libcurl4-openssl-dev libunwind-dev
+sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev zlib1g-dev libevent-dev libcurl4-openssl-dev libunwind-dev
 git submodule update --init --recursive
 bash scripts/build-service.sh
 ```
@@ -43,7 +43,8 @@ bash scripts/build-service.sh
 | --- | --- |
 | `GET /health` | 版本与健康状态 |
 | `POST /v1/job` | JSON 启动一个任务，返回 202；忙时 409；接管中或 worker 不可用时 503 |
-| `GET /v1/job` | idle / starting / running / stopping / finishing / completed / stopped / failed，计数与耗时摘要 |
+| `GET /v1/job` | idle / starting / waiting_assets / running / stopping / finishing / completed / stopped / failed，计数与耗时摘要 |
+| `POST /v1/job/watermark` | 单水印完整 revision 热更；202 仅代表 worker 接受，查询状态确认 applied 或失败；见[接口边界](watermark.md) |
 | `POST /v1/job/stop` | 取消运行中的任务，返回 202；通过 status 等待 stopped |
 
 参数示例见 `examples/`。`input`、`output` 必填；相对路径以服务进程的工作目录为准。本地输出使用排他创建，已有文件不会被覆盖；失败或停止时可能保留部分输出。输出父目录需预先存在。

@@ -1,4 +1,5 @@
 #include "live.h"
+#include "watermark.h"
 #include "crash.h"
 #include "media_hooks.h"
 #include "input_probe.h"
@@ -32,6 +33,7 @@ typedef struct Stamp {
     int picture_type, decoded_key, input_key, first_i;
     int intra_reason, timestamp_source, tracked_packet;
     int64_t frame_id, packet_pts, packet_dts, raw_pts, source_pts, source_us;
+    uint64_t watermark_revision;
 } Stamp;
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; } Interrupt;
 typedef struct Ledger { int used; int64_t pts; Stamp stamp; } Ledger;
@@ -51,6 +53,8 @@ typedef struct Pipeline {
     AVCodecAsyncContext *async;
     AVFilterGraph *graph;
     AVFilterContext *source, *sink;
+    NakiWatermarkCompositor *watermark_compositor;
+    uint64_t watermark_revision;
     AVStream *video;
     int stream_index, reader_started, header_written, custom_output_fd;
     int input_width, input_height, input_format, seen_input_i;
@@ -487,6 +491,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     json_str(doc,"decoded_picture_type",picture_type);
     json_int(doc,"input_packet_key",stamp.input_key); json_int(doc,"decoded_key",stamp.decoded_key);
     json_int(doc,"output_key",output_key); json_int(doc,"first_i",first_i && stamp.picture_type==AV_PICTURE_TYPE_I);
+    json_int(doc,"watermark_revision",(int64_t)stamp.watermark_revision);
     if (output_key && pts_gop) {
         json_int(doc,"keyframe_target_pts_us",key_target);
         json_num(doc,"keyframe_lateness_ms",(pts_us-key_target)/1000.0);
@@ -873,8 +878,25 @@ static int filter_output(Pipeline *p) {
     if (!frame) return AVERROR(ENOMEM);
     int ret;
     while ((ret=av_buffersink_get_frame(p->sink,frame))>=0) {
-        ret=encode_frame(p,frame); av_frame_unref(frame);
-        if (ret<0) break;
+        if(!frame->opaque_ref||frame->opaque_ref->size!=sizeof(Stamp)) {ret=AVERROR_INVALIDDATA;break;}
+        uint64_t watermark_revision=0;
+        p->stage="watermark composition";
+        ret=naki_watermark_frame(p->job->watermark,&p->watermark_compositor,frame,
+            av_buffersink_get_time_base(p->sink),((Stamp *)frame->opaque_ref->data)->source_us,&watermark_revision);
+        if(ret>=0)ret=av_buffer_make_writable(&frame->opaque_ref);
+        if(ret>=0) {
+            ((Stamp *)frame->opaque_ref->data)->watermark_revision=watermark_revision;
+            if(p->watermark_revision!=watermark_revision) {
+                yyjson_mut_doc *event=new_event("watermark_applied",p->job);
+                naki_watermark_status(p->job->watermark,event);logger_submit(p->job->logger,NULL,event);
+                p->watermark_revision=watermark_revision;
+            }
+        }
+        if(ret>=0)ret=encode_frame(p,frame);
+        av_frame_unref(frame);
+        /* Only EAGAIN/EOF from the main sink below are normal draining.
+         * An inner compositor/encoder error must never silently drop a frame. */
+        if(ret<0) {av_frame_free(&frame);return ret;}
     }
     av_frame_free(&frame);
     return ret==AVERROR(EAGAIN) || ret==AVERROR_EOF ? 0 : ret;
@@ -933,7 +955,12 @@ static int process_frame(Pipeline *p, AVFrame *frame) {
         }
         return 0;
     }
-    if (!p->graph && (ret=open_output(p,frame))<0) return ret;
+    if(!p->graph) {
+        p->stage="watermark video validation";
+        if((ret=naki_watermark_video(p->job->watermark,frame,p->job->config.width?p->job->config.width:frame->width,
+              p->job->config.height?p->job->config.height:frame->height))<0)return ret;
+        if((ret=open_output(p,frame))<0)return ret;
+    }
     /* Do not silently reuse an encoder/filter configuration across format changes. */
     if (frame->width!=p->input_width || frame->height!=p->input_height || frame->format!=p->input_format) {
         p->stage="input format changed; pipeline rebuild required";
@@ -1003,6 +1030,13 @@ void *pipeline_main(void *opaque) {
     p.stage="media hook initialization";
     int ret=frame ? naki_media_hooks_open(&info,&p.hooks) : AVERROR(ENOMEM);
     if(ret>0 || (ret>=0 && p.hooks.api_version!=NAKI_MEDIA_HOOK_API))ret=AVERROR(EINVAL);
+    if(ret>=0) {
+        p.stage="required watermark startup gate";
+        pthread_mutex_lock(&job->mutex);
+        if(job->config.watermark.required)strcpy(job->state,"waiting_assets");
+        pthread_mutex_unlock(&job->mutex);
+        ret=naki_watermark_wait(job->watermark);
+    }
     if(ret>=0)ret=initialize_decoder(&p);
     if (ret<0) goto cleanup;
     ret=pthread_create(&p.reader,NULL,reader_main,&p);
@@ -1077,6 +1111,7 @@ void *pipeline_main(void *opaque) {
     } else if (!atomic_load(&job->cancel)) {p.stage="empty video"; ret=AVERROR(ENODATA);}
 cleanup:
     {
+        naki_watermark_stop(job->watermark);
         int stopped=atomic_load(&job->cancel);
         pthread_mutex_lock(&job->mutex);job->policy_closing=1;int policy_failed=job->overload.failed;pthread_mutex_unlock(&job->mutex);
         if(policy_failed) {stopped=0; ret=AVERROR(ETIMEDOUT); p.stage="continuous overload budget exhausted";}
@@ -1115,7 +1150,7 @@ cleanup:
         for(int i=0;i<p.deferred_count;i++)free_input(&p.deferred_audio[i]);
         for(int i=0;i<p.audio_count;i++)av_bsf_free(&p.audio[i].bsf);
         av_frame_free(&frame); avcodec_free_context(&p.decoder); avcodec_free_context(&p.encoder);
-        avfilter_graph_free(&p.graph); avformat_close_input(&p.input);
+        avfilter_graph_free(&p.graph); naki_watermark_compositor_free(&p.watermark_compositor); avformat_close_input(&p.input);
         pthread_cond_destroy(&p.ring_space); pthread_mutex_destroy(&p.ring_mutex);
         pthread_mutex_lock(&job->mutex);
         memset(&job->policy_inflight,0,sizeof(job->policy_inflight));

@@ -9,6 +9,8 @@
 #include "logger.h"
 #include "netstats.h"
 #include "frame_policy.h"
+#include "watermark_config.h"
+typedef struct NakiWatermark NakiWatermark;
 
 typedef struct Config {
     char input[2048], output[2048], output_format[16];
@@ -19,6 +21,7 @@ typedef struct Config {
     int frame_log, frame_log_every, slow_frame_ms;
     int audio_copy, mux_wait_ms;
     NakiPolicyConfig policy;
+    NakiWatermarkConfig watermark;
 } Config;
 typedef struct Metric {
     uint64_t count;
@@ -42,6 +45,7 @@ typedef struct Job {
     Logger *logger;
     NetworkStats *network;
     TraceSink *trace;
+    NakiWatermark *watermark;
     int64_t started_us, ended_us;
     int64_t assigned_us, worker_received_us, worker_spawned_us, worker_ready_us;
     int64_t first_video_output_us, first_key_output_us;
