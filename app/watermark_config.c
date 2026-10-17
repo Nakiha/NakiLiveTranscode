@@ -91,7 +91,9 @@ int naki_watermark_config(yyjson_val *v,NakiWatermarkConfig *out,char *e,size_t 
     *out=c;return 0;
 }
 int naki_watermark_update(yyjson_val *v,NakiWatermarkConfig *out,uint64_t *revision,char *e,size_t n) {
-    if(keys(v,"|revision||watermark|",e,n))return -1;
+    if(keys(v,"|revision||watermark||output_id|",e,n))return -1;
+    yyjson_val *id=yyjson_obj_get(v,"output_id");
+    if(id&&(!yyjson_is_str(id)||!yyjson_get_len(id)||yyjson_get_len(id)>32||strlen(yyjson_get_str(id))!=yyjson_get_len(id)))return fail(e,n,"invalid output_id");
     yyjson_val *r=yyjson_obj_get(v,"revision"),*w=yyjson_obj_get(v,"watermark");
     if(!yyjson_is_uint(r)||!yyjson_get_uint(r)||yyjson_get_uint(r)>INT64_MAX||!w)return fail(e,n,"revision and watermark are required");
     if(naki_watermark_config(w,out,e,n))return -1;

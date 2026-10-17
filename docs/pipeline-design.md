@@ -1,6 +1,6 @@
 # 可扩展处理链草案（未实现）
 
-当前实现和可发送字段以 [OpenAPI](openapi.json) 为准。主链支持 null/scale/format；单水印 v1 的实现边界见 [水印接口](watermark.md)，正在验证。这里的通用 `/v2/jobs`、任意滤镜、ROI、HDR 转换和规格重建仍是草案，不能复制到 `/v1/job` 试运行。
+当前实现和可发送字段以 [OpenAPI](openapi.json) 为准。固定 2–4 路与固定输出动态输入适配已按本轮用户确认接入，见[实现边界](branching-contract.md)；下文更广的 `/v2/jobs` 仍是草案。主链支持 null/scale/format；单水印 v1 的实现边界见 [水印接口](watermark.md)，正在验证。这里的通用 `/v2/jobs`、任意滤镜、ROI、HDR 转换和规格重建仍是草案，不能复制到 `/v1/job` 试运行。
 
 直播客户的过载抽帧、随源/固定周期/随源+最大间隔 I 帧、PTS 与 UNKNOWN SEI 合同见 [帧策略草案](live-frame-policy.md)。已确认源 PTS 自身的空洞可以保留，不补帧、不因此终止；源 I 和到期需强制 I 的画面必须先于抽帧决策受到保护。
 

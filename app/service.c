@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "live.h"
+#include "media_hooks.h"
 #include <libavformat/live_mux.h>
 #include "ipc.h"
 #include "crash.h"
@@ -288,7 +289,7 @@ static void reap_worker(Service *s,Worker *w,int result) {
         const char *final=s->snapshot ? yyjson_get_str(yyjson_obj_get(yyjson_doc_get_root(s->snapshot),"state")) : NULL;
         if(s->stopping)strcpy(s->state,"stopped");
         else if(w->finished && (s->exit_code==0 || !w->owned) && final &&
-                (!strcmp(final,"completed") || !strcmp(final,"failed") || !strcmp(final,"stopped")))snprintf(s->state,sizeof(s->state),"%s",final);
+                (!strcmp(final,"completed") || !strcmp(final,"completed_partial") || !strcmp(final,"failed") || !strcmp(final,"stopped")))snprintf(s->state,sizeof(s->state),"%s",final);
         else {
             strcpy(s->state,"failed");
             if(!*s->error)snprintf(s->error,sizeof(s->error),"Worker exited unexpectedly (code=%d signal=%d)",s->exit_code,s->exit_signal);
@@ -366,7 +367,7 @@ static void handle_request(struct evhttp_request *req,void *opaque) {
     const char *uri=evhttp_request_get_uri(req); enum evhttp_cmd_type method=evhttp_request_get_command(req);
     if(!strcmp(uri,"/health") && method==EVHTTP_REQ_GET) {
         yyjson_mut_doc *doc=new_event("health",NULL);
-        json_str(doc,"status",s->shutting_down ? "stopping" : "ok"); json_str(doc,"version","0.8.0");
+        json_str(doc,"status",s->shutting_down ? "stopping" : "ok"); json_str(doc,"version","0.9.0");
         json_int(doc,"srt_enabled",avio_find_protocol_name("srt://127.0.0.1:1")!=NULL);
         json_int(doc,"live_mux_api",AVFORMAT_LIVE_MUX_VERSION);
         json_int(doc,"vvenc_enabled",avcodec_find_encoder_by_name("libvvenc")!=NULL);
@@ -381,6 +382,8 @@ static void handle_request(struct evhttp_request *req,void *opaque) {
         json_int(doc,"async_api",AVCODEC_ASYNC_API_VERSION); json_int(doc,"network_observer_api",AVFORMAT_NETWORK_OBSERVER_VERSION);
         json_int(doc,"frame_policy_api",1);
         json_int(doc,"watermark_api",1);
+        json_int(doc,"max_outputs",4);json_str(doc,"dynamic_video","fixed_output_filter_rebuild");
+        json_int(doc,"media_hooks_api",NAKI_MEDIA_HOOK_API);
         json_int(doc,"watermark_codecs",avcodec_find_decoder(AV_CODEC_ID_PNG)&&avcodec_find_decoder(AV_CODEC_ID_MJPEG)&&
             avcodec_find_decoder(AV_CODEC_ID_GIF)&&avfilter_get_by_name("overlay"));
 #ifdef AVCODEC_LIVE_FRAME_INTRA_VERSION

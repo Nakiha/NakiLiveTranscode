@@ -1,4 +1,4 @@
-# 内部媒体扩展接口（API 1）
+# 内部媒体扩展接口（API 2）
 
 当前已接入可编译的 C 扩展点，默认为空实现；不实现响度测量、I 帧窗口统计、具体 SEI 格式或时间戳修复，也不新增 HTTP 字段。客户特有逻辑后续由内网实现。声明在 [media_hooks.h](../app/media_hooks.h)，默认工厂在 [media_hooks_default.c](../app/media_hooks_default.c)。这是随源码编译的内部接口，不是稳定的动态插件 ABI。
 
@@ -57,3 +57,5 @@ NAKI_SKIP_FFMPEG=1 bash scripts/build-service.sh
 只有已安装匹配 FFmpeg 时才跳过依赖构建。Docker 支持同名 build arg，源码应在 app/ 内以便现有 COPY 带入；不要把宿主机绝对路径直接传进容器。每次私有构建仍需归档该构建的 Build ID 符号和私有源码版本。
 
 测试 `python3 tests/media_hooks_integration.py` 使用独立测试工厂验证串行 owner、借用引用留存、音频观察与 copy/MP4 解耦、编码重排和 EOF、回调失败/清理、非法时间戳修改和超量 payload 增长拒绝、取消清理。测试工厂不进入运行镜像，也没有实现响度算法或 SEI。
+
+API 2 增加固定多输出上下文：工厂先为共享输入打开一次（output_id=NULL），再为每个 output_id 打开独立私有状态。输入音频只在共享上下文观察一次，编码后视频在各路上下文观察；不同 owner 可并行，不能共用未同步的可变 opaque。共享回调错误失败任务，输出回调错误仅失败该分支；close 的 output_failures 回报部分成功的失败路数。所有上下文随同一 worker 接管，不因控制端重连重建。这是源码接口变化，私有 hook 须按 API 2 重编译并审查多实例所有权。

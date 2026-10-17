@@ -1,4 +1,4 @@
-# Linux 单路转码实验服务
+# Linux 单输入转码实验服务
 
 ## 依赖和构建
 
@@ -61,7 +61,7 @@ bash scripts/build-service.sh
 
 `audio_copy` 默认为 true：FLV/MPEG-TS 透传 AAC/MP3，晚出现的音轨直接注册到已打开的输出；MP4 仍只输出视频。上限 16 条输入音轨状态，非支持编码及参数变化拒绝该音轨并计数，视频继续。字幕和数据流不输出。过期/重复/无法恢复时间戳的音频显式丢弃并计数，不改写视频时间轴。`audio_copy=false` 禁用音频。`mux_wait_ms` 默认 50，范围 1..1000，控制有界墙钟交织排队，详见 [动态音轨](live-mux.md)。
 
-当前构建包含 file、UDP、TCP、RTP、HTTP、RTMP、RTSP、SRT 相关能力，不包含 HTTPS 或硬件编解码。RTMP 输出必须选择 flv，SRT 输出必须选择 mpegts；两者的 VVC 实流及晚音轨已纳入测试，其余协议的编译可用不等于均已实流验收。输入尺寸或像素格式变化时明确失败，暂不进行在线 filter/编码器重建。
+当前构建包含 file、UDP、TCP、RTP、HTTP、RTMP、RTSP、SRT 相关能力，不包含 HTTPS 或硬件编解码。RTMP 输出必须选择 flv，SRT 输出必须选择 mpegts；两者的 VVC 实流及晚音轨已纳入测试，其余协议的编译可用不等于均已实流验收。输入分辨率及 yuv420p/yuv420p10le 变化可重建滤镜适配固定输出；encoder、连接、时间基准和输出规格保持。primaries/transfer 变化及其他未支持格式明确失败，不做 HDR tone mapping。固定 2–4 路接口、独立预算/失败终态和 output_id 水印热更见[本批合同](branching-contract.md)。
 
 ## 进程、线程与停止
 

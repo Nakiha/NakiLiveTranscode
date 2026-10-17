@@ -1,4 +1,4 @@
-# Linux 单路 C 服务
+# Linux 单输入 C 服务
 
 - `service.c`：libevent evhttp 控制面、任务生命周期、信号退出。
 - `pipeline.c`：有界输入队列、异步解码 + 自动调度、8/10-bit filter、libx264/libvvenc、封装写出及逐帧追踪。
@@ -13,3 +13,5 @@
 - `client.c`：libcurl 命令行 HTTP 客户端。
 
 构建、使用及测量边界见 [服务说明](../docs/service.md)。
+
+固定多输出补充：output_config.c 解析 outputs 与每路预算；branch_queue.c 持有有界帧/音频参数引用；video_filter.c 准备独立滤镜图。pipeline.c 共享 demux/decode，分支 owner 独占 graph/encoder/mux，并在固定输出下处理输入分辨率/位深变化。单路失败只取消该路；common.c 输出各路状态与实际写出指标。完整边界见 ../docs/branching-contract.md。
