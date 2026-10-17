@@ -12,6 +12,8 @@ from vvenc_integration import PROBE, CACHE
 from vvc_structure import decode_frames, check_pts_structure
 from live_stream_fixtures import create
 
+LIVE_TIMEOUT_SECONDS = 22
+
 
 def inspect(path):
     result=subprocess.run([str(service.BIN/"naki-live-transport-fixture"),"inspect",str(path)],
@@ -47,7 +49,10 @@ def check_file_audio(run):
 def run():
     run=pathlib.Path(tempfile.mkdtemp(prefix="live-mux-",dir=service.ROOT/"out"))
     subprocess.run([str(service.BIN/"naki-live-mux-test")],check=True,timeout=5)
-    ts,flv=create(run,CACHE/"install/bin/ffmpeg")
+    # The progress bound covers audio absences while video keeps arriving.
+    # Keep the sender's video longer than the entire observation deadline,
+    # including on a slow runner that falls behind real-time input.
+    ts,flv=create(run,CACHE/"install/bin/ffmpeg",duration=LIVE_TIMEOUT_SECONDS+2)
     # Fixture must really reveal new streams after probing, not predeclare silent ones.
     server_log=(run/"server.jsonl").open("w");error=(run/"server.stderr").open("w")
     server=subprocess.Popen([str(service.BIN/"naki-live"),"--port",str(service.PORT),"--run-dir",str(run/"logs")],
@@ -76,8 +81,10 @@ def run():
                 time.sleep(.15)
                 accepted=service.start({"input":input_url,"output":output_url,"output_format":fmt,"encoder":"libvvenc",
                                         "frame_log":True,"mux_wait_ms":50})
-                began=time.monotonic();deadline=began+22;pid=None;first_video_tracks=None
+                began=time.monotonic();deadline=began+LIVE_TIMEOUT_SECONDS;pid=None;first_video_tracks=None
                 while time.monotonic()<deadline:
+                    assert sender.poll() is None,("live source exited",protocol)
+                    assert "SOURCE_STOPPED" not in (run/f"{protocol}-sender.log").read_text(),("live source stopped sending",protocol)
                     state=service.http();history.append({"t":time.monotonic()-began,"video":state["packets_out"],
                         "audio":state.get("audio_packets_out",0),"tracks":state.get("audio_tracks",0),"state":state["state"],
                         "write_phase":state.get("write_phase"),"write_ms":state.get("write_in_progress_ms")})

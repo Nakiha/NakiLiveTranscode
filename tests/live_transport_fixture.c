@@ -103,7 +103,12 @@ int main(int argc,char **argv) {
             total+=ret;fflush(file);
         }
     }
-    if(serve)av_usleep(3000000); /* Keep the finite fixture connected until the live test stops its job. */
+    if(serve) {
+        printf("SOURCE_STOPPED bytes=%llu result=%d elapsed_ms=%.3f\n",
+               (unsigned long long)total,ret,(av_gettime_relative()-epoch)/1000.);
+        fflush(stdout);
+        av_usleep(3000000); /* Connection liveness alone does not imply continued media delivery. */
+    }
     avio_closep(&io);fclose(file);
     printf("CLOSED bytes=%llu result=%d\n",(unsigned long long)total,ret);
     return 0;
