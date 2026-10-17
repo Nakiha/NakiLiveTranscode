@@ -22,7 +22,9 @@ FROM toolchain AS build
 COPY --from=ffmpeg /opt/naki-build/install/ /opt/naki-build/install/
 COPY --from=ffmpeg /opt/naki-build/ffmpeg-symbols/ /symbols/ffmpeg/
 COPY --from=ffmpeg /opt/naki-build/vvenc-symbols/ /symbols/vvenc/
-COPY scripts/build-service.sh scripts/archive-symbols.py scripts/sdk-identity.py scripts/
+COPY scripts/build-service.sh scripts/archive-symbols.py scripts/sdk-identity.py scripts/sdk-expected.py scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/
+COPY Dockerfile.ffmpeg ./
+COPY out/expected-sdk.json /src/expected-sdk.json
 COPY CMakeLists.txt ./
 COPY app/ app/
 COPY third_party/yyjson/src/ third_party/yyjson/src/
@@ -31,15 +33,31 @@ COPY tests/frame_policy_test.c tests/frame_policy_config_test.c tests/
 COPY tests/watermark_config_test.c tests/
 COPY tests/watermark_render_test.c tests/
 COPY tests/watermark_state_test.c tests/
+COPY tests/watermark_operation_test.c tests/
 COPY tests/branch_queue_test.c tests/
 COPY tests/video_filter_test.c tests/
 COPY tests/output_video_probe.c tests/
 COPY tests/live_input_poll_test.c tests/
+COPY tests/identity_intent_test.c tests/
+COPY tests/control_spec_test.c tests/
+COPY tests/control_connect_fault.c tests/
+COPY tests/output_finalize_barrier.c tests/
+COPY tests/event_logger_test.c tests/
+COPY tests/component_update_test.c tests/
+COPY tests/operation_store_test.c tests/
+COPY tests/operation_cache_test.c tests/
+COPY tests/operation_send_order.c tests/
+COPY tests/audio_signature_test.c tests/
+COPY tests/audio_change_fixture.c tests/
+COPY tests/video_rate_test.c tests/video_rate_guess.c tests/
+COPY tests/event_write_fault.c tests/
+COPY tests/control_connect_fault.c tests/
 COPY tests/multi_output_integration.py tests/
 ARG NAKI_MEDIA_HOOK_SOURCE=
-RUN NAKI_SKIP_FFMPEG=1 NAKI_MEDIA_HOOK_SOURCE="$NAKI_MEDIA_HOOK_SOURCE" bash scripts/build-service.sh
+ARG DEPENDENCY_KEY=
+RUN NAKI_SKIP_FFMPEG=1 NAKI_EXPECTED_SDK_MANIFEST=/src/expected-sdk.json \
+    NAKI_EXPECTED_DEPENDENCY_KEY="$DEPENDENCY_KEY" NAKI_MEDIA_HOOK_SOURCE="$NAKI_MEDIA_HOOK_SOURCE" bash scripts/build-service.sh
 ARG SOURCE_REVISION=unknown
-ARG DEPENDENCY_KEY=local
 RUN python3 scripts/archive-symbols.py --output /symbols/app --label application \
     --source-revision "$SOURCE_REVISION" --dependency-key "$DEPENDENCY_KEY" out/bin \
     && dpkg-query -W > /symbols/app/packages.txt \
@@ -68,8 +86,12 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
     && mkdir -p /data /var/log/naki && chown 10001:10001 /data /var/log/naki
 ARG SOURCE_REVISION=unknown
 ARG DEPENDENCY_KEY=local
+ARG SOURCE_TREE_SHA256=unknown
+ARG BUILD_RUN_ID=local
+ARG BUILD_RUN_ATTEMPT=1
 LABEL org.opencontainers.image.source="https://github.com/Nakiha/NakiLiveTranscode" \
-    org.opencontainers.image.revision="$SOURCE_REVISION" io.naki.ffmpeg-dependency="$DEPENDENCY_KEY"
+    org.opencontainers.image.revision="$SOURCE_REVISION" io.naki.ffmpeg-dependency="$DEPENDENCY_KEY" \
+    io.naki.source-tree="$SOURCE_TREE_SHA256" io.naki.build-run="$BUILD_RUN_ID" io.naki.build-attempt="$BUILD_RUN_ATTEMPT"
 COPY --from=build /runtime-bin/ /usr/local/bin/
 COPY --from=build /opt/naki-build/install/lib/ /opt/naki-build/install/lib/
 COPY scripts/maintain-logs.py /usr/local/lib/naki/maintain-logs.py

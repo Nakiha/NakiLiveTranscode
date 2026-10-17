@@ -5,6 +5,8 @@
 #include "crash.h"
 #include "media_hooks.h"
 #include "input_probe.h"
+#include "resource_limits.h"
+#include "audio_signature.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -42,18 +44,21 @@ typedef struct Stamp {
     int intra_reason, timestamp_source, tracked_packet;
     int64_t frame_id, packet_pts, packet_dts, raw_pts, source_pts, source_us;
     uint64_t watermark_revision;
+    NakiWatermark *delivery_owner;
+    NakiOperationHandle delivery_lease;
     uint64_t branch_charge;
     unsigned generation;
     uint64_t timestamp_wraps;
     int64_t branch_enqueued_us,branch_started_us;
 } Stamp;
-typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; } Interrupt;
-typedef struct Ledger { int used; int64_t pts; Stamp stamp; } Ledger;
+typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; atomic_int cleanup; } Interrupt;
+typedef struct Ledger { int used; int64_t pts; Stamp stamp; AVBufferRef *owner; } Ledger;
 typedef struct InputItem { AVPacket *packet; AVCodecParameters *params; AVRational tb; int64_t demuxed_us; uint64_t retained_bytes; } InputItem;
-typedef struct MuxTrace { Stamp stamp; int64_t encoded_us, pts_us, hook_us; int bytes, picture_type; } MuxTrace;
+typedef struct MuxTrace { Stamp stamp; AVBufferRef *owner; int64_t encoded_us, pts_us, hook_us; int bytes, picture_type; } MuxTrace;
 typedef struct AudioTrack {
     int input_index, rejected, have_clock;
     AVStream *output; AVBSFContext *bsf;
+    NakiAudioSignature accepted;
     int64_t last_dts, next_input_dts, previous_input_dts;
 } AudioTrack;
 typedef struct Branch Branch;
@@ -72,6 +77,7 @@ typedef struct Pipeline {
     int stream_index, reader_started, header_written, custom_output_fd;
     int input_width, input_height, input_format, seen_input_i;
     AVRational input_tb, frame_rate;
+    NakiVideoRate video_rate;
     int input_wrap_bits;
     int64_t next_frame_id;
     NakiTimeline timeline;
@@ -79,6 +85,7 @@ typedef struct Pipeline {
     Interrupt read_interrupt, write_interrupt;
     InputItem ring[READER_CAPACITY];
     int head, count, read_done, read_error;
+    uint64_t reader_bytes;
     pthread_mutex_t ring_mutex;
     pthread_cond_t ring_space;
     pthread_t reader;
@@ -124,6 +131,26 @@ static void packet_stamp_free(void *opaque, uint8_t *data) {
     if(stamp->tracked_packet)naki_policy_untrack(opaque,NAKI_TRACK_PACKET,(uint64_t)stamp->sequence);
     av_free(data);
 }
+static void media_phase(Pipeline *p,const char *phase) {
+    pthread_mutex_lock(&p->job->mutex);snprintf(p->job->media_phase,sizeof(p->job->media_phase),"%s",phase);pthread_mutex_unlock(&p->job->mutex);
+}
+/* These references stay inside the worker. Frame, encoder, ledger and mux
+ * packet clones share one lease; only the final actual reference closes it. */
+static void delivery_stamp_free(void *opaque,uint8_t *data) {
+    (void)opaque;Stamp *stamp=(Stamp *)data;
+    if(stamp->delivery_lease&&naki_watermark_release_frame(stamp->delivery_owner,stamp->delivery_lease))abort();
+    av_free(data);
+}
+static void mux_trace_free(void *opaque,uint8_t *data) {
+    (void)opaque;MuxTrace *meta=(MuxTrace *)data;av_buffer_unref(&meta->owner);av_free(data);
+}
+static void ledger_clear(Pipeline *p) {
+    for(int i=0;i<LEDGER_CAPACITY;i++) {av_buffer_unref(&p->ledger[i].owner);p->ledger[i].used=0;}
+}
+static NakiFrameIdentity frame_identity(Pipeline *p,const Stamp *stamp,int64_t output_pts,AVRational output_tb) {
+    return (NakiFrameIdentity){.frame_id=(uint64_t)stamp->frame_id,.source_pts=stamp->source_pts,.source_us=stamp->source_us,
+        .source_tb_num=p->input_tb.num,.source_tb_den=p->input_tb.den,.output_pts=output_pts,.output_tb_num=output_tb.num,.output_tb_den=output_tb.den};
+}
 
 static void checkpoint(Pipeline *p, int64_t *field) {
     pthread_mutex_lock(&p->job->mutex); if(!*field)*field=now_us(); pthread_mutex_unlock(&p->job->mutex);
@@ -140,7 +167,45 @@ static int encoder_receive(Pipeline *p, AVPacket *packet) {
 static int interrupted(void *opaque) {
     Interrupt *io=opaque;
     int64_t deadline=atomic_load(&io->deadline);
-    return atomic_load(&io->job->cancel) || (deadline && now_us()>deadline);
+    return (!atomic_load(&io->cleanup)&&atomic_load(&io->job->cancel)) || (deadline && now_us()>deadline);
+}
+/* The output owner alone runs this sequence. Preserve the first media error and
+ * publish every cleanup result before the hook observes the terminal boundary. */
+static int finalize_output(Pipeline *p,int primary,int stopped) {
+    Job *job=p->job;int trailer=0,flush=0,closed=0;int64_t began=now_us();
+    int64_t deadline=began+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US);
+    atomic_store(&p->write_interrupt.cleanup,1);atomic_store(&p->write_interrupt.deadline,deadline);
+    pthread_mutex_lock(&job->mutex);job->finalize_started_us=began;job->finalize_deadline_us=deadline;
+    job->write_started_us=began;strcpy(job->write_phase,"output_finalize");pthread_mutex_unlock(&job->mutex);
+    if(p->header_written)trailer=av_write_trailer(p->output);
+    if(p->output&&p->output->pb) {
+        avio_flush(p->output->pb);flush=p->output->pb->error;
+        pthread_mutex_lock(&job->mutex);job->bytes_out=p->output->pb->bytes_written;pthread_mutex_unlock(&job->mutex);
+        if(p->output->flags&AVFMT_FLAG_CUSTOM_IO) {av_freep(&p->output->pb->buffer);avio_context_free(&p->output->pb);}
+        else closed=avio_closep(&p->output->pb);
+    }
+    if(p->custom_output_fd>=0) {
+        if(close(p->custom_output_fd)<0&&closed>=0)closed=AVERROR(errno);
+        p->custom_output_fd=-1;
+    }
+    if(primary>=0&&!stopped) {
+        if(trailer<0) {primary=trailer;p->stage="output trailer";}
+        else if(flush<0) {primary=flush;p->stage="output flush";}
+        else if(closed<0) {primary=closed;p->stage="output protocol close";}
+    }
+    pthread_mutex_lock(&job->mutex);
+    job->finalize_trailer_error=trailer<0?trailer:0;job->finalize_flush_error=flush<0?flush:0;
+    job->finalize_close_error=closed<0?closed:0;job->finalize_primary_error=primary<0?primary:0;
+    job->finalize_finished_us=now_us();job->write_started_us=0;*job->write_phase=0;
+    pthread_mutex_unlock(&job->mutex);
+    if(p->hooks.close) {
+        NakiMediaEnd end={.cancelled=stopped,.error_code=primary<0?primary:0,.stage=p->stage};
+        if(job->parent)end.output_failures=atomic_load(&job->branch_failed)||(primary<0&&!stopped);
+        else for(int i=0;i<job->config.output_count;i++)end.output_failures+=atomic_load(&job->outputs[i]->branch_failed);
+        p->hooks.close(p->hooks.opaque,&end);p->hooks=(NakiMediaHooks){0};
+    }
+    if(p->output) {avformat_free_context(p->output);p->output=NULL;}
+    atomic_store(&p->write_interrupt.deadline,0);return primary;
 }
 static void refresh_auto(Pipeline *p) {
     AVCodecAsyncAutoStats stats={0};
@@ -172,7 +237,7 @@ static void *reader_main(void *opaque) {
             break;
         }
         if (packet->size<=0) {av_packet_free(&packet); continue;}
-        if(job->config.output_count&&packet->size>8*1024*1024) {av_packet_free(&packet);ret=AVERROR(ENOBUFS);break;}
+        if((unsigned)packet->size>NAKI_INPUT_PACKET_BYTES) {av_packet_free(&packet);ret=AVERROR(ENOBUFS);break;}
         int video=packet->stream_index==p->stream_index;
         InputItem item={.packet=packet,.tb=p->input_tb,.demuxed_us=finished};
         if (!video) {
@@ -210,11 +275,11 @@ static void *reader_main(void *opaque) {
         if (ret<0) {free_input(&item); break;}
         if (video) {
             av_buffer_unref(&packet->opaque_ref);
-            if(job->config.policy.overload_levels) {
+            {
                 uint8_t *data=av_mallocz(sizeof(Stamp));
                 packet->opaque_ref=data ? av_buffer_create(data,sizeof(Stamp),packet_stamp_free,job,0) : NULL;
                 if(!packet->opaque_ref)av_free(data);
-            } else packet->opaque_ref=av_buffer_allocz(sizeof(Stamp));
+            }
             if (!packet->opaque_ref) {free_input(&item); ret=AVERROR(ENOMEM); break;}
             Stamp *stamp=(Stamp *)packet->opaque_ref->data;
             if(seq==INT64_MAX) {free_input(&item); ret=AVERROR(ERANGE); break;}
@@ -223,16 +288,21 @@ static void *reader_main(void *opaque) {
             stamp->packet_pts=packet->pts; stamp->packet_dts=packet->dts;
             ret=naki_policy_track(job,NAKI_TRACK_PACKET,(uint64_t)stamp->sequence,stamp->ingress_us);
             if(ret<0) {free_input(&item); break;}
-            stamp->tracked_packet=job->config.policy.overload_levels!=0;
+            stamp->tracked_packet=1;
             checkpoint(p,&job->first_packet_us);
             stamp->input_key=!!(packet->flags&AV_PKT_FLAG_KEY);
         }
+        AVCodecParameters video_parameters={0};
+        NakiBranchItem accounting={.packet=item.packet,.parameters=item.params?item.params:&video_parameters,.media_us=1,.ingress_us=item.demuxed_us};
+        ret=naki_branch_item_charge(&accounting);
+        if(ret<0||accounting.charged_bytes>NAKI_INPUT_RETAINED_ITEM_BYTES) {free_input(&item);if(ret>=0)ret=AVERROR(ENOBUFS);break;}
+        item.retained_bytes=accounting.charged_bytes;
         pthread_mutex_lock(&p->ring_mutex);
-        while (p->count==READER_CAPACITY && !atomic_load(&job->cancel)) pthread_cond_wait(&p->ring_space,&p->ring_mutex);
+        while ((p->count==READER_CAPACITY||item.retained_bytes>NAKI_READER_RETAINED_BYTES-p->reader_bytes) && !atomic_load(&job->cancel)) pthread_cond_wait(&p->ring_space,&p->ring_mutex);
         if (atomic_load(&job->cancel)) {pthread_mutex_unlock(&p->ring_mutex); free_input(&item); break;}
-        p->ring[(p->head+p->count)%READER_CAPACITY]=item; p->count++;
+        p->ring[(p->head+p->count)%READER_CAPACITY]=item; p->count++;p->reader_bytes+=item.retained_bytes;
         pthread_mutex_unlock(&p->ring_mutex);
-        if(video) {pthread_mutex_lock(&job->mutex); job->packets_in++; pthread_mutex_unlock(&job->mutex);}
+        pthread_mutex_lock(&job->mutex);job->last_input_us=now_us();if(video)job->packets_in++;pthread_mutex_unlock(&job->mutex);
         wake_job(job);
     }
     pthread_mutex_lock(&p->ring_mutex);
@@ -245,7 +315,7 @@ static InputItem pop_input(Pipeline *p, int *done, int *error) {
     pthread_mutex_lock(&p->ring_mutex);
     if (p->count) {
         item=p->ring[p->head]; p->ring[p->head]=(InputItem){0};
-        p->head=(p->head+1)%READER_CAPACITY; p->count--;
+        p->head=(p->head+1)%READER_CAPACITY; p->count--;p->reader_bytes-=item.retained_bytes;
         pthread_cond_signal(&p->ring_space);
     }
     *done=p->read_done && !p->count && !item.packet; *error=p->read_error;
@@ -303,7 +373,7 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     p->encoder->bit_rate=cfg->bitrate;
     p->encoder->thread_count=cfg->encoder_threads;
     p->encoder->thread_type=FF_THREAD_SLICE;
-    p->encoder->gop_size=cfg->fps*2; p->encoder->max_b_frames=0;
+    p->encoder->gop_size=p->video_rate.nominal_gop_frames; p->encoder->max_b_frames=0;
     p->encoder->color_range=av_buffersink_get_color_range(p->sink);
     p->encoder->color_primaries=frame->color_primaries;
     p->encoder->color_trc=frame->color_trc; p->encoder->colorspace=av_buffersink_get_colorspace(p->sink);
@@ -317,7 +387,7 @@ static int open_output(Pipeline *p, AVFrame *frame) {
     int intra_frames=0;
     if (vvc && strcmp(cfg->encoder_profile,"reference")) {
         int temporal_filter=strcmp(cfg->encoder_profile,"live_3b_2s_no_mctf")!=0;
-        intra_frames=(int)av_rescale_q(2,(AVRational){1,1},av_inv_q(p->frame_rate));
+        intra_frames=p->video_rate.nominal_gop_frames;
         if (intra_frames<4) return AVERROR(EINVAL);
         p->encoder->gop_size=intra_frames; p->encoder->max_b_frames=3;
         /* Display order I B B B P ... ; coding order P4 B2 B1 B3. The
@@ -458,13 +528,16 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         p->previous_key_pts=pts_us; p->seen_output_key=1;
     }
     int64_t mux_start=encoded, write_begin=now_us(), interleaved=0, written=0;
+    NakiFrameIdentity identity=frame_identity(p,&stamp,packet->pts,p->video->time_base);
     int ret=write_packet_now(p,packet,&interleaved,&written);
     if(ret<0)return ret;
+    if(stamp.delivery_lease&&(ret=naki_watermark_written(stamp.delivery_owner,stamp.delivery_lease,&identity,written))<0)return ret;
     if(!naki_policy_untrack(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp.frame_id))return AVERROR_INVALIDDATA;
     naki_branch_release(p->job,(uint64_t)stamp.frame_id,stamp.branch_charge);
     if(p->job->parent) {
         Job *parent=p->job->parent;pthread_mutex_lock(&parent->mutex);
         if(!parent->first_video_output_us)parent->first_video_output_us=written;
+        parent->last_output_us=written;
         if(output_key&&!parent->first_key_output_us)parent->first_key_output_us=written;
         pthread_mutex_unlock(&parent->mutex);
     }
@@ -625,6 +698,8 @@ static int receive_encoded(Pipeline *p) {
     int ret;
     while((ret=encoder_receive(p,packet))>=0) {
         int64_t encoded_us=now_us(), hook_us=0;
+        pthread_mutex_lock(&p->job->mutex);p->job->last_encoded_us=encoded_us;pthread_mutex_unlock(&p->job->mutex);
+        if(p->job->parent) {pthread_mutex_lock(&p->job->parent->mutex);p->job->parent->last_encoded_us=encoded_us;pthread_mutex_unlock(&p->job->parent->mutex);}
         int slot=-1;
         for(int i=0;i<LEDGER_CAPACITY;i++)if(p->ledger[i].used && p->ledger[i].pts==packet->pts){slot=i;break;}
         if(slot<0){ret=AVERROR_INVALIDDATA;break;}
@@ -672,11 +747,13 @@ static int receive_encoded(Pipeline *p) {
                 (int64_t)packet->size-size>NAKI_MEDIA_HOOK_MAX_ADDED_BYTES))ret=AVERROR(EINVAL);
             if(ret<0)break;
         }
-        av_buffer_unref(&packet->opaque_ref);packet->opaque_ref=av_buffer_alloc(sizeof(MuxTrace));
-        if(!packet->opaque_ref){ret=AVERROR(ENOMEM);break;}
-        *(MuxTrace *)packet->opaque_ref->data=(MuxTrace){.stamp=p->ledger[slot].stamp,.encoded_us=encoded_us,.hook_us=hook_us,
+        MuxTrace *meta=av_malloc(sizeof(*meta));
+        AVBufferRef *reference=meta?av_buffer_create((uint8_t *)meta,sizeof(*meta),mux_trace_free,NULL,0):NULL;
+        if(!reference){av_free(meta);ret=AVERROR(ENOMEM);break;}
+        *meta=(MuxTrace){.stamp=p->ledger[slot].stamp,.owner=p->ledger[slot].owner,.encoded_us=encoded_us,.hook_us=hook_us,
             .pts_us=av_rescale_q(packet->pts,p->encoder->time_base,AV_TIME_BASE_Q),.bytes=packet->size,.picture_type=output_type};
-        p->ledger[slot].used=0;
+        p->ledger[slot].owner=NULL;p->ledger[slot].used=0;
+        av_buffer_unref(&packet->opaque_ref);packet->opaque_ref=reference;
         av_packet_rescale_ts(packet,p->encoder->time_base,p->video->time_base);packet->stream_index=p->video->index;
         if(!packet->duration)packet->duration=av_rescale_q(1,av_inv_q(p->frame_rate),p->video->time_base);
         ret=submit_mux(p,packet);av_packet_unref(packet);
@@ -694,6 +771,12 @@ static void audio_count(Pipeline *p, int unsupported) {
 static int prepare_audio_params(AVCodecParameters *par, const AVPacket *pkt) {
     if(par->codec_id!=AV_CODEC_ID_AAC && par->codec_id!=AV_CODEC_ID_MP3)return AVERROR(ENOSYS);
     if(par->extradata_size>65536 || par->extradata_size<0)return AVERROR(EINVAL);
+    size_t extra_bytes=0;const uint8_t *extra=av_packet_get_side_data(pkt,AV_PKT_DATA_NEW_EXTRADATA,&extra_bytes);
+    if(extra) {
+        if(extra_bytes<2||extra_bytes>65536)return AVERROR_INVALIDDATA;
+        uint8_t *copy=av_mallocz(extra_bytes+AV_INPUT_BUFFER_PADDING_SIZE);if(!copy)return AVERROR(ENOMEM);
+        memcpy(copy,extra,extra_bytes);av_freep(&par->extradata);par->extradata=copy;par->extradata_size=(int)extra_bytes;
+    }
     if(par->codec_id==AV_CODEC_ID_AAC && pkt->size>=7 && pkt->data[0]==0xff && (pkt->data[1]&0xf6)==0xf0) {
         static const int rates[]={96000,88200,64000,48000,44100,32000,24000,22050,16000,12000,11025,8000,7350};
         int aot=(pkt->data[2]>>6)+1, frequency=(pkt->data[2]>>2)&15;
@@ -750,10 +833,33 @@ static int process_audio(Pipeline *p, const InputItem *item) {
         *track=(AudioTrack){.input_index=item->packet->stream_index,.last_dts=AV_NOPTS_VALUE};
     }
     if(track->rejected){audio_count(p,1);return 0;}
+    /* Read the immutable input snapshot before prepare_audio_params performs
+     * any container/decoder normalization on this branch-owned copy. */
+    NakiAudioSignature observed={0};int signature_ret=naki_audio_signature_read(&observed,item->params,item->packet);
+    if(signature_ret==AVERROR(ENOMEM))return signature_ret;
+    if(track->output) {
+        const char *reason=signature_ret<0?"input_configuration_unreadable":naki_audio_signature_change(&track->accepted,&observed);
+        if(reason) {
+            track->rejected=1;audio_count(p,1);
+            yyjson_mut_doc *doc=new_event("audio_track_changed_unsupported",p->job);
+            json_int(doc,"input_stream",track->input_index);json_str(doc,"reason",reason);json_int(doc,"error_code",signature_ret);
+            json_int(doc,"accepted_core_sample_rate",track->accepted.core_rate);json_int(doc,"observed_core_sample_rate",observed.core_rate);
+            json_int(doc,"accepted_coded_channels",track->accepted.layout.nb_channels);json_int(doc,"observed_coded_channels",observed.layout.nb_channels);
+            json_int(doc,"accepted_object_type",track->accepted.object_type);json_int(doc,"observed_object_type",observed.object_type);
+            logger_submit(p->job->logger,NULL,doc);naki_audio_signature_clear(&observed);return 0;
+        }
+    } else if(signature_ret<0) {
+        if(signature_ret!=AVERROR(EAGAIN)) {
+            track->rejected=1;yyjson_mut_doc *doc=new_event("audio_track_rejected",p->job);
+            json_int(doc,"input_stream",track->input_index);json_str(doc,"codec",avcodec_get_name(item->params->codec_id));
+            json_str(doc,"reason","input_configuration_unreadable");json_int(doc,"error_code",signature_ret);logger_submit(p->job->logger,NULL,doc);
+        }
+        audio_count(p,signature_ret!=AVERROR(EAGAIN));naki_audio_signature_clear(&observed);return 0;
+    }
     if(!track->output) {
         int ret=prepare_audio_params(item->params,item->packet);
-        if(ret==AVERROR(EAGAIN)){audio_count(p,0);return 0;}
-        if(ret==AVERROR(ENOMEM))return ret;
+        if(ret==AVERROR(EAGAIN)){audio_count(p,0);naki_audio_signature_clear(&observed);return 0;}
+        if(ret==AVERROR(ENOMEM)) {naki_audio_signature_clear(&observed);return ret;}
         if(ret>=0 && item->params->codec_id==AV_CODEC_ID_AAC) {
             const AVBitStreamFilter *filter=av_bsf_get_by_name("aac_adtstoasc");
             ret=filter ? av_bsf_alloc(filter,&track->bsf) : AVERROR_BSF_NOT_FOUND;
@@ -762,27 +868,21 @@ static int process_audio(Pipeline *p, const InputItem *item) {
         }
         if(ret>=0)ret=avformat_live_add_audio(p->output,item->params,item->tb,&track->output);
         if(ret<0) {
-            if(ret==AVERROR(ENOMEM))return ret;
+            naki_audio_signature_clear(&observed);if(ret==AVERROR(ENOMEM))return ret;
             track->rejected=1;audio_count(p,1);
             yyjson_mut_doc *doc=new_event("audio_track_rejected",p->job);
             json_int(doc,"input_stream",track->input_index);json_str(doc,"codec",avcodec_get_name(item->params->codec_id));
             json_int(doc,"error_code",ret);logger_submit(p->job->logger,NULL,doc);
             return 0;
         }
+        track->accepted=observed;memset(&observed,0,sizeof(observed));
         pthread_mutex_lock(&p->job->mutex);p->job->audio_tracks++;pthread_mutex_unlock(&p->job->mutex);
         yyjson_mut_doc *doc=new_event("audio_track_added",p->job);
         json_int(doc,"input_stream",track->input_index);json_int(doc,"output_stream",track->output->index);
         json_str(doc,"codec",avcodec_get_name(item->params->codec_id));json_int(doc,"sample_rate",item->params->sample_rate);
         json_str(doc,"action","registered_without_reopening_output");logger_submit(p->job->logger,NULL,doc);
     }
-    if(item->params->codec_id!=track->output->codecpar->codec_id ||
-       (item->params->extradata_size>0 && (item->params->extradata_size!=track->output->codecpar->extradata_size ||
-        memcmp(item->params->extradata,track->output->codecpar->extradata,item->params->extradata_size)))) {
-        track->rejected=1;audio_count(p,1);
-        yyjson_mut_doc *doc=new_event("audio_track_changed_unsupported",p->job);
-        json_int(doc,"input_stream",track->input_index);logger_submit(p->job->logger,NULL,doc);
-        return 0;
-    }
+    naki_audio_signature_clear(&observed);
     AVPacket *packet=av_packet_clone(item->packet);
     if(!packet)return AVERROR(ENOMEM);
     if(item->params->codec_id==AV_CODEC_ID_AAC && packet->size>=7 && packet->data[0]==0xff && (packet->data[1]&0xf6)==0xf0) {
@@ -887,17 +987,19 @@ static int encode_frame(Pipeline *p, AVFrame *frame) {
     if (slot<0) return AVERROR(ENOBUFS);
     p->stage="encode";
     int ret;
+    AVBufferRef *owner=av_buffer_ref(frame->opaque_ref);
+    if(!owner)return AVERROR(ENOMEM);
     stamp.encoder_submit_us=now_us();
     checkpoint(p,&p->job->first_encoder_submit_us);
     while ((ret=encoder_send(p,frame))==AVERROR(EAGAIN)) {
-        if ((ret=receive_encoded(p))<0) return ret;
+        if ((ret=receive_encoded(p))<0) {av_buffer_unref(&owner);return ret;}
     }
-    if (ret<0) return ret;
+    if (ret<0) {av_buffer_unref(&owner);return ret;}
     stamp.encoder_accepted_us=now_us();
     if(strict) {p->last_output_display_pts=output_display_pts;p->have_output_display_pts=1;}
     naki_intra_accept(&p->job->config.policy,&p->intra,stamp.source_us,stamp.intra_reason);
     if(stamp.intra_reason) {pthread_mutex_lock(&p->job->mutex);p->job->intra_requested++;pthread_mutex_unlock(&p->job->mutex);}
-    p->ledger[slot]=(Ledger){.used=1,.pts=frame->pts,.stamp=stamp}; p->last_pts=frame->pts;
+    p->ledger[slot]=(Ledger){.used=1,.pts=frame->pts,.stamp=stamp,.owner=owner}; p->last_pts=frame->pts;
     pthread_mutex_lock(&p->job->mutex); p->job->frames_filtered++; pthread_mutex_unlock(&p->job->mutex);
     return receive_encoded(p);
 }
@@ -910,12 +1012,21 @@ static int filter_output(Pipeline *p) {
         if(p->job->filter_generations>1) {frame->colorspace=p->encoder->colorspace;frame->color_range=p->encoder->color_range;}
         if(!frame->opaque_ref||frame->opaque_ref->size!=sizeof(Stamp)) {ret=AVERROR_INVALIDDATA;break;}
         uint64_t watermark_revision=0;
+        Stamp stamp=*(Stamp *)frame->opaque_ref->data;NakiOperationHandle lease=0;
+        AVRational time_base=av_buffersink_get_time_base(p->sink);
+        NakiFrameIdentity identity=frame_identity(p,&stamp,frame->pts,time_base);
         p->stage="watermark composition";
-        ret=naki_watermark_frame(p->job->watermark,&p->watermark_compositor,frame,
-            av_buffersink_get_time_base(p->sink),((Stamp *)frame->opaque_ref->data)->source_us,&watermark_revision);
-        if(ret>=0)ret=av_buffer_make_writable(&frame->opaque_ref);
+        ret=naki_watermark_frame_tracked(p->job->watermark,&p->watermark_compositor,frame,
+            time_base,&identity,&watermark_revision,&lease);
         if(ret>=0) {
-            ((Stamp *)frame->opaque_ref->data)->watermark_revision=watermark_revision;
+            stamp.watermark_revision=watermark_revision;stamp.delivery_owner=p->job->watermark;stamp.delivery_lease=lease;
+            Stamp *owned=av_memdup(&stamp,sizeof(stamp));
+            AVBufferRef *reference=owned?av_buffer_create((uint8_t *)owned,sizeof(*owned),delivery_stamp_free,NULL,0):NULL;
+            if(!reference) {
+                av_free(owned);if(naki_watermark_release_frame(p->job->watermark,lease))abort();ret=AVERROR(ENOMEM);
+            } else {av_buffer_unref(&frame->opaque_ref);frame->opaque_ref=reference;}
+        }
+        if(ret>=0) {
             if(p->watermark_revision!=watermark_revision) {
                 yyjson_mut_doc *event=new_event("watermark_applied",p->job);
                 naki_watermark_status(p->job->watermark,event);logger_submit(p->job->logger,NULL,event);
@@ -939,6 +1050,7 @@ static int prepare_decoded_frame(Pipeline *p, AVFrame *frame) {
     if (ret<0) return ret;
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
     stamp->decoded_us=now_us();
+    pthread_mutex_lock(&p->job->mutex);p->job->last_decoded_us=stamp->decoded_us;strcpy(p->job->media_phase,"running");pthread_mutex_unlock(&p->job->mutex);
     checkpoint(p,&p->job->first_decoded_us);
     stamp->picture_type=frame->pict_type;
     stamp->first_i=frame->pict_type==AV_PICTURE_TYPE_I && !p->seen_input_i;
@@ -998,6 +1110,7 @@ static int process_frame(Pipeline *p,AVFrame *frame) {
         pthread_mutex_lock(&p->job->mutex);
         if(!p->job->first_decoded_us)p->job->first_decoded_us=stamp->decoded_us;
         if(!p->job->first_packet_us)p->job->first_packet_us=stamp->ingress_us;
+        p->job->last_decoded_us=stamp->decoded_us;strcpy(p->job->media_phase,"running");
         pthread_mutex_unlock(&p->job->mutex);
     }
     if((ret=naki_policy_track(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp->frame_id,stamp->ingress_us))<0)return ret;
@@ -1039,6 +1152,7 @@ static int process_frame(Pipeline *p,AVFrame *frame) {
     return filter_output(p);
 }
 static int initialize_decoder(Pipeline *p) {
+    media_phase(p,"opening_input");
     p->stage="input open/probe";
     p->input=avformat_alloc_context();
     if (!p->input) return AVERROR(ENOMEM);
@@ -1065,8 +1179,10 @@ static int initialize_decoder(Pipeline *p) {
     if (stream->codecpar->codec_id!=AV_CODEC_ID_H264 && stream->codecpar->codec_id!=AV_CODEC_ID_HEVC) return AVERROR(ENOSYS);
     p->input_tb=stream->time_base;
     p->input_wrap_bits=stream->pts_wrap_bits;
-    p->frame_rate=av_guess_frame_rate(p->input,stream,NULL);
-    if (p->frame_rate.num<=0 || p->frame_rate.den<=0) p->frame_rate=(AVRational){p->job->config.fps,1};
+    ret=naki_video_rate_resolve(av_guess_frame_rate(p->input,stream,NULL),p->job->config.fps,&p->video_rate);
+    if(ret<0)return ret;
+    p->frame_rate=p->video_rate.value;
+    pthread_mutex_lock(&p->job->mutex);p->job->video_rate=p->video_rate;pthread_mutex_unlock(&p->job->mutex);
     p->stage="async decoder initialization";
     const AVCodec *codec=avcodec_find_decoder(stream->codecpar->codec_id);
     if (!codec) return AVERROR_DECODER_NOT_FOUND;
@@ -1076,7 +1192,7 @@ static int initialize_decoder(Pipeline *p) {
     p->decoder->pkt_timebase=p->input_tb;
     p->decoder->thread_count=p->job->config.max_threads;
     p->decoder->thread_type=FF_THREAD_FRAME; p->decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;
-    if(p->job->config.output_count)p->decoder->max_pixels=4096LL*2160;
+    p->decoder->max_pixels=NAKI_INPUT_MAX_PIXELS;
     if ((ret=avcodec_open2(p->decoder,codec,NULL))<0) return ret;
     if ((ret=avcodec_async_create(&p->async,&p->decoder,p->job->config.queue_capacity,wake_job,p->job))<0) return ret;
     AVCodecAsyncBudget *budget=NULL;
@@ -1092,8 +1208,14 @@ static int initialize_decoder(Pipeline *p) {
 static void branch_queue_stats(Branch *b) {
     pthread_mutex_lock(&b->queue.mutex);
     unsigned count=b->queue.count,high=b->queue.high_water;uint64_t bytes=b->queue.bytes,media=b->queue.media_us;
+    unsigned video=b->queue.video_count,audio=b->queue.audio_count,video_high=b->queue.video_high,audio_high=b->queue.audio_high,reason=b->queue.rejection_reason;
+    int64_t oldest=b->queue.count?b->queue.items[b->queue.head].ingress_us:0;
+    uint64_t rejected[NAKI_BRANCH_REASONS];memcpy(rejected,b->queue.rejected,sizeof(rejected));
     pthread_mutex_unlock(&b->queue.mutex);Job *j=b->pipeline.job;
-    pthread_mutex_lock(&j->mutex);j->branch_queued=count;j->branch_queue_bytes=bytes;j->branch_queue_media_us=media;j->branch_queue_high=high;pthread_mutex_unlock(&j->mutex);
+    pthread_mutex_lock(&j->mutex);j->branch_queued=count;j->branch_queue_bytes=bytes;j->branch_queue_media_us=media;j->branch_queue_high=high;
+    j->branch_video_queued=video;j->branch_audio_queued=audio;j->branch_video_high=video_high;j->branch_audio_high=audio_high;j->branch_rejection_reason=reason;
+    j->branch_oldest_ingress_us=oldest;
+    memcpy(j->branch_rejected,rejected,sizeof(rejected));pthread_mutex_unlock(&j->mutex);
 }
 static void fail_branch(Branch *b,int ret,const char *stage) {
     Job *j=b->pipeline.job;if(atomic_load(&j->done))return;
@@ -1113,14 +1235,22 @@ static int check_branches(Pipeline *p,int finishing) {
         pthread_mutex_lock(&j->mutex);
         int64_t age=naki_inflight_age(&j->branch_pending,now),write=j->write_started_us?now-j->write_started_us:0;
         int failed=j->branch_failed;pthread_mutex_unlock(&j->mutex);
-        if(!failed&&(age>(int64_t)b->spec->max_lag_ms*1000||write>(int64_t)b->spec->io_timeout_ms*1000||
-           naki_branch_queue_check(&b->queue,now)==AVERROR(ETIMEDOUT)))fail_branch(b,AVERROR(ETIMEDOUT),"branch ingress/write deadline");
+        if(!failed) {
+            if(age>(int64_t)b->spec->max_lag_ms*1000)fail_branch(b,AVERROR(ETIMEDOUT),"branch retained-frame ingress deadline");
+            else if(write>(int64_t)b->spec->io_timeout_ms*1000)fail_branch(b,AVERROR(ETIMEDOUT),"branch output I/O deadline");
+            else if(naki_branch_queue_check(&b->queue,now)==AVERROR(ETIMEDOUT)) {
+                pthread_mutex_lock(&b->queue.mutex);int pressure=b->queue.admission_deadline_us&&now>=b->queue.admission_deadline_us;unsigned reason=b->queue.rejection_reason;pthread_mutex_unlock(&b->queue.mutex);
+                char stage[96];snprintf(stage,sizeof(stage),pressure?"branch bounded admission window (%s)":"branch queued ingress deadline (%s)",naki_branch_reason_name(reason));
+                fail_branch(b,AVERROR(ETIMEDOUT),stage);
+            }
+        }
         if(!atomic_load(&j->cancel))active++;
         branch_queue_stats(b);
     }
     return !finishing&&!active?AVERROR(EPIPE):0;
 }
 static int drain_output(Pipeline *p) {
+    media_phase(p,"draining");
     if(!p->graph) {p->stage="empty video";return AVERROR(ENODATA);}
     p->stage="filter drain";int ret=av_buffersrc_add_frame_flags(p->source,NULL,0);
     if(ret<0||(ret=filter_output(p))<0)return ret;
@@ -1137,10 +1267,12 @@ static void *branch_main(void *opaque) {
     if(ret>0||(ret>=0&&p->hooks.api_version!=NAKI_MEDIA_HOOK_API))ret=AVERROR(EINVAL);
     if(ret>=0) {pthread_mutex_lock(&j->mutex);strcpy(j->state,"running");pthread_mutex_unlock(&j->mutex);}
     while(ret>=0&&!atomic_load(&j->cancel)) {
+        media_phase(p,"waiting_input");
         NakiBranchItem item={0};ret=naki_branch_queue_pop(&b->queue,&item,now_us()+20000);branch_queue_stats(b);
         if(ret==AVERROR_EOF) {ret=drain_output(p);break;}
         if(ret==AVERROR(ETIMEDOUT)||ret==AVERROR(EAGAIN)) {ret=p->live_mux?drain_mux(p,0):0;continue;}
         if(ret<0)break;
+        pthread_mutex_lock(&j->mutex);j->last_input_us=now_us();strcpy(j->media_phase,"running");pthread_mutex_unlock(&j->mutex);
         if(item.frame)ret=process_frame(p,item.frame);
         else if(j->config.audio_copy&&strcmp(j->config.output_format,"mp4")) {
             InputItem audio={.packet=item.packet,.params=item.parameters,.tb=item.time_base,.demuxed_us=item.ingress_us};
@@ -1151,28 +1283,18 @@ static void *branch_main(void *opaque) {
     }
     if(!atomic_load(&j->parent->cancel)&&atomic_load(&j->cancel)&&!j->branch_failed)fail_branch(b,AVERROR(ETIMEDOUT),"branch overload cancellation");
     if(ret<0&&!atomic_load(&j->parent->cancel))fail_branch(b,ret,p->stage);
-    naki_branch_queue_abort(&b->queue);naki_watermark_stop(j->watermark);
-    if(p->header_written) {
-        atomic_store(&p->write_interrupt.deadline,now_us()+p->io_timeout_us);
-        int trailer=av_write_trailer(p->output);if(p->output->pb) {avio_flush(p->output->pb);if(trailer>=0&&p->output->pb->error<0)trailer=p->output->pb->error;}
-        if(ret>=0&&trailer<0&&!atomic_load(&j->parent->cancel)) {ret=trailer;fail_branch(b,ret,"output trailer");}
-    }
-    if(p->hooks.close) {NakiMediaEnd end={.cancelled=atomic_load(&j->parent->cancel),.error_code=ret<0?ret:0,.stage=p->stage,.output_failures=atomic_load(&j->branch_failed)};p->hooks.close(p->hooks.opaque,&end);}
-    if(p->output) {
-        if(p->output->pb) {
-            pthread_mutex_lock(&j->mutex);j->bytes_out=p->output->pb->bytes_written;pthread_mutex_unlock(&j->mutex);
-            if(p->output->flags&AVFMT_FLAG_CUSTOM_IO) {av_freep(&p->output->pb->buffer);avio_context_free(&p->output->pb);}
-            else avio_closep(&p->output->pb);
-        }
-        avformat_free_context(p->output);
-    }
-    if(p->custom_output_fd>=0)close(p->custom_output_fd);
+    naki_branch_queue_abort(&b->queue);naki_watermark_owner_finish(j->watermark,ret,atomic_load(&j->parent->cancel));naki_watermark_stop(j->watermark);
+    ret=finalize_output(p,ret,atomic_load(&j->parent->cancel));
+    if(ret<0&&!atomic_load(&j->parent->cancel))fail_branch(b,ret,p->stage);
     for(int i=0;i<p->deferred_count;i++)free_input(&p->deferred_audio[i]);
-    for(int i=0;i<p->audio_count;i++)av_bsf_free(&p->audio[i].bsf);
+    for(int i=0;i<p->audio_count;i++) {av_bsf_free(&p->audio[i].bsf);naki_audio_signature_clear(&p->audio[i].accepted);}
     avcodec_free_context(&p->encoder);avfilter_graph_free(&p->graph);naki_watermark_compositor_free(&p->watermark_compositor);
+    ledger_clear(p);
     pthread_mutex_lock(&j->mutex);j->policy_closing=1;j->ended_us=now_us();
     memset(&j->policy_inflight,0,sizeof(j->policy_inflight));memset(&j->branch_pending,0,sizeof(j->branch_pending));
     j->branch_inflight_bytes=j->branch_inflight_frames=0;j->branch_queued=j->branch_queue_bytes=j->branch_queue_media_us=0;
+    j->branch_video_queued=j->branch_audio_queued=0;
+    j->branch_oldest_ingress_us=0;
     strcpy(j->state,j->branch_failed?"failed":atomic_load(&j->parent->cancel)?"stopped":"completed");
     pthread_mutex_unlock(&j->mutex);logger_submit(j->logger,NULL,job_report(j,1));atomic_store(&j->done,1);wake_job(j->parent);return NULL;
 }
@@ -1181,12 +1303,13 @@ static int start_branches(Pipeline *p) {
     for(int i=0;i<p->branch_count;i++)p->branches[i].pipeline.job=p->job->outputs[i];
     for(int i=0;i<p->branch_count;i++) {
         Branch *b=&p->branches[i];Job *j=p->job->outputs[i];b->spec=&p->job->config.outputs[i];
-        b->pipeline=(Pipeline){.job=j,.input_tb=p->input_tb,.frame_rate=p->frame_rate,.input_wrap_bits=p->input_wrap_bits,
+        b->pipeline=(Pipeline){.job=j,.input_tb=p->input_tb,.frame_rate=p->frame_rate,.video_rate=p->video_rate,.input_wrap_bits=p->input_wrap_bits,
             .custom_output_fd=-1,.last_pts=AV_NOPTS_VALUE,.mux_max_dts_us=INT64_MIN,.stage="branch initialization",.io_timeout_us=(int64_t)b->spec->io_timeout_ms*1000};
         b->pipeline.write_interrupt.job=j;atomic_init(&b->pipeline.write_interrupt.deadline,0);
+        atomic_init(&b->pipeline.write_interrupt.cleanup,0);
         pthread_mutex_lock(&j->mutex);j->input_open_started_us=p->job->input_open_started_us;j->input_open_done_us=p->job->input_open_done_us;
-        j->input_probe_done_us=p->job->input_probe_done_us;j->decoder_ready_us=p->job->decoder_ready_us;pthread_mutex_unlock(&j->mutex);
-        int ret=naki_branch_queue_init(&b->queue,b->spec->queue_items,b->spec->queue_bytes,(int64_t)b->spec->queue_media_ms*1000,(int64_t)b->spec->max_lag_ms*1000);
+        j->input_probe_done_us=p->job->input_probe_done_us;j->decoder_ready_us=p->job->decoder_ready_us;j->video_rate=p->video_rate;pthread_mutex_unlock(&j->mutex);
+        int ret=naki_branch_queue_init_limits(&b->queue,b->spec->queue_items,b->spec->audio_packets,b->spec->queue_bytes,(int64_t)b->spec->queue_media_ms*1000,(int64_t)b->spec->max_lag_ms*1000);
         if(ret<0)return ret;
         b->initialized=1;
         if(atomic_load(&j->done))continue;
@@ -1215,11 +1338,13 @@ static int admit_branch_items(Pipeline *p,NakiBranchItem *items) {
             Stamp *s=(Stamp *)items[i].frame->opaque_ref->data;
             naki_branch_release(j,(uint64_t)s->frame_id,s->branch_charge);
         }
-        if(offers[i].queue&&offers[i].result<0&&!atomic_load(&p->job->cancel)&&!atomic_load(&j->done))
-            fail_branch(b,offers[i].result,"branch bounded admission");
+        if(offers[i].queue&&offers[i].result<0&&!atomic_load(&p->job->cancel)&&!atomic_load(&j->done)) {
+            pthread_mutex_lock(&b->queue.mutex);unsigned reason=b->queue.rejection_reason;pthread_mutex_unlock(&b->queue.mutex);
+            char stage[96];snprintf(stage,sizeof(stage),"branch bounded admission (%s)",naki_branch_reason_name(reason));fail_branch(b,offers[i].result,stage);
+        }
         naki_branch_item_free(&items[i]);branch_queue_stats(b);
     }
-    return check_branches(p,0);
+    int result=check_branches(p,0);if(result<0)p->stage="all outputs failed after bounded admission";return result;
 }
 static int fanout_frame(Pipeline *p,AVFrame *frame) {
     NakiBranchItem items[4]={0};
@@ -1232,7 +1357,7 @@ static int fanout_frame(Pipeline *p,AVFrame *frame) {
         NakiBranchItem item={.frame=av_frame_clone(frame),.source_us=source->source_us,.ingress_us=source->ingress_us,.sequence=source->sequence,.time_base=p->input_tb};
         /* Queue work-duration budget never turns legal source PTS holes or
          * long display durations into an admission failure. No PTS is retimed. */
-        int64_t duration=av_rescale_q(1,(AVRational){1,p->job->config.fps},AV_TIME_BASE_Q);
+        int64_t duration=p->video_rate.nominal_frame_work_us;
         item.media_us=duration>0?(uint64_t)duration:1;
         ret=item.frame?av_buffer_make_writable(&item.frame->opaque_ref):AVERROR(ENOMEM);
         if(ret>=0)ret=naki_branch_item_charge(&item);
@@ -1299,11 +1424,14 @@ void *pipeline_main(void *opaque) {
     (void)crash_thread_init();
     Job *job=opaque;
     Pipeline p={.job=job,.custom_output_fd=-1,.last_pts=AV_NOPTS_VALUE,.mux_max_dts_us=INT64_MIN,.stage="initialization"};
+    if(!job->config.output_count) {OutputConfig output;naki_logical_output(&job->config,0,&output);p.io_timeout_us=(int64_t)output.io_timeout_ms*1000;}
     p.read_interrupt.job=job; p.write_interrupt.job=job;
     atomic_init(&p.read_interrupt.deadline,0); atomic_init(&p.write_interrupt.deadline,0);
+    atomic_init(&p.read_interrupt.cleanup,0);atomic_init(&p.write_interrupt.cleanup,0);
     pthread_mutex_init(&p.ring_mutex,NULL); pthread_cond_init(&p.ring_space,NULL);
     InputItem pending={0}; AVFrame *frame=av_frame_alloc();int branches_joined=0;
-    NakiMediaJobInfo info={.job_id=job->id,.request_id=job->request_id,.config=&job->config,.request_us=job->started_us};
+    NakiMediaJobInfo info={.job_id=job->id,.request_id=job->request_id,.config=&job->config,.request_us=job->started_us,
+        .output_id=job->config.output_count?NULL:job->output_id};
     p.stage="media hook initialization";
     int ret=frame ? naki_media_hooks_open(&info,&p.hooks) : AVERROR(ENOMEM);
     if(ret>0 || (ret>=0 && p.hooks.api_version!=NAKI_MEDIA_HOOK_API))ret=AVERROR(EINVAL);
@@ -1384,6 +1512,7 @@ void *pipeline_main(void *opaque) {
             p.next_stats_us=now_us()+1000000;
         }
         if (!progress) {
+            media_phase(&p,"waiting_input");
             struct pollfd fd={.fd=job->wake_fd,.events=POLLIN};
             int n;
             do {n=poll(&fd,1,p.branches?20:p.live_mux ? 10 : 1000);} while(n<0 && errno==EINTR && !atomic_load(&job->cancel));
@@ -1404,6 +1533,7 @@ void *pipeline_main(void *opaque) {
         for (int i=0;i<LEDGER_CAPACITY;i++) if(p.ledger[i].used) {ret=AVERROR_INVALIDDATA; goto cleanup;}
     } else if (!atomic_load(&job->cancel)) {p.stage="empty video"; ret=AVERROR(ENODATA);}
 cleanup:
+    media_phase(&p,"draining");
     {
         int stopped=atomic_load(&job->cancel);
         if(ret<0)atomic_store(&job->cancel,1);
@@ -1414,7 +1544,9 @@ cleanup:
         }
         if(p.branches&&!branches_joined)finish_branches(&p,1);
         for(int i=0;i<job->config.output_count;i++) {
-            Job *b=job->outputs[i];naki_watermark_stop(b->watermark);
+            Job *b=job->outputs[i];
+            if(!atomic_load(&b->done))naki_watermark_owner_finish(b->watermark,ret,stopped);
+            naki_watermark_stop(b->watermark);
             if(!atomic_load(&b->done)) {
                 pthread_mutex_lock(&b->mutex);strcpy(b->state,stopped?"stopped":"failed");b->branch_failed=!stopped;b->ended_us=now_us();
                 snprintf(b->error,sizeof(b->error),"shared pipeline terminated at %s",p.stage);pthread_mutex_unlock(&b->mutex);atomic_store(&b->done,1);
@@ -1435,31 +1567,15 @@ cleanup:
         if (p.reader_started) pthread_join(p.reader,NULL);
         refresh_auto(&p);
         avcodec_async_free(&p.async);
-        if (p.header_written) {
-            int trailer_ret=av_write_trailer(p.output);
-            if (p.output->pb) {avio_flush(p.output->pb); if (trailer_ret>=0 && p.output->pb->error<0) trailer_ret=p.output->pb->error;}
-            if (ret>=0 && !stopped && trailer_ret<0) {p.stage="output trailer"; ret=trailer_ret;}
-        }
-        if(p.hooks.close) {
-            NakiMediaEnd end={.cancelled=stopped,.error_code=ret<0 ? ret : 0,.stage=p.stage};
-            for(int i=0;i<job->config.output_count;i++)end.output_failures+=atomic_load(&job->outputs[i]->branch_failed);
-            p.hooks.close(p.hooks.opaque,&end);
-            p.hooks=(NakiMediaHooks){0};
-        }
-        if (p.output) {
-            if (p.output->pb) {pthread_mutex_lock(&job->mutex); job->bytes_out=(uint64_t)p.output->pb->bytes_written; pthread_mutex_unlock(&job->mutex);}
-            if (p.output->flags&AVFMT_FLAG_CUSTOM_IO) {
-                if(p.output->pb) {av_freep(&p.output->pb->buffer); avio_context_free(&p.output->pb);}
-            } else if (p.output->pb) avio_closep(&p.output->pb);
-            avformat_free_context(p.output);
-        }
-        if (p.custom_output_fd>=0) close(p.custom_output_fd);
+        naki_watermark_owner_finish(job->watermark,ret,stopped);
+        ret=finalize_output(&p,ret,stopped);
         free_input(&pending);
         for(int i=0;i<READER_CAPACITY;i++) free_input(&p.ring[i]);
         for(int i=0;i<p.deferred_count;i++)free_input(&p.deferred_audio[i]);
-        for(int i=0;i<p.audio_count;i++)av_bsf_free(&p.audio[i].bsf);
+        for(int i=0;i<p.audio_count;i++) {av_bsf_free(&p.audio[i].bsf);naki_audio_signature_clear(&p.audio[i].accepted);}
         av_frame_free(&frame); avcodec_free_context(&p.decoder); avcodec_free_context(&p.encoder);
         avfilter_graph_free(&p.graph); naki_watermark_compositor_free(&p.watermark_compositor); avformat_close_input(&p.input);
+        ledger_clear(&p);
         pthread_cond_destroy(&p.ring_space); pthread_mutex_destroy(&p.ring_mutex);
         if(p.branches) {
             for(int i=0;i<p.branch_count;i++)if(p.branches[i].initialized)naki_branch_queue_destroy(&p.branches[i].queue);

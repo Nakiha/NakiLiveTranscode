@@ -8,6 +8,43 @@
   "servers": [{"url": "http://127.0.0.1:8090"}],
   "security": [],
   "paths": {
+    "/v1/jobs": {
+      "post": {
+        "operationId": "createJobOperation",
+        "summary": "Create or retry one normalized creation intent in the fixed service namespace",
+        "description": "202 follows worker ownership ACK. Retry the same operation_id after an uncertain 503 or connection loss. Identical normalized spec returns the original job before busy admission; conflicting intent returns 409. Finite in-memory retention, not durable acceptance.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["operation_id", "spec"], "properties": {"operation_id": {"$ref": "#/components/schemas/ControlId"}, "spec": {"$ref": "#/components/schemas/JobConfig"}}}}}},
+        "responses": {"202": {"description": "Worker accepted, or retained original acceptance; job_id identifies the same owner."}, "409": {"$ref": "#/components/responses/Error"}, "503": {"description": "Unresolved recovery, capacity, shutdown or uncertain ownership; reuse the same operation_id."}, "default": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "parameters": [{"$ref": "#/components/parameters/JobId"}],
+      "get": {"operationId": "getTargetJob", "responses": {"200": {"$ref": "#/components/responses/Status"}, "404": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/v1/jobs/{job_id}/stop": {
+      "parameters": [{"$ref": "#/components/parameters/JobId"}],
+      "post": {
+        "operationId": "stopTargetJob", "description": "Reserve one stop operation per job. Duplicate accepted operation replays before current-job admission checks. 202 follows worker stop-intent ACK; query state separately. New stale-target stop cannot affect a replacement job.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["operation_id"], "properties": {"operation_id": {"$ref": "#/components/schemas/ControlId"}}}}}},
+        "responses": {"202": {"description": "Known worker stop intent or retained stop result."}, "409": {"$ref": "#/components/responses/Error"}, "503": {"description": "Stop acknowledgement unconfirmed; query/retry original operation."}, "default": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/v1/jobs/{job_id}/operations/{operation_id}": {
+      "parameters": [{"$ref": "#/components/parameters/JobId"}, {"name": "operation_id", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/ControlId"}}],
+      "get": {"operationId": "getRetainedOperation", "description": "Worker-authoritative create/update/stop query, or bounded controller history. A 200 response can have outcome_known=false, state=unknown, reason=operation_outcome_unknown and last_observed after unconfirmed worker loss. Cached pending never proves not_written. See component-updates.md.", "responses": {"200": {"description": "Authoritative or explicitly unknown result.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OperationResult"}}}}, "404": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}}}
+    },
+    "/v1/jobs/{job_id}/updates": {
+      "parameters": [{"$ref": "#/components/parameters/JobId"}],
+      "post": {
+        "operationId": "updateTargetComponent", "summary": "Typed sparse watermark update with worker CAS and caller operation ID",
+        "description": "8192-byte envelope. Matching original intent replays before closing/CAS/budget checks. Omitted fields retain desired; null, unknown/duplicate keys and policy fields are rejected. Prepare failure retains failed desired and previous effective. Per-output revisions, shared per-job create/update/stop ID domain. 256 update records/2MiB worker store plus reserved stop; completed results retained at least 30 minutes, referenced records pinned. One outstanding update/query RPC, 2s acknowledgement wait. Bounded memory, not a durable journal.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ComponentUpdate"}}}},
+        "responses": {"202": {"description": "Worker accepted or matching operation active.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OperationResult"}}}}, "200": {"description": "Matching terminal result.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OperationResult"}}}}, "400": {"$ref": "#/components/responses/Error"}, "404": {"$ref": "#/components/responses/Error"}, "409": {"$ref": "#/components/responses/Error"}, "429": {"$ref": "#/components/responses/Error"}, "503": {"$ref": "#/components/responses/Error"}}
+      }
+    },
+    "/health/live": {"get": {"operationId": "getControllerLiveness", "description": "HTTP event-loop liveness, independent of media output.", "responses": {"200": {"description": "Controller can answer."}, "405": {"$ref": "#/components/responses/Error"}}}},
+    "/health/ready": {"get": {"operationId": "getControlReadiness", "description": "Reliable ownership/control management. Healthy busy remains ready; recovery/unavailable/stale control closes readiness. No new automatic kill threshold.", "responses": {"200": {"description": "Control ready."}, "503": {"description": "Explicit readiness reason in body."}, "405": {"$ref": "#/components/responses/Error"}}}},
+    "/health/admission": {"get": {"operationId": "getCreationAdmission", "description": "New creation eligibility; busy/recovery/retention/worker/backoff reasons are distinct from readiness.", "responses": {"200": {"description": "New creation may be attempted."}, "503": {"description": "Admission closed with reason."}, "405": {"$ref": "#/components/responses/Error"}}}},
     "/health": {
       "get": {
         "operationId": "getHealth",
@@ -24,7 +61,7 @@
       "post": {
         "operationId": "startJob",
         "summary": "Start the single media job asynchronously",
-        "parameters": [{"in": "header", "name": "X-Request-ID", "required": false, "schema": {"type": "string", "maxLength": 128}, "description": "Correlation only, not an idempotency key. Missing or overlong values fall back to job_id; limit is 128 bytes."}],
+        "parameters": [{"in": "header", "name": "X-Request-ID", "required": false, "schema": {"$ref": "#/components/schemas/ControlId"}, "description": "HTTP-attempt correlation, not a business retry key. Missing values receive a random 128-bit ID; invalid values return 400."}],
         "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobConfig"}, "examples": {
           "srtVvc": {"value": {"input": "srt://0.0.0.0:15000?mode=listener&latency=50000", "output": "srt://receiver.example:15000?mode=caller&latency=50000", "output_format": "mpegts", "encoder": "libvvenc", "audio_copy": true, "mux_wait_ms": 50}},
           "rtmpVvc": {"value": {"input": "rtmp://source.example/live/input", "output": "rtmp://receiver.example/live/output", "output_format": "flv", "encoder": "libvvenc"}}
@@ -78,17 +115,59 @@
       "post": {
         "operationId": "stopJob",
         "summary": "Request cancellation; poll until stopped or failed",
-        "description": "Body is ignored; send {} or an empty body. Accepted cancellation can omit in-flight reordered frames. No running job returns 409, not an idempotent success.",
+        "description": "Legacy adapter requires explicit job_id; optional operation_id enables retained retries. CLI resolves current once then binds that ID. 202 accepts controller stop intent; use the new targeted route for worker-ACK acceptance. In-flight reordered frames may be omitted.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "additionalProperties": false, "required": ["job_id"], "properties": {"job_id": {"$ref": "#/components/schemas/ControlId"}, "operation_id": {"$ref": "#/components/schemas/ControlId"}}}}}},
         "responses": {"202": {"$ref": "#/components/responses/Status"}, "409": {"$ref": "#/components/responses/Error"}, "default": {"$ref": "#/components/responses/Error"}}
       }
     }
   },
   "components": {
+    "parameters": {"JobId": {"name": "job_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[A-Za-z0-9_-]+$"}}},
     "responses": {
       "Status": {"description": "Asynchronous job snapshot. Worker fields can be absent until the first snapshot. Retains last job after completion. No-store.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobStatus"}}}},
-      "Error": {"description": "Application JSON error (400/404/405/409/413/500/503 as applicable). Unknown URI=404, wrong method on an exact known URI=405. Libevent or allocation failures may return HTML.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}, "text/html": {"schema": {"type": "string"}}}}
+      "Error": {"description": "Application JSON error (400/404/405/409/413/429/500/503 as applicable). Unknown URI=404; legacy exact known URI with wrong method=405. Libevent or allocation failures may return HTML.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}, "text/html": {"schema": {"type": "string"}}}}
     },
     "schemas": {
+      "ControlId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"},
+      "ComponentUpdate": {
+        "type": "object", "additionalProperties": false, "required": ["operation_id", "target", "expected_revision", "patch"],
+        "properties": {
+          "operation_id": {"$ref": "#/components/schemas/ControlId"},
+          "target": {"type": "object", "additionalProperties": false, "required": ["output_id", "component"], "properties": {"output_id": {"type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[A-Za-z0-9_-]+$"}, "component": {"const": "watermark"}}},
+          "expected_revision": {"type": "integer", "minimum": 1, "maximum": 9223372036854775806},
+          "patch": {"$ref": "#/components/schemas/WatermarkPatch"}
+        }
+      },
+      "WatermarkPatch": {
+        "type": "object", "additionalProperties": false, "description": "Sparse typed fields; omission retains desired, null rejected. Startup/update/animation policies and encoder/output fields are immutable.",
+        "properties": {
+          "enabled": {"type": "boolean"},
+          "resource": {"type": "object", "additionalProperties": false, "properties": {"uri": {"type": "string", "minLength": 1, "maxLength": 2047}, "load_timeout_ms": {"type": "integer", "minimum": 1, "maximum": 30000}}},
+          "placement": {"type": "object", "additionalProperties": false, "properties": {
+            "anchor": {"enum": ["top_left", "top_center", "top_right", "center_left", "center", "center_right", "bottom_left", "bottom_center", "bottom_right"]},
+            "opacity": {"type": "number", "minimum": 0, "maximum": 1},
+            "offset": {"type": "object", "additionalProperties": false, "properties": {"x": {"type": "integer", "minimum": -8192, "maximum": 8192}, "y": {"type": "integer", "minimum": -8192, "maximum": 8192}}},
+            "size": {"type": "object", "additionalProperties": false, "properties": {"width": {"type": "integer", "minimum": 1, "maximum": 2048}, "height": {"type": "integer", "minimum": 1, "maximum": 2048}, "fit": {"enum": ["contain", "stretch"]}}}
+          }}
+        }
+      },
+      "FrameCheckpoint": {"type": "object", "properties": {"frame_id": {"type": "integer", "minimum": 1}, "source_pts": {"type": "integer"}, "source_us": {"type": "integer"}, "source_tb_num": {"type": "integer", "minimum": 1}, "source_tb_den": {"type": "integer", "minimum": 1}, "output_pts": {"type": "integer"}, "output_tb_num": {"type": "integer", "minimum": 1}, "output_tb_den": {"type": "integer", "minimum": 1}}},
+      "OperationResult": {
+        "type": "object", "required": ["job_id", "operation_id", "kind", "state", "outcome_known"], "additionalProperties": true,
+        "description": "applied and first_written may identify different frames. first_written is local write/flush, not display. Unknown outcome retains last_observed and confirmed checkpoints; pending history is never presented as current execution.",
+        "properties": {
+          "job_id": {"type": "string"}, "operation_id": {"$ref": "#/components/schemas/ControlId"}, "kind": {"enum": ["create", "update", "stop"]},
+          "origin_request_id": {"$ref": "#/components/schemas/ControlId"}, "operation_url": {"type": "string"},
+          "state": {"enum": ["reserved", "accepted", "preparing", "prepared", "applying", "applied", "failed", "superseded", "cancelled", "stopping", "stopped", "unknown"]},
+          "outcome_known": {"type": "boolean"}, "reason": {"type": "string"}, "accepted_revision": {"type": "integer"},
+          "result_source": {"enum": ["worker", "controller_history"]}, "result_expires_at": {"type": ["string", "null"]}, "result_expires_monotonic_us": {"type": ["integer", "null"]},
+          "result_version": {"type": "integer", "minimum": 1, "description": "Worker-store mutation sequence scoped to this job. Covers all result fields, including lease and retention changes after delivery. Controllers retain the entire greatest-version result despite message reordering."},
+          "applied_checkpoint": {"oneOf": [{"$ref": "#/components/schemas/FrameCheckpoint"}, {"type": "null"}]},
+          "delivery": {"type": "object", "properties": {"state": {"enum": ["not_ready", "pending", "first_written", "not_written"]}, "inflight_frame_leases": {"type": "integer", "minimum": 0}, "first_written": {"oneOf": [{"$ref": "#/components/schemas/FrameCheckpoint"}, {"type": "null"}]}, "written_us": {"type": "integer"}}},
+          "last_observed": {"type": ["object", "null"]}
+        }
+      },
+      "Components": {"type": "object", "properties": {"watermark": {"type": "object", "properties": {"state": {"type": "string"}, "desired_revision": {"type": "integer"}, "effective_revision": {"type": "integer"}, "claimed_revision": {"type": "integer"}, "desired": {"$ref": "#/components/schemas/Watermark"}, "effective": {"oneOf": [{"$ref": "#/components/schemas/Watermark"}, {"type": "null"}]}}}}},
       "JobConfig": {
         "type": "object", "additionalProperties": false, "required": ["input"], "oneOf": [{"required":["output"],"not":{"required":["outputs"]}},{"required":["outputs"],"not":{"anyOf":[{"required":["output"]},{"required":["watermark"]}]}}],
         "description": "UTF-8 strings must fit C buffers in bytes, exclude NUL. At most 32 keys; duplicates rejected before schema validation. min_threads<=max_threads. width/height are both zero/omitted or both positive even values. RTMP output requires flv; SRT requires mpegts. pace=true requires a local input. Encoder preset/profile must match the selected encoder; defaults are conditional.",
@@ -107,7 +186,7 @@
           "budget_slots": {"type": "integer", "minimum": 1, "maximum": 256, "default": 12, "description": "Adaptive decoder budget, not an overall CPU quota."},
           "queue_capacity": {"type": "integer", "minimum": 1, "maximum": 64, "default": 4, "description": "Async decoder queue; independent from reader and mux queues."},
           "encoder_threads": {"type": "integer", "minimum": 1, "maximum": 16, "default": 2},
-          "fps": {"type": "integer", "minimum": 1, "maximum": 240, "default": 25, "description": "Fallback nominal rate, not frame-rate conversion."},
+          "fps": {"type": "integer", "minimum": 1, "maximum": 240, "default": 25, "description": "Used only when av_guess_frame_rate is unavailable. Effective rational rate drives encoder/RC hints, nominal GOP frame count and queue work charge; source PTS cadence is preserved. See video-rate.md."},
           "pace": {"type": "boolean", "default": false, "description": "Local input file DTS-paced replay."},
           "frame_log": {"type": "boolean", "default": false},
           "frame_log_every": {"type": "integer", "minimum": 1, "maximum": 1000000, "default": 1, "description": "Detail sampling only; metrics still count every written video frame. I/key/slow frames override sampling."},
@@ -118,7 +197,7 @@
           "intra": {"$ref": "#/components/schemas/IntraPolicy"},
           "frame_selection": {"$ref": "#/components/schemas/FrameSelection"},
           "watermark": {"$ref": "#/components/schemas/Watermark"},
-          "outputs": {"type":"array","minItems":2,"maxItems":4,"items":{"$ref":"#/components/schemas/OutputConfig"}}
+          "outputs": {"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/components/schemas/OutputConfig"},"allOf":[{"if":{"minItems":2},"then":{"items":{"required":["id"]}}}],"description":"One logical output retains the direct execution path and defaults id to main; arrays with two to four entries require explicit unique ids."}
         },
         "allOf": [
           {"if": {"required": ["intra"]}, "then": {"required": ["timestamps"], "properties": {"timestamps": {"properties": {"mode": {"const": "source_all"}}}}}},
@@ -130,10 +209,9 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "id",
           "output"
         ],
-        "description": "Fixed startup branch. Unique ASCII id and destination. Other media fields inherit top-level defaults; top-level output/watermark are forbidden with outputs. Width/height pair and area <=4096*2160; zero uses first decoded canvas then freezes it. Encoder threads across branches sum <=16. Decoder is shared. Temporary queue fullness uses one shared 100ms pressure window after offering to all healthy branches; later healthy items can wait during that window. Only a timely drain strictly below all half-water marks resets it (capacity 1/2 must empty). Sustained pressure or I/O deadline fails only this branch; no destination reopen or compressed-packet dropping. Producer retains at most one pending item per branch outside queue metrics, each within single-item byte/media limits; queue plus pending conservatively <=queue_items+1, 2*queue_bytes and 2*queue_media_ms. queue_media_ms charges nominal video work duration, not PTS gaps. inflight_bytes reserves retained source plus encoder-input buffers through actual mux, max 128 frames; not an RSS bound. Codec internals, watermark assets/canvases and bounded mux/deferred audio have separate caps.",
+        "description": "Fixed startup branch. Unique ASCII id and destination. Other media fields inherit top-level defaults; top-level output/watermark are forbidden with outputs. Width/height pair and area <=4096*2160; zero uses first decoded canvas then freezes it. Encoder threads across branches sum <=16. Decoder is shared. Temporary queue fullness uses one shared 100ms pressure window after offering to all healthy branches; later healthy items can wait during that window. Only a timely drain strictly below all half-water marks resets it (capacity 1/2 must empty). Sustained pressure or I/O deadline fails only this branch; no destination reopen or compressed-packet dropping. Producer retains at most one pending item per branch outside queue metrics, each within single-item byte/media limits; video_items (alias queue_items) and audio_packets independently bound one FIFO; queue plus pending conservatively <=video_items+audio_packets+1, 2*queue_bytes and 2*queue_media_ms. queue_media_ms charges nominal video work duration, not PTS gaps. inflight_bytes reserves retained source plus encoder-input buffers through actual mux, max 128 frames; not an RSS bound. Codec internals, watermark assets/canvases and bounded mux/deferred audio have separate caps.",
         "properties": {
           "id": {
             "type": "string",
@@ -181,8 +259,11 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 16,
-            "default": 16
+            "default": 16,
+            "description": "Compatibility spelling of video_items; cannot be combined with video_items. Audio has its own quota."
           },
+          "video_items": {"type": "integer", "minimum": 1, "maximum": 16, "default": 16},
+          "audio_packets": {"type": "integer", "minimum": 1, "maximum": 256, "default": 256},
           "queue_bytes": {
             "type": "integer",
             "minimum": 4096,
@@ -215,13 +296,25 @@
           }
         }
       },
+      "VideoRate": {
+        "type": "object", "description": "Resolved startup nominal rational rate; source PTS cadence is unchanged. See video-rate.md.",
+        "properties": {
+          "num": {"type": "integer", "minimum": 1}, "den": {"type": "integer", "minimum": 1},
+          "source": {"enum": ["av_guess_frame_rate", "config_fallback"]}, "fallback_fps": {"type": "integer", "minimum": 1, "maximum": 240},
+          "nominal_frame_work_us": {"type": "integer", "minimum": 1}, "nominal_gop_frames": {"type": "integer", "minimum": 1},
+          "keyframe_schedule": {"enum": ["frame_policy", "source_pts_2s_grid", "nominal_frame_count_max"]},
+          "rc_nominal_rate": {"type": "object", "properties": {"num": {"type": "integer", "minimum": 1}, "den": {"type": "integer", "minimum": 1}}}
+        }
+      },
       "OutputStatus": {
         "type": "object",
         "description": "Private output owner summary; all per-frame latency metrics end at actual local write/flush. output_id also labels trace and unconditional startup checkpoints. On teardown queued/inflight counters return to zero.",
         "properties": {
+          "progress": {"type": "object", "description": "Scoped owner admission/video decode/encode/write times, ages at sampled_monotonic_us, phase and bounded oldest video/FIFO observations; see health-progress.md."},
           "output_id": {
             "type": "string"
           },
+          "video_rate": {"oneOf": [{"$ref": "#/components/schemas/VideoRate"}, {"type": "null"}]},
           "state": {
             "enum": [
               "waiting_assets",
@@ -238,6 +331,7 @@
           "watermark": {
             "$ref": "#/components/schemas/WatermarkStatus"
           },
+          "components": {"$ref": "#/components/schemas/Components"},
           "ingress_to_mux": {
             "$ref": "#/components/schemas/Metric"
           },
@@ -294,7 +388,7 @@
         },
         "description": "Server also checks strictly increasing enter_ms and keep_one_in, positive recover_below_ms below level 1, and max_continuous_degraded_ms greater than recover_sustain_ms. Recovery must complete strictly before the continuous degraded deadline; exhaustion wins equality, including late polls. Worker polls about every 50ms independently of mux/control connection. No hard realtime guarantee across an uninterruptible codec call. Inflight metadata cap is 512; overflow fails."
       },
-      "Error": {"type": "object", "required": ["event", "error"], "properties": {"event": {"const": "error"}, "error": {"type": "string"}, "unix_us": {"type": "integer"}, "monotonic_us": {"type": "integer"}, "process_id": {"type": "integer"}}},
+      "Error": {"type": "object", "required": ["event", "error"], "properties": {"event": {"const": "error"}, "error": {"type": "string"}, "error_code": {"type": "string"}, "unix_us": {"type": "integer"}, "monotonic_us": {"type": "integer"}, "process_id": {"type": "integer"}}},
 
       "Watermark": {
         "type": "object",
@@ -509,17 +603,19 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "job_id": {"type":"string","minLength":1,"maxLength":63,"pattern":"^[A-Za-z0-9_-]+$"},
           "revision": {
             "type": "integer",
             "minimum": 1,
             "maximum": 9223372036854775807
           },
-          "output_id": {"type":"string","minLength":1,"maxLength":32,"description":"Required for multi-output; forbidden on legacy single output. Revision belongs to the selected branch."},
+          "output_id": {"type":"string","minLength":1,"maxLength":32,"description":"Required for multiple outputs; optional for direct output but must match its logical id. Revision belongs to the selected output."},
           "watermark": {
             "$ref": "#/components/schemas/Watermark"
           }
         },
         "required": [
+          "job_id",
           "revision",
           "watermark"
         ]
@@ -603,7 +699,13 @@
         "type": "object", "required": ["event", "state", "supervisor", "pool"],
         "description": "Extensible snapshot; see service.md, operations.md and live-mux.md for remaining telemetry. Non-required media fields are absent before the first worker snapshot. Latencies end at local mux/AVIO completion, not peer display.",
         "properties": {
+          "progress": {"type": "object", "description": "Scoped media progress sampled by the worker; not a live observation merely because HTTP responds."},
+          "snapshot_generation": {"type": "integer", "minimum": 1},
+          "freshness": {"type": "object", "description": "Worker generation/time, controller receipt/observation time and receipt age/staleness; see health-progress.md."},
+          "liveness": {"type": "object"}, "readiness": {"type": "object"}, "admission": {"type": "object"},
           "watermark": {"$ref": "#/components/schemas/WatermarkStatus"},
+          "video_rate": {"oneOf": [{"$ref": "#/components/schemas/VideoRate"}, {"type": "null"}]},
+          "components": {"$ref": "#/components/schemas/Components"},
           "outputs": {"type":"array","minItems":2,"maxItems":4,"items":{"$ref":"#/components/schemas/OutputStatus"}},
           "outputs_failed":{"type":"integer","minimum":0,"maximum":4}, "outputs_completed":{"type":"integer","minimum":0,"maximum":4},
           "event": {"const": "status"}, "state": {"enum": ["idle", "starting", "waiting_assets", "running", "stopping", "finishing", "completed", "completed_partial", "stopped", "failed"]},

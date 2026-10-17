@@ -66,12 +66,16 @@ class GatedInput:
         except (OSError,TimeoutError):pass
     def __enter__(self):self.thread.start();return self
     def __exit__(self,*_):
-        self.release.set();self.finish.set();self.listener.close();self.thread.join(timeout=3)
+        self.release.set();self.finish.set()
+        try:self.listener.shutdown(socket.SHUT_RDWR)
+        except OSError:pass
+        self.listener.close();self.thread.join(timeout=3)
         assert not self.thread.is_alive()
 
 
 def run():
     results={};red=RUN/"red.png";png(red)
+    results["operation-owner-races"]=command([BIN/"naki-watermark-operation-test",red]).decode().strip()
     command([BIN/"naki-watermark-state-test",red,RUN/"boundary-state.json"])
     matrix=json.loads((RUN/"boundary-state.json").read_text())
     assert matrix["count"]==33 and matrix["failures"]==0,matrix
@@ -154,6 +158,8 @@ def run():
         listener=socket.socket();listener.bind(("127.0.0.1",0));port=listener.getsockname()[1];listener.close()
         base=f"http://127.0.0.1:{port}"
         def api(path="/v1/job",body=None,code=200):
+            if path in ("/v1/job/stop","/v1/job/watermark") and isinstance(body,dict) and "job_id" not in body:
+                body=dict(body,job_id=api()["job_id"])
             req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers={"Content-Type":"application/json"})
             try:response=urllib.request.urlopen(req,timeout=4)
             except urllib.error.HTTPError as error:response=error
@@ -167,7 +173,8 @@ def run():
             state=wait(lambda:(s if (s:=api())["state"] in ("completed","failed","stopped") else None))
             assert state["state"]==expected,state;return state
         log=(RUN/"server.jsonl").open("wb");err=(RUN/"server.stderr").open("wb")
-        server=subprocess.Popen([str(BIN/"naki-live"),"--port",str(port),"--run-dir",str(RUN/"logs")],stdout=log,stderr=err,cwd=ROOT)
+        server=subprocess.Popen([str(BIN/"naki-live"),"--port",str(port),"--run-dir",str(RUN/"logs"),
+                                 "--state-dir",tempfile.mkdtemp(prefix="wmr-",dir=os.environ.get("TMPDIR"))],stdout=log,stderr=err,cwd=ROOT)
         try:
             def online():
                 assert server.poll() is None
@@ -179,6 +186,11 @@ def run():
                 ("hdr-prepared-update",hdr,False,False,False),("hdr-loading-update",hdr,False,False,True),
                 ("large-prepared-update",plain,True,False,False),
                 ("hdr-initial-enabled",hdr,False,True,False),("large-initial-enabled",plain,True,True,False)]:
+                if large:
+                    job={"input":"udp://127.0.0.1:1","output":str(RUN/f"{name}.mp4"),"output_format":"mp4","width":4096,"height":2162}
+                    if initial:job["watermark"]=config(red)
+                    rejected=api(body=job,code=400);assert "live-4k-v1" in rejected["error"],rejected
+                    results[name]={"stage":"static-resource-profile","http_status":400};continue
                 with GatedInput(data) as incoming:
                     output=RUN/f"{name}.mp4"
                     job={"input":incoming.url,"output":str(output),"output_format":"mp4","encoder_preset":"ultrafast"}
@@ -212,6 +224,10 @@ def run():
             for name,data,large,held in [
                 ("hdr-close-before-first",hdr,False,False),("large-close-before-first",plain,True,False),
                 ("hdr-close-during-load",hdr,False,True),("large-close-during-load",plain,True,True)]:
+                if large:
+                    rejected=api(body={"input":"udp://127.0.0.1:1","output":str(RUN/f"{name}.mp4"),"output_format":"mp4", "width":4096,"height":2162,"watermark":config(red)},code=400)
+                    assert "live-4k-v1" in rejected["error"],rejected
+                    results[name]={"stage":"static-resource-profile","http_status":400};continue
                 with GatedInput(data) as incoming:
                     Assets.slow_started.clear();Assets.slow_release.clear()
                     output=RUN/f"{name}.mp4"
@@ -261,7 +277,7 @@ def run():
                     retry=None;retry_result=[]
                     signal.pidfd_send_signal(fd,signal.SIGSTOP)
                     try:
-                        payload=json.dumps({"revision":revision,"watermark":config(red)}).encode()
+                        payload=json.dumps({"job_id":accepted["job_id"],"revision":revision,"watermark":config(red)}).encode()
                         raw=socket.create_connection(("127.0.0.1",port))
                         raw.sendall(b"POST /v1/job/watermark HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: "+str(len(payload)).encode()+b"\r\n\r\n"+payload)
                         wait(lambda:api("/v1/job/watermark",{"invalid":True},(400,409)).get("error")=="Watermark acknowledgement pending",1)

@@ -3,7 +3,15 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <libavcodec/avcodec.h>
-#define NAKI_BRANCH_QUEUE_MAX 16
+#define NAKI_BRANCH_VIDEO_MAX 16
+#define NAKI_BRANCH_AUDIO_MAX 256
+#define NAKI_BRANCH_QUEUE_MAX NAKI_BRANCH_VIDEO_MAX /* Legacy shared-cap init. */
+#define NAKI_BRANCH_QUEUE_STORAGE_MAX (NAKI_BRANCH_VIDEO_MAX+NAKI_BRANCH_AUDIO_MAX)
+enum NakiBranchReason {NAKI_BRANCH_NONE,NAKI_BRANCH_VIDEO_COUNT,NAKI_BRANCH_AUDIO_COUNT,NAKI_BRANCH_BYTES,NAKI_BRANCH_WORK,NAKI_BRANCH_LAG,NAKI_BRANCH_REASONS};
+static inline const char *naki_branch_reason_name(unsigned reason) {
+    static const char *names[]={"none","video_count","audio_count","bytes","work","lag"};
+    return reason<NAKI_BRANCH_REASONS?names[reason]:"invalid";
+}
 /* In-process ownership only, never serialized into worker IPC. Each item has
  * either a decoded frame or an audio packet + immutable parameter snapshot. */
 typedef struct NakiBranchItem {
@@ -17,8 +25,10 @@ typedef struct NakiBranchItem {
 typedef struct NakiBranchQueue {
     pthread_mutex_t mutex;
     pthread_cond_t changed;
-    NakiBranchItem items[NAKI_BRANCH_QUEUE_MAX];
+    NakiBranchItem items[NAKI_BRANCH_QUEUE_STORAGE_MAX];
     unsigned capacity,head,count,high_water;
+    unsigned video_limit,audio_limit,video_count,audio_count,video_high,audio_high,rejection_reason;
+    uint64_t rejected[NAKI_BRANCH_REASONS];
     uint64_t byte_limit,bytes,high_bytes,media_us;
     int64_t media_limit_us,lag_limit_us;
     int64_t admission_deadline_us;
@@ -30,6 +40,9 @@ void naki_branch_item_free(NakiBranchItem *item);
  * Shared buffers may be charged more than once; this is not a process RSS cap. */
 int naki_branch_item_charge(NakiBranchItem *item);
 int naki_branch_queue_init(NakiBranchQueue *queue,unsigned capacity,uint64_t byte_limit,
+    int64_t media_limit_us,int64_t lag_limit_us);
+/* Production mixed FIFO: separate type quotas and matching total storage. */
+int naki_branch_queue_init_limits(NakiBranchQueue *queue,unsigned video_items,unsigned audio_packets,uint64_t byte_limit,
     int64_t media_limit_us,int64_t lag_limit_us);
 /* Nonblocking push transfers ownership only on success. Full -> EAGAIN;
  * single-item byte/media oversize -> EFBIG; cumulative media/bytes -> EAGAIN;

@@ -53,22 +53,32 @@ int naki_branch_item_charge(NakiBranchItem *i) {
     }
     i->charged_bytes=bytes;return 0;
 }
-int naki_branch_queue_init(NakiBranchQueue *q,unsigned capacity,uint64_t bytes,int64_t media,int64_t lag) {
-    if(!q||!capacity||capacity>NAKI_BRANCH_QUEUE_MAX||!bytes||media<=0||lag<=0)return AVERROR(EINVAL);
-    *q=(NakiBranchQueue){.capacity=capacity,.byte_limit=bytes,.media_limit_us=media,.lag_limit_us=lag};
+static int initialize(NakiBranchQueue *q,unsigned capacity,unsigned video,unsigned audio,uint64_t bytes,int64_t media,int64_t lag) {
+    if(!q||!capacity||capacity>NAKI_BRANCH_QUEUE_STORAGE_MAX||!bytes||media<=0||lag<=0)return AVERROR(EINVAL);
+    *q=(NakiBranchQueue){.capacity=capacity,.video_limit=video,.audio_limit=audio,.byte_limit=bytes,.media_limit_us=media,.lag_limit_us=lag};
     int ret=pthread_mutex_init(&q->mutex,NULL);if(ret)return AVERROR(ret);
     pthread_condattr_t attr;ret=pthread_condattr_init(&attr);
     if(!ret) {ret=pthread_condattr_setclock(&attr,CLOCK_MONOTONIC);if(!ret)ret=pthread_cond_init(&q->changed,&attr);pthread_condattr_destroy(&attr);}
     if(ret)pthread_mutex_destroy(&q->mutex);
     return ret?AVERROR(ret):0;
 }
+int naki_branch_queue_init(NakiBranchQueue *q,unsigned capacity,uint64_t bytes,int64_t media,int64_t lag) {
+    if(capacity>NAKI_BRANCH_VIDEO_MAX)return AVERROR(EINVAL);
+    return initialize(q,capacity,capacity,capacity,bytes,media,lag);
+}
+int naki_branch_queue_init_limits(NakiBranchQueue *q,unsigned video,unsigned audio,uint64_t bytes,int64_t media,int64_t lag) {
+    if(!video||video>NAKI_BRANCH_VIDEO_MAX||!audio||audio>NAKI_BRANCH_AUDIO_MAX)return AVERROR(EINVAL);
+    return initialize(q,video+audio,video,audio,bytes,media,lag);
+}
+static void rejected(NakiBranchQueue *q,unsigned reason) {q->rejection_reason=reason;q->rejected[reason]++;}
 static int push(NakiBranchQueue *q,NakiBranchItem *i,int64_t now,int64_t grace) {
     int ret=naki_branch_item_charge(i);if(ret<0)return ret;
     pthread_mutex_lock(&q->mutex);
     if(q->aborted)ret=AVERROR(ECANCELED);
     else if(q->eof)ret=AVERROR_EOF;
     else if(q->admission_deadline_us&&now>=q->admission_deadline_us) {q->admission_timeouts++;ret=AVERROR(ETIMEDOUT);}
-    else if(i->charged_bytes>q->byte_limit||i->media_us>(uint64_t)q->media_limit_us)ret=AVERROR(EFBIG);
+    else if(i->charged_bytes>q->byte_limit) {rejected(q,NAKI_BRANCH_BYTES);ret=AVERROR(EFBIG);}
+    else if(i->media_us>(uint64_t)q->media_limit_us) {rejected(q,NAKI_BRANCH_WORK);ret=AVERROR(EFBIG);}
     else {
         int64_t ingress=i->ingress_us;
         for(unsigned n=0;n<q->count;n++) {
@@ -76,9 +86,12 @@ static int push(NakiBranchQueue *q,NakiBranchItem *i,int64_t now,int64_t grace) 
             if(p->ingress_us<ingress)ingress=p->ingress_us;
         }
         if(now<ingress)ret=AVERROR(EINVAL);
-        else if((uint64_t)now-(uint64_t)ingress>(uint64_t)q->lag_limit_us)ret=AVERROR(ETIMEDOUT);
-        else if(q->count==q->capacity||i->charged_bytes>q->byte_limit-q->bytes||
-                i->media_us>(uint64_t)q->media_limit_us-q->media_us) {
+        else if((uint64_t)now-(uint64_t)ingress>(uint64_t)q->lag_limit_us) {rejected(q,NAKI_BRANCH_LAG);ret=AVERROR(ETIMEDOUT);}
+        else if(q->count==q->capacity||(i->frame?q->video_count>=q->video_limit:q->audio_count>=q->audio_limit)||
+                i->charged_bytes>q->byte_limit-q->bytes||i->media_us>(uint64_t)q->media_limit_us-q->media_us) {
+            unsigned reason=q->count==q->capacity||(i->frame?q->video_count>=q->video_limit:q->audio_count>=q->audio_limit)?
+                (i->frame?NAKI_BRANCH_VIDEO_COUNT:NAKI_BRANCH_AUDIO_COUNT):i->charged_bytes>q->byte_limit-q->bytes?NAKI_BRANCH_BYTES:NAKI_BRANCH_WORK;
+            rejected(q,reason);
             ret=AVERROR(EAGAIN);
             if(grace) {
                 if(!q->admission_deadline_us)q->admission_deadline_us=now+grace;
@@ -86,7 +99,11 @@ static int push(NakiBranchQueue *q,NakiBranchItem *i,int64_t now,int64_t grace) 
             }
         }
         else {
-            q->items[(q->head+q->count)%q->capacity]=*i;q->count++;q->bytes+=i->charged_bytes;q->media_us+=i->media_us;*i=(NakiBranchItem){0};
+            q->items[(q->head+q->count)%q->capacity]=*i;q->count++;q->bytes+=i->charged_bytes;q->media_us+=i->media_us;
+            if(i->frame)q->video_count++;else q->audio_count++;
+            if(q->video_count>q->video_high)q->video_high=q->video_count;
+            if(q->audio_count>q->audio_high)q->audio_high=q->audio_count;
+            *i=(NakiBranchItem){0};
             if(q->count>q->high_water)q->high_water=q->count;
             if(q->bytes>q->high_bytes)q->high_bytes=q->bytes;
             pthread_cond_signal(&q->changed);ret=0;
@@ -114,6 +131,14 @@ int naki_branch_admit_many(NakiBranchOffer *offers,unsigned count,int64_t grace,
         }
         int pending=0;
         for(unsigned i=0;i<count;i++)if(offers[i].queue&&offers[i].result==AVERROR(EAGAIN)) {
+            /* A pressure episode must drain below all low-water marks. Do
+             * not keep refilling each newly freed slot and prevent that
+             * recovery ourselves. The original deadline still applies. */
+            NakiBranchQueue *queue=offers[i].queue;int64_t current=av_gettime_relative();
+            pthread_mutex_lock(&queue->mutex);
+            int recovering=queue->admission_deadline_us&&current<queue->admission_deadline_us&&!queue->aborted&&!queue->eof;
+            pthread_mutex_unlock(&queue->mutex);
+            if(recovering) {pending++;continue;}
             offers[i].result=naki_branch_queue_admit(offers[i].queue,offers[i].item,av_gettime_relative(),grace);
             pending+=offers[i].result==AVERROR(EAGAIN);
         }
@@ -135,7 +160,8 @@ int naki_branch_queue_pop(NakiBranchQueue *q,NakiBranchItem *i,int64_t deadline)
     else if(!ret) {
         *i=q->items[q->head];q->items[q->head]=(NakiBranchItem){0};q->head=(q->head+1)%q->capacity;
         q->count--;q->bytes-=i->charged_bytes;q->media_us-=i->media_us;
-        if(q->admission_deadline_us&&q->count<=(q->capacity-1)/2&&q->bytes<=(q->byte_limit-1)/2&&
+        if(i->frame)q->video_count--;else q->audio_count--;
+        if(q->admission_deadline_us&&q->count<=(q->capacity-1)/2&&q->video_count<=(q->video_limit-1)/2&&q->audio_count<=(q->audio_limit-1)/2&&q->bytes<=(q->byte_limit-1)/2&&
            q->media_us<=((uint64_t)q->media_limit_us-1)/2&&av_gettime_relative()<q->admission_deadline_us)
             q->admission_deadline_us=0;
     }
@@ -147,7 +173,7 @@ int naki_branch_queue_check(NakiBranchQueue *q,int64_t now) {
     for(unsigned n=0;!ret&&n<q->count;n++) {
         int64_t ingress=q->items[(q->head+n)%q->capacity].ingress_us;
         if(now<ingress)ret=AVERROR(EINVAL);
-        else if((uint64_t)now-(uint64_t)ingress>(uint64_t)q->lag_limit_us)ret=AVERROR(ETIMEDOUT);
+        else if((uint64_t)now-(uint64_t)ingress>(uint64_t)q->lag_limit_us) {rejected(q,NAKI_BRANCH_LAG);ret=AVERROR(ETIMEDOUT);}
     }
     pthread_mutex_unlock(&q->mutex);return ret;
 }
@@ -155,10 +181,10 @@ void naki_branch_queue_finish(NakiBranchQueue *q) {
     pthread_mutex_lock(&q->mutex);q->eof=1;pthread_cond_broadcast(&q->changed);pthread_mutex_unlock(&q->mutex);
 }
 void naki_branch_queue_abort(NakiBranchQueue *q) {
-    NakiBranchItem retired[NAKI_BRANCH_QUEUE_MAX];unsigned count;
+    NakiBranchItem retired[NAKI_BRANCH_QUEUE_STORAGE_MAX];unsigned count;
     pthread_mutex_lock(&q->mutex);q->aborted=1;count=q->count;
     for(unsigned n=0;n<count;n++) {unsigned index=(q->head+n)%q->capacity;retired[n]=q->items[index];q->items[index]=(NakiBranchItem){0};}
-    q->count=0;q->bytes=0;q->media_us=0;pthread_cond_broadcast(&q->changed);pthread_mutex_unlock(&q->mutex);
+    q->count=0;q->video_count=0;q->audio_count=0;q->bytes=0;q->media_us=0;pthread_cond_broadcast(&q->changed);pthread_mutex_unlock(&q->mutex);
     for(unsigned n=0;n<count;n++)naki_branch_item_free(&retired[n]);
 }
 void naki_branch_queue_destroy(NakiBranchQueue *q) {

@@ -9,6 +9,8 @@ def main():
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     base=f'http://127.0.0.1:{port}';server=None;logs=[];results={}
     def api(path='/v1/job',body=None,code=200):
+        if path in ('/v1/job/stop','/v1/job/watermark') and isinstance(body,dict) and 'job_id' not in body:
+            body=dict(body,job_id=api()['job_id'])
         req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json'})
         try:response=urllib.request.urlopen(req,timeout=3)
         except urllib.error.HTTPError as error:response=error

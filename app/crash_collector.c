@@ -391,7 +391,7 @@ static int store_report(int directory,const CrashOptions *o,const CrashRecord *r
     close(lock); return failed ? -1 : 0;
 }
 int main(int argc,char **argv) {
-    if(argc!=3)return 2;
+    if(argc!=3&&argc!=4)return 2;
     int target=atoi(argv[1]); CrashOptions options;
     if(target<=0 || crash_options_env(&options) || !*options.directory)return 2;
     struct ucred peer; socklen_t length=sizeof(peer);
@@ -426,6 +426,11 @@ int main(int argc,char **argv) {
         char *text=NULL; size_t size=0; unsigned frames=options.max_frames;
         for(;;) {
             yyjson_mut_doc *doc=make_report(&record,argv[2],job,&options,result,reason,frames,frames==0);
+            if(doc) {
+                yyjson_mut_val *root=yyjson_mut_doc_get_root(doc);
+                yyjson_mut_obj_add_bool(doc,root,"instance_id_available",argc==4&&strlen(argv[3])==32);
+                if(argc==4&&strlen(argv[3])==32)yyjson_mut_obj_add_strcpy(doc,root,"instance_id",argv[3]);
+            }
             text=doc ? yyjson_mut_write(doc,0,&size) : NULL;
             if(doc)yyjson_mut_doc_free(doc);
             if(!text || size+1<=options.max_report_bytes || !frames)break;

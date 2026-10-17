@@ -36,7 +36,8 @@ id 为唯一的 1–32 字节 ASCII 字母、数字、下划线或连字符，�
 
 | 每路字段 | 默认 | 范围与含义 |
 | --- | --- | --- |
-| queue_items | 16 | 1–16 个视频/音频项合计 |
+| video_items（兼容别名 queue_items） | 16 | 1–16 个视频项；两种拼写不能同时给出 |
+| audio_packets | 256 | 1–256 个音频包，和视频独立名额；仍共用一个 FIFO |
 | queue_bytes | 128MiB | 4KiB–256MiB，按实际保留缓冲及参数计费 |
 | queue_media_ms | 5000 | 1–30000ms，视频按任务 fps 的名义处理时长累计；音频按包/采样时长。不是首尾 PTS 差，不因源时间戳空洞立即超限 |
 | max_lag_ms | 10000 | 100–30000ms，从 ingress 到实际 mux 的在途年龄，含队列/encoder lookahead/mux 等待；无新到达也轮询 |
@@ -49,7 +50,9 @@ id 为唯一的 1–32 字节 ASCII 字母、数字、下划线或连字符，�
 
 队列暂满时，先向全部健康分支投递当前项，再共同重试，持续压力窗口为 100ms；健康分支的后续项也会等待这个窗口，不能承诺完全无背压。一次成功投递不重置窗口，只有消费端及时将项数、字节和媒体时长均降到严格低于半水位才恢复；容量 1 或 2 时必须排空。持续拥塞只失败该路，此后健康分支继续。原有项数、字节、媒体时长、在途、max_lag 和 I/O 预算仍生效，不丢压缩包换进度，不重开输出目标。
 
-等待期间，生产者最多为每个活动分支持有当前一个未转交项，不积累下一项。这一项不属于 queue_items/queue_bytes 指标；重试前必须通过单项字节/媒体时长上限，因此「队列加生产者待交项」最多为 queue_items+1 项、2×queue_bytes 和 2×queue_media_ms 的保守计费量。音频 payload 与当前共享输入包引用同一缓冲，参数是独立快照；视频待交项仍计入已有在途预算。此处不包含 owner 正在处理的项、codec 内部和其他已列明的独立缓冲，不能将队列指标当成全部内存或 RSS 上限。
+等待期间，生产者最多为每个活动分支持有当前一个未转交项，不积累下一项。这一项不属于 queue_items/queue_bytes 指标；重试前必须通过单项字节/媒体时长上限，因此「队列加生产者待交项」最多为 video_items+audio_packets+1 项、2×queue_bytes 和 2×queue_media_ms 的保守计费量。音频 payload 与共享输入包引用同一缓冲，参数独立；视频待交项仍计入在途预算。类型、总字节、名义 work 和 age 都独立约束，不能仅凭 count 预算承诺任意多音轨突发。此处不包含 owner 当前项、codec 内部及其他独立缓冲，也不代表 RSS 上限。
+
+状态中的 queue_items 仍是 FIFO 总数，queue_video_items/queue_audio_packets 分别计数；queue_limits 给出两类名额和合计上限。queue_rejection_reason 与 queue_rejected_attempts 区分 video_count、audio_count、bytes、work、lag；尝试计数包含重试，并非丢包数。queued_work_us 与旧 queue_media_us 同义，不是首尾 PTS 差。pressure 恢复必须及时同时排至两类 count、总字节和 work 的半水位以下。原 shared16 的历史单测保留用于兼容 helper，生产入口使用分开名额的 initializer。
 
 单项超限、在途预算超限、持续队列压力、写出超时、可返回的分支运行错误只失败该路，取消其 I/O、释放其队列/codec/mux 引用，其余继续。原生崩溃仍影响同一 worker 的全部输出。全部分支失败则共享输入取消、任务 failed。正常 EOF 时全部成功为 completed，至少一路成功且有失败为 completed_partial；每路有独立终态和错误。用户停止为 stopped。共享输入/解码错误仍失败整个任务。暂停输入与持续音频突发的新增回归见 [输入稳定性](live-input-stability.md)。
 
@@ -68,3 +71,7 @@ primaries/transfer 变化（包括 SDR↔HDR）明确失败该分支，不做假
 顶层 frames_decoded 和 decode 只统计共同解码一次；packets_out、frames_filtered、bytes_out 为分支输出之和。各路摘要位于 outputs，提供 output_id、终态、错误、队列/在途计数、filter_generations、水印、实际首/末 mux 时刻与时延。完整逐帧和首帧记录带 output_id；每路窗口独立、不重叠，公共解码与各路端到端时延不能相加后充当 CPU/显示时延。
 
 本轮最终证据为 `out/multi-output-acceptance-20261017T1430/`，本轮 15 项实流场景、13 套功能回归及单测/符号检查通过，独立源码复审已通过，结果以该目录 ACCEPTANCE.json 为准。开发窗口 attempt-4 已通过 13 项真实场景，后续补入 PTS 空洞及全部 required 门禁失败，共 15 项。使用独立同步解码 probe 检查实际 H.264/VVC 画面，另核对音频 payload 顺序及写出+显式丢弃数量闭合。它们是功能证据，不是生产性能、容量或任意长时间稳定性证明。
+
+## Pressure recovery before refill
+
+The production multi-output scheduler preserves one common bounded pressure window. Once a branch enters that window, it waits for the consumer to drain below all count/type/byte/work low-water marks before sending another pending item to that branch. Refilling each newly freed slot would prevent the scheduler's own hysteresis from recovering. Healthy current offers are still tried independently, only one pending item per branch is retained, and the original 100ms deadline is neither extended nor replaced. Hard limits and explicit no-drop behavior are unchanged. Queue-pressure, retained-frame age and output-I/O timeout errors are reported with distinct contexts. A deterministic scheduler regression and the original paused-late-PID service fixture cover this behavior.

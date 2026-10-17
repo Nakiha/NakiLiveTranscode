@@ -1,13 +1,11 @@
 #include "live.h"
 
 int naki_policy_track(Job *job, int kind, uint64_t id, int64_t ingress) {
-    if(!job->config.policy.overload_levels)return 0;
     pthread_mutex_lock(&job->mutex);
     int ret=naki_inflight_add(&job->policy_inflight,kind,id,ingress);
     pthread_mutex_unlock(&job->mutex); return ret;
 }
 int naki_policy_untrack(Job *job, int kind, uint64_t id) {
-    if(!job->config.policy.overload_levels)return 1;
     pthread_mutex_lock(&job->mutex);
     int found=naki_inflight_remove(&job->policy_inflight,kind,id);
     pthread_mutex_unlock(&job->mutex); return found;

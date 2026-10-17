@@ -11,6 +11,7 @@ import time
 import service_integration as service
 from vvenc_integration import PROBE
 from vvc_structure import decode_frames, check_structure
+from event_logs import read_events
 
 ROOT, BIN = service.ROOT, service.BIN
 
@@ -42,7 +43,7 @@ def run(repeats=2):
                 structure=check_structure(decoded,50) if profile!="reference" else {}
                 (run/f"{profile}-{repeat}.state.json").write_text(json.dumps(state,indent=2))
                 (run/f"{profile}-{repeat}.frames.json").write_text(json.dumps(decoded,indent=2))
-                events=[json.loads(line) for line in (run/"server.jsonl").read_text().splitlines()]
+                events=read_events(run/"logs/events")
                 first=next(e for e in events if e["event"]=="first_frame" and e["job_id"]==accepted["job_id"])
                 ready=next(e for e in events if e["event"]=="pipeline_ready" and e["job_id"]==accepted["job_id"])
                 row={"profile":profile,"repeat":repeat,"startup":state["startup"],"first_output":first,

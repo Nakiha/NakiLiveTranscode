@@ -1,0 +1,37 @@
+# Keep the input type used by your installed Filebeat. This example uses log.
+# Do not enable this input alongside another input/stdout harvester for the same events.
+# Persist Filebeat's data/registry directory across restarts.
+filebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/naki/events/*.events.*.jsonl
+      - /var/log/naki/events/*.events.*.jsonl.active
+    json.keys_under_root: false
+    json.add_error_key: true
+    processors:
+      - script:
+          lang: javascript
+          id: naki_bounded_fields
+          source: >
+            function process(event) {
+              var row = event.Get("json");
+              if (!row || row.category !== "event") { event.Cancel(); return; }
+              var keys = ["schema_version", "category", "event", "level", "role",
+                          "instance_id", "pid", "tid", "event_seq", "ts_utc", "mono_us",
+                          "job_id", "output_id", "operation_id", "request_id",
+                          "origin_request_id", "create_request_id", "component", "revision",
+                          "state", "error_code", "worker_instance_id"];
+              var details = {};
+              for (var name in row) {
+                if (keys.indexOf(name) >= 0) { event.Put("naki." + name, row[name]); }
+                else { details[name] = row[name]; }
+              }
+              event.Put("naki.details_json", JSON.stringify(details));
+              event.Delete("json");
+            }
+
+# Deliberately no frame-trace input and no automatic gzip for events.
+# Configure output, credentials, mappings and capacity for the actual deployment.
+# Age/size retention and ignore_older/clean_inactive must be validated together;
+# a 7-day age cap plus a 2-GiB sealed cap is not a guaranteed 7-day offline window.

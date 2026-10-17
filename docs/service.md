@@ -47,6 +47,14 @@ bash scripts/build-service.sh
 | `POST /v1/job/watermark` | 单水印完整 revision 热更；202 仅代表 worker 接受，查询状态确认 applied 或失败；见[接口边界](watermark.md) |
 | `POST /v1/job/stop` | 取消运行中的任务，返回 202；通过 status 等待 stopped |
 
+本地工程分支增加 `POST /v1/jobs`：请求为 `{"operation_id":"create-example","spec":{...}}`。202 必须等待 worker 确认接单；超时可能已执行，应保留原 operation_id 重试。同一规范化 spec 重试返回原 job_id，改变 spec 返回 409。`GET /v1/jobs/{job_id}` 查询指定任务，`GET /v1/jobs/{job_id}/operations/{operation_id}` 查询创建、更新、停止结果。`POST /v1/jobs/{job_id}/updates` 提供带 operation ID、typed patch 和 desired revision CAS 的 watermark 更新；范围、写出边界、有限保留及未知结果语义见[组件更新](component-updates.md)，设计草案中的其他组件字段仍不接受。
+
+`POST /v1/jobs/{job_id}/stop` 请求为 `{"operation_id":"stop-example"}`，等待 worker 停止意图确认后返回 202。旧 stop/watermark 写接口也必须在请求体带明确的 `job_id`；CLI 会先读一次 current，再固定目标发送，失败时不会改写新任务。request_id 每次 HTTP 尝试独立，创建时的关联 ID 保存在 create_request_id，操作保留 origin_request_id。
+
+创建索引属于当前固定服务命名空间，可用 `--namespace` 显式配置；默认由规范化 private state 目录派生。接管时从存活 worker 的 assignment 重建索引；瞬时连接失败和不兼容存活 worker 均保持接单关闭。当前控制器最多保留 32 个创建结果，每项终态 snapshot 不超过 64 KiB；终态至少保留 30 分钟，容量耗尽时先拒绝新建，每任务预留一个停止结果。它是有界内存重试保证，全部 owner 和历史丢失后不提供宿主机崩溃持久性。
+
+单路和多路均使用 `live-4k-v1` profile：输入/输出像素面积不超过 4096×2160，输入 packet payload 不超过 8 MiB，reader ring 保留字节不超过 64 MiB。reader 与 consumer 各可另持一个不超过 16 MiB 的有界 item；这些计费上限不等于进程 RSS 上限。8192×8192 等旧单路 canvas 现在在静态校验阶段拒绝。
+
 参数示例见 `examples/`。`input`、`output` 必填；相对路径以服务进程的工作目录为准。本地输出使用排他创建，已有文件不会被覆盖；失败或停止时可能保留部分输出。输出父目录需预先存在。
 
 机器可读接口规范见 [openapi.json](openapi.json)，包括全部当前路径、请求参数、范围和状态码。它是仓库静态文档，服务尚不提供 `/openapi.json` 或 Swagger UI。未来的有序滤镜、ROI 分析与颜色处理见 [处理链设计草案](pipeline-design.md)；草案字段当前会被拒绝。
@@ -73,7 +81,7 @@ HTTP 控制进程只管理任务，通过 Unix SOCK_SEQPACKET 与独立 worker �
 
 ## JSONL 指标的边界
 
-worker 默认每 10 秒生成 status，经其日志线程和非阻塞 IPC 交给控制进程的有界日志线程写 stdout；空闲时由控制进程发 heartbeat。生命周期、首帧链路及最终状态也写 stdout。逐帧明细默认关闭，可用任务 `frame_log=true` 开启，文件由 worker 日志线程按大小/时间轮转。HTTP 查询读取 worker 每 250 ms 上报的快照，包含累计及窗口耗时、分位数上界、I 帧拆分、自动调度、日志/网络计数和快照年龄。详见 [运行观测与长期运维](operations.md)。
+worker 默认每 10 秒生成 status，由自身 logger 写进程事件文件；controller 空闲 heartbeat 和生命周期事件写自己的进程事件文件，路径在 run-dir/events。首帧 checkpoint 保留供查询，接管不重放相同 worker 事件。逐帧明细默认关闭，启用 frame_log 后写独立轮转 trace。HTTP 查询读取约每 250 ms 的媒体快照，operation 查询通过有界 RPC 取得 worker 权威结果；重连另发送一次归属信息和操作分页。详见[进程事件](process-events.md)、[组件更新](component-updates.md)及[运行观测](operations.md)。
 
 使用单调时钟计算耗时，另有 `unix_us` 便于关联日志。关联通过 packet opaque_ref 传递到 decoded/filter frame，再按 encoder PTS 匹配输出包；关联缺失、PTS 不递增或有界映射溢出会明确失败。
 

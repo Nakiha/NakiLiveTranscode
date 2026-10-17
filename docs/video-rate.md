@@ -1,0 +1,13 @@
+# Effective nominal video rate
+
+`fps` is a fallback nominal rate (integer 1–240), not a frame-rate conversion request. At startup the service resolves one rational rate from `av_guess_frame_rate`; only an unavailable/nonpositive result uses `fps`. It retains the reduced numerator/denominator and the source of that decision. Single-output and branch owners use the same resolved value.
+
+The encoder's frame-rate/RC hint, nominal two-second GOP frame count and per-frame queue work charge derive from that rational value. Positive values round to the nearest integer: nominal GOP is `round(2*num/den)` frames, at least one; nominal work is `round(1000000*den/num)` microseconds, at least one. A valid known rate makes changes to fallback `fps` irrelevant to these values. Unrepresentable GOP hints fail explicitly.
+
+`video_rate` in root/output status reports `num`, `den`, `source`, `fallback_fps`, `rc_nominal_rate`, `nominal_gop_frames`, `nominal_frame_work_us` and `keyframe_schedule`; it is null before rate resolution. The library's guessed rate is a nominal hint, not a measurement of every frame interval. Source PTS continue to determine cadence; no frame insertion, timestamp compression or implicit CFR conversion is introduced. Queue work charges do not count legal PTS gaps as processing work.
+
+H.264 uses the nominal frame-count GOP maximum; scene changes or an explicit intra policy can request earlier I pictures. Live VVenC keeps its source-PTS two-second CRA grid and B-picture reordering; its nominal intra-period frame count remains an RC hint. Ordinary intra pictures and output-key classification remain distinct. The reference VVenC profile retains its documented nominal-time-base restrictions in [vvenc.md](vvenc.md).
+
+`tests/video_rate_test.c` covers integer/fractional reduction, fallback and overflow bounds. The real integration checks actual decoded PTS and coded keys for 24/25/30/50/60 and 30000/1001, known-rate fallback invariance, multiple outputs and VFR offset/gaps. Its unknown-rate branch deliberately injects an unknown `av_guess_frame_rate` result in a test-only worker while preserving the real encoded input and PTS; that is dependency-injection evidence, not a claim that the fixture's source itself lacks frame-rate information. Existing frame-policy and VVC PTS suites provide separate ordinary-I/reordering/grid regressions.
+
+The operating-state directory honors an absolute `TMPDIR` when `--state-dir` is omitted, retaining the existing private owner/mode/path-length checks. An unset `TMPDIR` uses `/tmp`. Test runners set it to the existing project WSL cache so generated sockets/state stay inside the authorized output locations.

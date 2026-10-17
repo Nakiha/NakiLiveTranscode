@@ -9,7 +9,7 @@ mkdir -p "$root/out/bin"
 if [[ ${NAKI_SKIP_FFMPEG:-0} != 1 ]]; then
     bash "$root/scripts/build-ffmpeg.sh"
 fi
-python3 "$root/scripts/sdk-identity.py" verify --prefix "$prefix"
+python3 "$root/scripts/sdk-expected.py" verify --prefix "$prefix"
 [[ ${NAKI_FFMPEG_ONLY:-0} == 1 ]] && exit 0
 [[ -f "$root/third_party/yyjson/src/yyjson.c" ]] || { echo 'Run git submodule update --init --recursive' >&2; exit 1; }
 cd "$root"

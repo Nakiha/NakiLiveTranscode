@@ -6,6 +6,7 @@ static int bad(char *e,size_t n,const char *s) {snprintf(e,n,"outputs: %s",s);re
 void naki_output_config(Config *out,const Config *common,int index) {
     *out=*common;out->output_count=0;memset(out->outputs,0,sizeof(out->outputs));
     const OutputConfig *o=&common->outputs[index];
+    strcpy(out->single_output_id,o->id);out->outputs[0]=*o;
     strcpy(out->output,o->output);strcpy(out->output_format,o->output_format);strcpy(out->encoder,o->encoder);
     strcpy(out->encoder_preset,o->encoder_preset);strcpy(out->encoder_profile,o->encoder_profile);
     out->width=o->width;out->height=o->height;out->bitrate=o->bitrate;out->encoder_threads=o->encoder_threads;
@@ -13,14 +14,16 @@ void naki_output_config(Config *out,const Config *common,int index) {
 }
 int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
     yyjson_val *list=yyjson_obj_get(root,"outputs");if(!list)return 0;
-    if(!yyjson_is_arr(list)||yyjson_arr_size(list)<2||yyjson_arr_size(list)>4)return bad(e,n,"must contain 2..4 fixed branches");
+    if(!yyjson_is_arr(list)||yyjson_arr_size(list)<1||yyjson_arr_size(list)>4)return bad(e,n,"must contain 1..4 fixed outputs");
     if(yyjson_obj_get(root,"output")||yyjson_obj_get(root,"watermark"))return bad(e,n,"output and watermark belong inside each branch");
     OutputConfig outputs[4]={0};Config first={0};unsigned count=0;int encoder_threads=0;
     size_t ai,am;yyjson_val *v;
     yyjson_arr_foreach(list,ai,am,v) {
         OutputConfig *o=&outputs[count];
-        o->queue_items=16;o->queue_bytes=128U*1024*1024;o->queue_media_ms=5000;o->max_lag_ms=10000;o->io_timeout_ms=5000;o->inflight_bytes=512U*1024*1024;
+        if(yyjson_arr_size(list)==1)strcpy(o->id,"main");
+        o->queue_items=16;o->audio_packets=256;o->queue_bytes=128U*1024*1024;o->queue_media_ms=5000;o->max_lag_ms=10000;o->io_timeout_ms=5000;o->inflight_bytes=512U*1024*1024;
         if(!yyjson_is_obj(v))return bad(e,n,"branch must be an object");
+        if(yyjson_obj_get(v,"queue_items")&&yyjson_obj_get(v,"video_items"))return bad(e,n,"queue_items and video_items are alternative spellings");
         yyjson_mut_doc *d=yyjson_mut_doc_new(NULL);if(!d)return bad(e,n,"allocation failed");
         yyjson_mut_val *merged=yyjson_val_mut_copy(d,root);yyjson_mut_doc_set_root(d,merged);yyjson_mut_obj_remove_key(merged,"outputs");
         const char *seen[32];size_t seen_count=0,ki,km;yyjson_val *key,*value;int fail=0;
@@ -37,7 +40,8 @@ int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
                 continue;
             }
             uint64_t *wide=NULL;int *integer=NULL;uint64_t low=1,high=0;
-            if(!strcmp(name,"queue_items")) {integer=&o->queue_items;high=16;}
+            if(!strcmp(name,"queue_items")||!strcmp(name,"video_items")) {integer=&o->queue_items;high=16;}
+            else if(!strcmp(name,"audio_packets")) {integer=&o->audio_packets;high=256;}
             else if(!strcmp(name,"queue_bytes")) {wide=&o->queue_bytes;low=4096;high=256U*1024*1024;}
             else if(!strcmp(name,"inflight_bytes")) {wide=&o->inflight_bytes;low=1048576;high=1024U*1024*1024;}
             else if(!strcmp(name,"queue_media_ms")) {integer=&o->queue_media_ms;high=30000;}
@@ -68,7 +72,9 @@ int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
         encoder_threads+=o->encoder_threads;count++;
     }
     if(encoder_threads>16)return bad(e,n,"sum of encoder_threads must not exceed 16");
-    *out=first;out->output_count=(int)count;memcpy(out->outputs,outputs,sizeof(outputs));memset(&out->watermark,0,sizeof(out->watermark));
+    *out=first;out->output_count=count==1?0:(int)count;memcpy(out->outputs,outputs,sizeof(outputs));
+    if(count==1) {strcpy(out->single_output_id,outputs[0].id);return 1;}
+    memset(&out->watermark,0,sizeof(out->watermark));
     /* Root's reader must deliver audio if any branch needs it. */
     out->audio_copy=0;for(unsigned k=0;k<count;k++)if(outputs[k].audio_copy&&strcmp(outputs[k].output_format,"mp4"))out->audio_copy=1;
     return 1;

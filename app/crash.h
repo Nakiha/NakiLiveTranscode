@@ -31,6 +31,8 @@ int crash_options_env(CrashOptions *options);
 int crash_options_export(const CrashOptions *options);
 /* Must run before application threads; collector execs independently of the control service. */
 int crash_client_start(const CrashOptions *options,const char *role);
+/* Normal startup context only; fatal record/layout and signal path stay fixed. */
+void crash_set_instance(const char *instance_id);
 int crash_thread_init(void);
 void crash_set_job(const char *id);
 int crash_collector_pid(void);

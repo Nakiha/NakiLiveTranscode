@@ -68,8 +68,8 @@ def main():
              '-c:v','libx264','-preset','ultrafast','-threads','2','-g','25','-bf','0','-c:a','aac','-b:a','64k',
              '-f','mpegts',sample])
     # Exercise the original default TS packaging, including an audio PES burst
-    # that fills the shared 16-item queue. Runtime admission must recover its
-    # transient pressure without increasing the hard queue limits or dropping.
+    # that exhausted the historical shared16 queue. Keep this regression when
+    # production uses separate type quotas, common bounded retry and no drops.
     packets=json.loads(command(['ffprobe','-v','error','-show_packets','-show_entries','packet=codec_type','-of','json',sample]))['packets']
     burst=longest=0
     for packet in packets:
@@ -77,7 +77,10 @@ def main():
     assert longest>=16,longest
     results['success-fixture-audio-burst']={'longest_consecutive_audio_packets':longest,'minimum':16}
     s=socket.socket();s.bind(('127.0.0.1',0));port=s.getsockname()[1];s.close();base=f'http://127.0.0.1:{port}';server=None;logs=[]
+    state_directory=tempfile.mkdtemp(prefix='mul-',dir=os.environ.get('TMPDIR'))
     def api(body=None,path='/v1/job',code=200):
+        if path in ('/v1/job/stop','/v1/job/watermark') and isinstance(body,dict) and 'job_id' not in body:
+            body=dict(body,job_id=api()['job_id'])
         req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json'})
         try:r=urllib.request.urlopen(req,timeout=4)
         except urllib.error.HTTPError as e:r=e
@@ -86,7 +89,7 @@ def main():
     def serve():
         nonlocal server
         log=(RUN/f'server-{len(logs)}.jsonl').open('wb');err=(RUN/f'server-{len(logs)}.stderr').open('wb');logs.extend([log,err])
-        server=subprocess.Popen([str(BIN/'naki-live'),'--port',str(port),'--run-dir',str(RUN/'logs')],stdout=log,stderr=err,cwd=ROOT)
+        server=subprocess.Popen([str(BIN/'naki-live'),'--port',str(port),'--run-dir',str(RUN/'logs'),'--state-dir',state_directory],stdout=log,stderr=err,cwd=ROOT)
         def online():
             assert server.poll() is None
             try:return api(path='/health')
@@ -105,7 +108,7 @@ def main():
         serve()
         # Strict static validation before media allocation.
         a=output('valid-a');b=output('valid-b')
-        bads=[{'input':str(sample),'outputs':[a]}, {'input':str(sample),'outputs':[a]*5},
+        bads=[{'input':str(sample),'outputs':[]}, {'input':str(sample),'outputs':[a]*5},
               {'input':str(sample),'outputs':[a,dict(b,id='valid-a')]}, {'input':str(sample),'outputs':[a,dict(b,output=a['output'])]},
               {'input':str(sample),'outputs':[a,dict(b,queue_items=17)]}, {'input':str(sample),'outputs':[a,dict(b,queue_bytes=1)]},
               {'input':str(sample),'outputs':[a,dict(b,extra=True)]}, {'input':str(sample),'outputs':[a,b],'output':str(RUN/'ambiguous.ts')}]

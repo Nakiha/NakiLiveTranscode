@@ -84,7 +84,12 @@ def sources(root):
 
 
 def object_key(snapshot, component):
-    return identity({"source": snapshot["sources"][component], "recipes": snapshot["recipes"]})
+    inputs = {"source": snapshot["sources"][component], "recipes": snapshot["recipes"]}
+    # libavcodec/libvvenc.c compiles against installed VVenC public headers.
+    # Conservatively bind the entire upstream component, including ABI changes.
+    if component == "ffmpeg":
+        inputs["direct_dependencies"] = {"vvenc": snapshot["sources"]["vvenc"]}
+    return identity(inputs)
 
 
 def artifacts(prefix):

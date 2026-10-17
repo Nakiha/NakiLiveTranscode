@@ -30,6 +30,10 @@ static atomic_int fatal_entered;
 static struct sigaction default_action;
 static sigset_t fatal_signals;
 static char report_directory[4096];
+static char process_instance[33];
+void crash_set_instance(const char *id) {
+    if(!initialized&&id&&strlen(id)==32)memcpy(process_instance,id,33);
+}
 static pthread_key_t stack_key;
 typedef struct AltStack {void *mapping; size_t size;} AltStack;
 
@@ -178,7 +182,7 @@ int crash_client_start(const CrashOptions *o,const char *role) {
     if(!error)error=posix_spawn_file_actions_addopen(&actions,2,"/dev/null",O_WRONLY,0);
     if(!error)error=posix_spawn_file_actions_addclosefrom_np(&actions,4);
     char target[24]; snprintf(target,sizeof(target),"%d",getpid());
-    char *args[]={executable,target,(char *)role,NULL}; pid_t pid=0;
+    char *args[]={executable,target,(char *)role,process_instance,NULL}; pid_t pid=0;
     if(!error)error=posix_spawn(&pid,executable,&actions,NULL,args,environ);
     posix_spawn_file_actions_destroy(&actions); close(child_fd); close(pair[1]);
     if(error) {close(pair[0]); errno=error; return -1;}

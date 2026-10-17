@@ -15,7 +15,8 @@ from vvenc_integration import PROBE, probe
 def run():
     run=pathlib.Path(tempfile.mkdtemp(prefix="vvenc-pts-",dir=service.ROOT/"out"))
     log=(run/"server.jsonl").open("w"); error=(run/"server.stderr").open("w")
-    server=subprocess.Popen([str(service.BIN/"naki-live"),"--port",str(service.PORT),"--run-dir",str(run/"logs")],
+    state_directory=tempfile.TemporaryDirectory(prefix="naki-vvenc-pts-state-")
+    server=subprocess.Popen([str(service.BIN/"naki-live"),"--port",str(service.PORT),"--run-dir",str(run/"logs"),"--state-dir",state_directory.name],
                             stdout=log,stderr=error)
     results=[]
     cases=[("cadence",105,"if(lt(N,40),N*3000,120000+(N-40)*6000)","hevc",10),
@@ -71,7 +72,7 @@ def run():
             (run/"results.json").write_text(json.dumps(results,indent=2))
             print("PASS PTS GOP",name,structure["key_frame_indices"],structure["display_types"],flush=True)
     finally:
-        server.send_signal(signal.SIGTERM); server.wait(timeout=15); log.close(); error.close()
+        server.send_signal(signal.SIGTERM); server.wait(timeout=15); log.close(); error.close();state_directory.cleanup()
     assert server.returncode==0
     (run/"COMPLETE.json").write_text(json.dumps({"status":"passed","cases":len(results)}))
     print("PASS PTS-grid CRA, VFR DTS, no lost frames, independent VVC decode:",run,flush=True)

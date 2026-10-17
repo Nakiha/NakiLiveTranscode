@@ -18,18 +18,19 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-def run(expect_stale=False):
+def run(expect_stale=False,identity_script=None,expect_stale_transitive=False):
     result = pathlib.Path(tempfile.mkdtemp(prefix="sdk-build-", dir=ROOT / "out"))
     root = result / "source"
     scripts = root / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("build-service.sh", "build-ffmpeg.sh", "build-vvenc.sh", "sdk-identity.py", "archive-symbols.py"):
+    for name in ("build-service.sh", "build-ffmpeg.sh", "build-vvenc.sh", "sdk-identity.py", "sdk-expected.py", "archive-symbols.py"):
         shutil.copy2(ROOT / "scripts" / name, scripts / name)
+    if identity_script:shutil.copy2(identity_script,scripts/"sdk-identity.py")
     shutil.copy2(ROOT / "Dockerfile.ffmpeg", root / "Dockerfile.ffmpeg")
     ffmpeg = root / "experiments/decoder-20261016/ffmpeg-7.0.3"
     (ffmpeg / "libavformat").mkdir(parents=True)
     source = ffmpeg / "libavformat/demux.c"
-    source.write_text("int format_marker(void) { return 1; }\n")
+    source.write_text("#include <vvenc/marker.h>\nint format_marker(void) { return 1+VVENC_WRAPPER_MARKER; }\n")
     ffmpeg_broken = ffmpeg / "libavformat/broken.c"
     ffmpeg_broken.write_text("int format_aux(void) { return 0; }\n")
     (ffmpeg / "marker.h").write_text("int format_marker(void);\n")
@@ -50,7 +51,7 @@ def run(expect_stale=False):
             'include ffbuild/config.mak\\n'
             'all: libavformat.so\\n'
             'demux.o: $(source)/libavformat/demux.c\\n'
-            '\\t$(CC) -fPIC -O0 -g -c $< -o $@\\n'
+            '\\t$(CC) -fPIC -O0 -g -I$(prefix)/include -c $< -o $@\\n'
             'broken.o: $(source)/libavformat/broken.c demux.o\\n'
             '\\t$(CC) -fPIC -O0 -g -c $< -o $@\\n'
             'config.o: config.c config.h ffbuild/config.mak\\n'
@@ -84,7 +85,7 @@ def run(expect_stale=False):
     for path in (source, vvenc_source, ffmpeg_broken, vvenc_broken, configure):
         os.utime(path, ns=(1700000000000000000, 1700000000000000000))
     vvenc_header = vvenc / "marker.h"
-    vvenc_header.write_text("int vvenc_marker(void); /* 11 */\n")
+    vvenc_header.write_text("int vvenc_marker(void); /* 11 */\n#define VVENC_WRAPPER_MARKER 0\n")
     (vvenc / "CMakeLists.txt").write_text(textwrap.dedent('''\
         cmake_minimum_required(VERSION 3.16)
         project(VVenCCacheFixture LANGUAGES C)
@@ -172,7 +173,7 @@ def run(expect_stale=False):
     first = build("first")
     assert first["marker"] == [1, 11], first
     stamp = source.stat()
-    source.write_text("int format_marker(void) { return 2; }\n")
+    source.write_text("#include <vvenc/marker.h>\nint format_marker(void) { return 2+VVENC_WRAPPER_MARKER; }\n")
     os.utime(source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
     assert source.stat().st_mtime_ns == stamp.st_mtime_ns
     changed_ffmpeg = build("same-mtime-ffmpeg")
@@ -182,7 +183,7 @@ def run(expect_stale=False):
     os.utime(vvenc_source, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
     assert vvenc_source.stat().st_mtime_ns == stamp.st_mtime_ns
     header_stamp = vvenc_header.stat()
-    vvenc_header.write_text("int vvenc_marker(void); /* 12 */\n")
+    vvenc_header.write_text("int vvenc_marker(void); /* 12 */\n#define VVENC_WRAPPER_MARKER 0\n")
     os.utime(vvenc_header, ns=(header_stamp.st_atime_ns, header_stamp.st_mtime_ns))
     changed_vvenc = build("same-mtime-vvenc")
     final_skip = build("same-mtime-vvenc-skip", skip=True)
@@ -201,6 +202,27 @@ def run(expect_stale=False):
         assert changed_vvenc["marker"] == final_skip["marker"] == [2, 12], report
         assert installed_header == vvenc_header.read_text(), report
         print("PASS same-mtime source changes rebuild actual FFmpeg/VVenC DSOs, seal and skip:", result, flush=True)
+
+    # A real downstream source includes the installed upstream public header.
+    # Only its content changes; source and installed timestamps intentionally collide.
+    old_header=vvenc_header.read_bytes();header_stamp=vvenc_header.stat()
+    vvenc_header.write_bytes(old_header.replace(b"WRAPPER_MARKER 0",b"WRAPPER_MARKER 100"))
+    os.utime(vvenc_header,ns=(header_stamp.st_atime_ns,header_stamp.st_mtime_ns))
+    installed=cache/"install/include/vvenc/marker.h"
+    os.utime(installed,ns=(header_stamp.st_atime_ns,header_stamp.st_mtime_ns))
+    before_key=json.loads((cache/"install/share/naki/ffmpeg-build.json").read_text())["object_keys"]["ffmpeg"]
+    header_changed=build("transitive-public-header-same-mtime")
+    after_key=json.loads((cache/"install/share/naki/ffmpeg-build.json").read_text())["object_keys"]["ffmpeg"]
+    report["transitive_public_header"]={"before_key":before_key,"after_key":after_key,**header_changed}
+    if expect_stale_transitive:
+        assert header_changed["marker"]==[2,12] and before_key==after_key,report
+        (result/"TRANSITIVE-BEFORE.json").write_text(json.dumps(report,indent=2)+"\n")
+        print("REPRODUCED unchanged downstream object key and stale wrapper after old-mtime upstream header change:",result,flush=True)
+        return
+    assert header_changed["marker"]==[102,12] and before_key!=after_key,report
+    vvenc_header.write_bytes(old_header);os.utime(vvenc_header,ns=(header_stamp.st_atime_ns,header_stamp.st_mtime_ns))
+    assert build("restore-public-header")["marker"]==[2,12]
+    print("PASS actual downstream wrapper behavior follows upstream header content with preserved mtime:",result,flush=True)
 
     baseline = {path: (path.read_bytes(), path.stat().st_mtime_ns)
                 for path in (source, ffmpeg_broken, vvenc_source, vvenc_broken)}
@@ -317,4 +339,7 @@ def run(expect_stale=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--expect-stale", action="store_true", help="reproduce the pre-fix bug")
-    run(parser.parse_args().expect_stale)
+    parser.add_argument("--identity-script",type=pathlib.Path)
+    parser.add_argument("--expect-stale-transitive",action="store_true")
+    args=parser.parse_args()
+    run(args.expect_stale,args.identity_script,args.expect_stale_transitive)

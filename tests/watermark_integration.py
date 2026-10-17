@@ -154,6 +154,8 @@ def run():
     results["startup-budget-not-reset-by-revision"]="passed"
     port = free_port();base = f"http://127.0.0.1:{port}"
     def http(path="/v1/job", data=None, code=200):
+        if path in ("/v1/job/stop","/v1/job/watermark") and isinstance(data,dict) and "job_id" not in data:
+            data=dict(data,job_id=http()["job_id"])
         req = urllib.request.Request(base+path, data=json.dumps(data).encode() if data is not None else None, headers={"Content-Type":"application/json"})
         try: response=urllib.request.urlopen(req,timeout=4)
         except urllib.error.HTTPError as e: response=e
@@ -182,8 +184,9 @@ def run():
     sample=RUN/"input.mp4"
     command(["ffmpeg","-v","error","-f","lavfi","-i","color=black:size=160x96:rate=25:duration=5","-c:v","libx264","-preset","ultrafast","-threads","2",sample])
     log=(RUN/"server.jsonl").open("wb");err=(RUN/"server.stderr").open("wb")
+    state_directory=tempfile.mkdtemp(prefix="wm-",dir=os.environ.get("TMPDIR"))
     def serve():
-        return subprocess.Popen([str(BIN/"naki-live"),"--port",str(port),"--run-dir",str(RUN/"logs"),"--status-interval","1"],stdout=log,stderr=err,cwd=ROOT)
+        return subprocess.Popen([str(BIN/"naki-live"),"--port",str(port),"--run-dir",str(RUN/"logs"),"--state-dir",state_directory,"--status-interval","1"],stdout=log,stderr=err,cwd=ROOT)
     server=serve()
     try:
         health=wait(online)

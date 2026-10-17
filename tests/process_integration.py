@@ -8,9 +8,12 @@ import signal
 import statistics
 import subprocess
 import time
+import tempfile
 import urllib.request
 from service_integration import ROOT, BIN, RUN, BASE, PORT, http, start, finished, port
 import socket
+from event_logs import read_events
+STATES={}
 
 
 def wait_for(predicate, timeout=8):
@@ -33,10 +36,13 @@ def dead(pid):
 
 
 def serve(name, spares=1):
+    if name not in STATES:STATES[name]=tempfile.mkdtemp(prefix="pool-",dir=os.environ.get("TMPDIR"))
+    state=STATES[name]
     output=(RUN/f"{name}.jsonl").open("a")
     errors=(RUN/f"{name}.stderr").open("a")
     def no_core():resource.setrlimit(resource.RLIMIT_CORE,(0,0))
     server=subprocess.Popen([str(BIN/"naki-live"),"--port",str(PORT),"--run-dir",str(RUN/name),
+                             "--state-dir",state,
                              "--spare-workers",str(spares),"--worker-timeout","2",
                              "--worker-stop-timeout","1","--status-interval","1"],
                             stdout=output,stderr=errors,cwd=ROOT,preexec_fn=no_core)
@@ -57,7 +63,7 @@ def stop(server):
 
 
 def events(name):
-    return [json.loads(line) for line in (RUN/f"{name}.jsonl").read_text().splitlines()]
+    return read_events(RUN/name/"events")
 
 
 def silent(name):
@@ -74,7 +80,7 @@ def run():
         health=wait_for(ready)
         idle_pid=next(w["pid"] for w in health["pool"]["workers"] if w["state"]=="ready")
         assert idle_pid!=server.pid and health["execution_mode"]=="process_pool"
-        duplicate=subprocess.run([str(BIN/"naki-live"),"--port",str(port()),"--run-dir",str(RUN/"warm")],
+        duplicate=subprocess.run([str(BIN/"naki-live"),"--port",str(port()),"--run-dir",str(RUN/"warm"),"--state-dir",STATES["warm"]],
                                   capture_output=True,timeout=3)
         assert duplicate.returncode!=0 and http("/health")["status"]=="ok"
         # Keep a task running while the supervisor replenishes its standby process.
@@ -108,7 +114,7 @@ def run():
         failed=finished("failed",timeout=5)
         assert failed["supervisor"]["exit_signal"]==signal.SIGSEGV and http("/health")["status"]=="ok"
         wait_for(lambda:any(e["event"]=="worker_crash" and e.get("job_id")==job["job_id"] and
-                            e["supervisor"]["exit_signal"]==signal.SIGSEGV for e in events("warm")))
+                            e["snapshot"]["supervisor"]["exit_signal"]==signal.SIGSEGV for e in events("warm")))
         wait_for(ready)
         assert any(e["event"]=="startup_incomplete" and e.get("job_id")==job["job_id"] for e in events("warm"))
 
@@ -159,7 +165,9 @@ def run():
             recovered=wait_for(lambda:(r if (r:=http()).get("job_id")==job["job_id"] and r["supervisor"]["recovered"] else None))
             assert recovered["supervisor"]["worker_pid"]==pid and recovered["packets_out"]>before
             assert recovered["control_reconnects"]>=1 and recovered["control_disconnected_ms"]>2000
-            wait_for(lambda:any(e.get("job_id")==job["job_id"] and e["event"]=="first_frame" and e.get("replayed_after_reconnect") for e in events("warm")))
+            assert recovered["first_frame_checkpoints"],recovered
+            first=[e for e in events("warm") if e.get("job_id")==job["job_id"] and e["event"]=="first_frame" and e["first_video"]]
+            assert len(first)==1 and not first[0].get("replayed_after_reconnect"),first
             http("/v1/job/stop",data={},code=202)
             done=finished("stopped")
             assert not done["supervisor"]["exit_status_known"] and dead(pid)

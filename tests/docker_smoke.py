@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 import tempfile
 import time
+from event_logs import read_events
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 RUN=pathlib.Path(tempfile.mkdtemp(prefix="docker-smoke-",dir=ROOT/"out"))
@@ -135,13 +136,15 @@ def run():
         assert status["State"]["Health"]["Status"]=="healthy"
         assert status["Config"]["User"]=="10001:10001"
         assert status["HostConfig"]["LogConfig"]["Type"]=="local"
-        command(COMPOSE+["stop","-t","15","transcode"])
+        command(COMPOSE+["stop","transcode"])
         status=json.loads(command(["docker","inspect",container]))[0]
         assert status["State"]["ExitCode"]==0 and not status["State"]["OOMKilled"]
         lines=command(["docker","logs",container])
         (RUN/"container.jsonl").write_text(lines+"\n")
         events=[json.loads(line) for line in lines.splitlines()]
-        assert events[-1]["event"]=="shutdown"
+        command(["docker","cp",container+":/var/log/naki/events",str(RUN/"events")])
+        process_events=read_events(RUN/"events")
+        assert any(event["event"]=="shutdown" and event["role"]=="controller" for event in process_events)
         (RUN/"COMPLETE.json").write_text(json.dumps({"project":PROJECT,"status":"passed","frames":75,
                                                     "compressed_segments":count,"exit_code":0},indent=2))
         assert any(event["event"]=="control_restarting" for event in events)

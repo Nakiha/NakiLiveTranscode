@@ -10,12 +10,14 @@
 #include "netstats.h"
 #include "frame_policy.h"
 #include "watermark_config.h"
+#include "video_rate.h"
 typedef struct NakiWatermark NakiWatermark;
+typedef struct NakiOperations NakiOperations;
 #define NAKI_OUTPUT_MAX 4
 typedef struct OutputConfig {
     char id[33],output[2048],output_format[16],encoder[16],encoder_preset[16],encoder_profile[24];
     int width,height,bitrate,encoder_threads,audio_copy,mux_wait_ms;
-    int queue_items,queue_media_ms,max_lag_ms,io_timeout_ms;
+    int queue_items,audio_packets,queue_media_ms,max_lag_ms,io_timeout_ms;
     uint64_t queue_bytes,inflight_bytes;
     NakiWatermarkConfig watermark;
 } OutputConfig;
@@ -28,6 +30,7 @@ typedef struct Config {
     int queue_capacity, encoder_threads, fps, pace;
     int frame_log, frame_log_every, slow_frame_ms;
     int audio_copy, mux_wait_ms;
+    char single_output_id[33]; /* Logical identity; output_count still selects direct vs branch execution. */
     NakiPolicyConfig policy;
     NakiWatermarkConfig watermark;
     int output_count;
@@ -58,8 +61,11 @@ typedef struct Job {
     NetworkStats *network;
     TraceSink *trace;
     NakiWatermark *watermark;
+    NakiOperations *operations; /* Root job owns the shared bounded control store. */
     void (*watermark_snapshot)(NakiWatermark *,yyjson_mut_doc *);
     int64_t started_us, ended_us;
+    int64_t stop_requested_us,stop_deadline_us;
+    char stop_operation_id[129],stop_origin_request_id[129];
     int64_t assigned_us, worker_received_us, worker_spawned_us, worker_ready_us;
     int64_t first_video_output_us, first_key_output_us;
     int64_t input_open_started_us, input_open_done_us, input_probe_done_us, decoder_ready_us;
@@ -69,12 +75,18 @@ typedef struct Job {
     yyjson_mut_doc *first_chain[2]; /* Bounded checkpoints for replay after controller loss. */
     uint64_t packets_in, frames_decoded, frames_filtered, packets_out, bytes_out;
     uint64_t audio_tracks, audio_packets_out, audio_dropped, audio_unsupported;
+    NakiVideoRate video_rate;
     uint64_t mux_queued_packets, mux_queued_bytes, mux_high_water, mux_timeouts, mux_pressure, mux_forced;
     Latencies lifetime, window;
     Latencies i_lifetime, i_window;
     Latencies key_lifetime, key_window;
     FrameGroups groups, window_groups;
     int64_t window_start_us, last_output_us, write_started_us, last_i_output_us;
+    int64_t last_input_us,last_decoded_us,last_encoded_us,branch_oldest_ingress_us;
+    char media_phase[24];
+    uint64_t snapshot_generation;
+    int64_t finalize_started_us,finalize_finished_us,finalize_deadline_us;
+    int finalize_trailer_error,finalize_flush_error,finalize_close_error,finalize_primary_error;
     int64_t auto_updated_us;
     char write_phase[24];
     uint64_t window_start_input, window_start_output, i_frames;
@@ -88,6 +100,8 @@ typedef struct Job {
     uint64_t frame_id_last, frames_selected, frames_dropped_overload, frames_protected;
     uint64_t intra_requested, intra_confirmed, timestamp_wraps;
     uint64_t branch_queued,branch_queue_bytes,branch_queue_media_us,branch_queue_high;
+    unsigned branch_video_queued,branch_audio_queued,branch_video_high,branch_audio_high,branch_rejection_reason;
+    uint64_t branch_rejected[6];
     uint64_t branch_inflight_bytes,branch_inflight_frames,branch_inflight_high,filter_generations;
     NakiInFlight branch_pending;
     atomic_int branch_failed;
@@ -106,6 +120,9 @@ yyjson_mut_doc *job_snapshot(Job *job);
 yyjson_mut_doc *job_report(Job *job, int final);
 void *pipeline_main(void *opaque);
 int config_parse(const char *body, size_t size, Config *out, char *error, size_t cap);
+int naki_config_fingerprint(const Config *config,char out[65],char *error,size_t cap);
+int naki_logical_output_count(const Config *config);
+void naki_logical_output(const Config *config,int index,OutputConfig *out);
 int naki_outputs_parse(yyjson_val *root,Config *out,char *error,size_t cap);
 void naki_output_config(Config *out,const Config *common,int index);
 void naki_branch_release(Job *job,uint64_t id,uint64_t bytes);

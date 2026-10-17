@@ -30,6 +30,8 @@ BASE = f"http://127.0.0.1:{PORT}"
 
 
 def http(path="/v1/job", data=None, code=200, raw=None, method=None):
+    if path in ("/v1/job/stop","/v1/job/watermark") and isinstance(data,dict) and "job_id" not in data:
+        data=dict(data,job_id=http()["job_id"])
     body = raw if raw is not None else json.dumps(data).encode() if data is not None else None
     req = urllib.request.Request(BASE + path, data=body, method=method,
                                  headers={"Content-Type": "application/json"})

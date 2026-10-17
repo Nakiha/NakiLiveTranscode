@@ -25,6 +25,13 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+      - name: Capture exact application source and unique image identity
+        run: |
+          mkdir -p out
+          tree=$(python3 scripts/release-manifest.py source --output out/source-inputs.json)
+          echo "SOURCE_TREE_SHA256=$tree" >> "$GITHUB_ENV"
+          echo "RUNTIME_TAG=$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
+          python3 tests/release_manifest_test.py
       - name: Download exact FFmpeg SDK
         env:
           GH_TOKEN: ${{ github.token }}
@@ -38,12 +45,16 @@ jobs:
         run: |
           # Release-key fixtures need Git; the test container intentionally has no Git dependency.
           python3 tests/sdk_identity_test.py
+          python3 tests/sdk_expected_test.py
+          python3 scripts/sdk-expected.py generate --output out/expected-sdk.json
           docker build --target test --build-arg FFMPEG_STAGE=ffmpeg-prebuilt \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" --build-arg DEPENDENCY_KEY="$DEPENDENCY_KEY" \
             -t naki-live-transcode:test .
           docker build --target runtime --build-arg FFMPEG_STAGE=ffmpeg-prebuilt \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" --build-arg DEPENDENCY_KEY="$DEPENDENCY_KEY" \
-            -t naki-live-transcode:local -t "naki-live-transcode:$GITHUB_SHA" .
+            --build-arg SOURCE_TREE_SHA256="$SOURCE_TREE_SHA256" --build-arg BUILD_RUN_ID="$GITHUB_RUN_ID" \
+            --build-arg BUILD_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            -t naki-live-transcode:local -t "naki-live-transcode:$RUNTIME_TAG" .
           docker build --target symbols --build-arg FFMPEG_STAGE=ffmpeg-prebuilt \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" --build-arg DEPENDENCY_KEY="$DEPENDENCY_KEY" \
             --output type=local,dest=out/symbols .
@@ -51,7 +62,7 @@ jobs:
         run: |
           mkdir -p out/ci-results
           docker run --rm --init -v "$PWD/out/ci-results:/src/out/results" naki-live-transcode:test \
-            bash -c 'trap "cp -a out/service-test-* out/symbols-test-* out/decoder-test-* out/probe-test-* out/sdk-build-* out/frame-policy-* out/vvenc-test-* out/vvenc-latency-* out/vvenc-pts-* out/live-mux-* out/media-hooks-* out/watermark-* out/multi-output-* out/input-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/ci-test.sh'
+            bash -c 'trap "cp -a out/service-test-* out/symbols-test-* out/decoder-test-* out/probe-test-* out/sdk-build-* out/frame-policy-* out/vvenc-test-* out/vvenc-latency-* out/vvenc-pts-* out/live-mux-* out/media-hooks-* out/watermark-* out/multi-output-* out/mixed-queue-* out/audio-signature-* out/video-rate-* out/update-api-* out/control-lifecycle-* out/input-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/ci-test.sh'
       - name: Runtime image recovery and source-line symbolization
         env:
           NAKI_SYMBOLS_DIR: ${{ github.workspace }}/out/symbols
@@ -62,16 +73,36 @@ jobs:
       - name: Package exact image and separate symbols
         run: |
           mkdir -p out/release
-          docker save "naki-live-transcode:$GITHUB_SHA" | gzip -1 > out/release/image-linux-amd64.tar.gz
+          docker save "naki-live-transcode:$RUNTIME_TAG" | gzip -1 > out/release/image-linux-amd64.tar.gz
           tar -C out/symbols -czf out/release/symbols-linux-amd64.tar.gz .
-          docker image inspect "naki-live-transcode:$GITHUB_SHA" > out/release/image.json
+          docker image inspect "naki-live-transcode:$RUNTIME_TAG" > out/release/image.json
           printf '%s\n' "$GITHUB_SHA" > out/release/source-revision.txt
           printf '%s\n' "$DEPENDENCY_KEY" > out/release/ffmpeg-dependency-key.txt
           cp scripts/symbolize-crash.py out/release/
-          (cd out/release && sha256sum *.tar.gz > SHA256SUMS)
+          cp out/source-inputs.json out/release/
+          # Compare the actual stripped image ELF files to separately archived
+          # Build ID DWARF. Overlay its native libraries onto the sealed SDK;
+          # SDK verification then rejects any different runtime library bytes.
+          mkdir -p out/release-sdk out/release-runtime-bin
+          tar -xzf out/ffmpeg-sdk.tar.gz -C out/release-sdk ./install
+          container=$(docker create "naki-live-transcode:$RUNTIME_TAG")
+          trap 'docker rm "$container" >/dev/null' EXIT
+          docker cp "$container:/usr/local/bin/." out/release-runtime-bin/
+          docker cp "$container:/opt/naki-build/install/lib/." out/release-sdk/install/lib/
+          python3 scripts/release-manifest.py create --source out/source-inputs.json \
+            --runtime-bin out/release-runtime-bin --sdk-prefix out/release-sdk/install \
+            --app-symbols out/symbols/app --ffmpeg-symbols out/symbols/ffmpeg --vvenc-symbols out/symbols/vvenc \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --dependency-key "$DEPENDENCY_KEY" \
+            --image-inspect out/release/image.json --image-archive out/release/image-linux-amd64.tar.gz \
+            --symbols-archive out/release/symbols-linux-amd64.tar.gz --output out/release/release-manifest.json
+          python3 scripts/release-manifest.py verify --manifest out/release/release-manifest.json \
+            --runtime-bin out/release-runtime-bin --sdk-prefix out/release-sdk/install \
+            --app-symbols out/symbols/app --ffmpeg-symbols out/symbols/ffmpeg --vvenc-symbols out/symbols/vvenc \
+            --image-inspect out/release/image.json --artifact-directory out/release
+          (cd out/release && sha256sum *.tar.gz *.json *.txt > SHA256SUMS)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-amd64-${{ github.sha }}
+          name: linux-amd64-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: out/release/
           compression-level: 0
           retention-days: 90

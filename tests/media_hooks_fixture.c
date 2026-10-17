@@ -6,10 +6,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <libavutil/time.h>
 
 typedef struct Context {
     char path[4096], mode[32];
+    char gate[4096];
+    unsigned pause_us;
     pthread_t owner;
     uint64_t audio, video, keys, known_types, reordered_pts;
     int64_t previous_pts, previous_encoded_us, first_encoded_us;
@@ -44,6 +47,20 @@ static int video(void *opaque,const NakiVideoEncodedEvent *event,AVPacket *packe
     if(c->video && packet->pts<c->previous_pts)c->reordered_pts++;
     c->previous_pts=packet->pts;c->previous_encoded_us=event->encoded_us;
     c->video++;c->keys+=event->output_key;c->known_types+=event->output_picture_type!=AV_PICTURE_TYPE_NONE;
+    if(c->video==1&&c->pause_us)av_usleep(c->pause_us);
+    if(!strcmp(c->mode,"gate_video")&&*c->gate) {
+        char entered[4200],release[4200],off[4200],failure[4200];
+        snprintf(entered,sizeof(entered),"%s/entered.json",c->gate);snprintf(release,sizeof(release),"%s/release",c->gate);
+        snprintf(off,sizeof(off),"%s/off",c->gate);snprintf(failure,sizeof(failure),"%s/fail",c->gate);
+        if(access(off,F_OK)) {
+            FILE *f=fopen(entered,"w");assert(f);fprintf(f,"{\"packet\":%llu,\"frame_id\":%lld}\n",(unsigned long long)c->video,(long long)event->frame_id);assert(!fclose(f));
+            int64_t until=av_gettime_relative()+10000000;
+            while(access(release,F_OK)&&access(off,F_OK)&&access(failure,F_OK)&&av_gettime_relative()<until)av_usleep(1000);
+            if(!access(failure,F_OK))return AVERROR_EXTERNAL;
+            if(av_gettime_relative()>=until)return AVERROR(ETIMEDOUT);
+            if(!access(release,F_OK))assert(!unlink(release));
+        }
+    }
     if(!strcmp(c->mode,"video_error"))return AVERROR_EXTERNAL;
     if(!strcmp(c->mode,"rewrite_pts"))packet->pts++;
     if(!strcmp(c->mode,"growth"))return av_grow_packet(packet,NAKI_MEDIA_HOOK_MAX_ADDED_BYTES+1);
@@ -68,7 +85,12 @@ int naki_media_hooks_open(const NakiMediaJobInfo *info,NakiMediaHooks *hooks) {
     if(!directory)return AVERROR(EINVAL);
     Context *c=calloc(1,sizeof(*c));if(!c)return AVERROR(ENOMEM);
     if(snprintf(c->path,sizeof(c->path),"%s/%s.json",directory,info->job_id)>=(int)sizeof(c->path)) {free(c);return AVERROR(ENAMETOOLONG);}
+    if(getenv("NAKI_TEST_HOOK_OUTPUT_PATHS")&&snprintf(c->path,sizeof(c->path),"%s/%s-%s.json",directory,info->job_id,
+        info->output_id&&*info->output_id?info->output_id:"shared")>=(int)sizeof(c->path)) {free(c);return AVERROR(ENAMETOOLONG);}
     snprintf(c->mode,sizeof(c->mode),"%s",mode ? mode : "valid");
+    const char *gate=getenv("NAKI_TEST_MEDIA_HOOK_GATE");if(gate)snprintf(c->gate,sizeof(c->gate),"%s",gate);
+    const char *paused_output=getenv("NAKI_TEST_MEDIA_HOOK_PAUSE_OUTPUT");
+    if(!strcmp(c->mode,"pause_video")&&(!paused_output||(info->output_id&&!strcmp(paused_output,info->output_id))))c->pause_us=40000;
     c->owner=pthread_self();
     *hooks=(NakiMediaHooks){.api_version=NAKI_MEDIA_HOOK_API,.opaque=c,.audio_packet=audio,.video_packet=video,.close=close_hook};
     return !strcmp(c->mode,"open_error") ? AVERROR_EXTERNAL : 0;

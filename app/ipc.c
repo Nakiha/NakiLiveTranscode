@@ -1,11 +1,17 @@
 #define _GNU_SOURCE
 #include "ipc.h"
+#include "identity.h"
+#include "intent.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <fcntl.h>
+#ifndef SO_PEERPIDFD
+#define SO_PEERPIDFD 77
+#endif
 
 yyjson_mut_doc *ipc_message(const char *kind) {
     yyjson_mut_doc *doc=yyjson_mut_doc_new(NULL);
@@ -14,6 +20,7 @@ yyjson_mut_doc *ipc_message(const char *kind) {
     yyjson_mut_doc_set_root(doc,root);
     yyjson_mut_obj_add_int(doc,root,"ipc_version",IPC_VERSION);
     yyjson_mut_obj_add_strcpy(doc,root,"ipc_kind",kind);
+    yyjson_mut_obj_add_strcpy(doc,root,"instance_id",naki_process_id());
     return doc;
 }
 int ipc_send(int fd, yyjson_mut_doc *doc) {
@@ -34,10 +41,17 @@ int ipc_receive(int fd, yyjson_doc **doc) {
     if(n<=0 || n>(ssize_t)sizeof(text))return -1;
     *doc=yyjson_read(text,(size_t)n,0);
     yyjson_val *root=*doc ? yyjson_doc_get_root(*doc) : NULL;
-    if(!yyjson_is_obj(root) || yyjson_get_int(yyjson_obj_get(root,"ipc_version"))!=IPC_VERSION ||
+    if(!yyjson_is_obj(root) || !yyjson_is_int(yyjson_obj_get(root,"ipc_version")) ||
        !yyjson_is_str(yyjson_obj_get(root,"ipc_kind"))) {
         if(*doc)yyjson_doc_free(*doc);
         *doc=NULL; return -1;
+    }
+    if(yyjson_get_int(yyjson_obj_get(root,"ipc_version"))!=IPC_VERSION)return IPC_VERSION_MISMATCH;
+    char error[128];
+    if(naki_intent_validate(root,error,sizeof(error))) {yyjson_doc_free(*doc);*doc=NULL;return -1;}
+    yyjson_val *instance=yyjson_obj_get(root,"instance_id");
+    if(!yyjson_is_str(instance)||yyjson_get_len(instance)!=32||!naki_id_valid(yyjson_get_str(instance),32)) {
+        yyjson_doc_free(*doc);*doc=NULL;return -1;
     }
     return 1;
 }
@@ -56,7 +70,8 @@ int ipc_listen(const char *path) {
     if(bind(fd,(struct sockaddr *)&addr,sizeof(addr)) || listen(fd,4)) {int e=errno; close(fd); errno=e; return -1;}
     return fd;
 }
-int ipc_connect(const char *path,int *peer_pid) {
+int ipc_connect(const char *path,int *peer_pid,int *peer_pidfd) {
+    *peer_pidfd=-1;
     struct sockaddr_un addr; if(address(path,&addr))return -1;
     int fd=socket(AF_UNIX,SOCK_SEQPACKET|SOCK_CLOEXEC|SOCK_NONBLOCK,0);
     if(fd<0)return -1;
@@ -64,7 +79,13 @@ int ipc_connect(const char *path,int *peer_pid) {
     if(connect(fd,(struct sockaddr *)&addr,sizeof(addr)) || getsockopt(fd,SOL_SOCKET,SO_PEERCRED,&peer,&size) || peer.uid!=geteuid()) {
         int e=errno ? errno : EACCES; close(fd); errno=e; return -1;
     }
-    *peer_pid=peer.pid; return fd;
+    int process=-1;socklen_t process_size=sizeof(process);
+    /* Bind the descriptor atomically to the socket peer, avoiding PID reuse
+     * between reading SO_PEERCRED and opening a numeric pidfd. */
+    if(getsockopt(fd,SOL_SOCKET,SO_PEERPIDFD,&process,&process_size)||process<0||fcntl(process,F_SETFD,FD_CLOEXEC)<0) {
+        int saved=errno;if(process>=0)close(process);close(fd);errno=saved;return -1;
+    }
+    *peer_pid=peer.pid;*peer_pidfd=process;return fd;
 }
 int ipc_accept(int listener) {
     int fd=accept4(listener,NULL,NULL,SOCK_NONBLOCK|SOCK_CLOEXEC);

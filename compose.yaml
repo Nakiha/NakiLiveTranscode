@@ -17,7 +17,13 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-    pids_limit: 256
+    cpus: "${NAKI_CPU_LIMIT:-0.0}"
+    mem_limit: "${NAKI_MEMORY_LIMIT:-0}"
+    pids_limit: ${NAKI_PID_LIMIT:-256}
+    ulimits:
+      nofile:
+        soft: ${NAKI_NOFILE_SOFT:-65536}
+        hard: ${NAKI_NOFILE_HARD:-65536}
     logging:
       driver: local
       options:
@@ -32,6 +38,14 @@ services:
     init: true
     entrypoint: ["python3", "/usr/local/lib/naki/maintain-logs.py"]
     command: ["--directory", "/var/log/naki", "--max-age-days", "7", "--max-total-bytes", "2147483648"]
+    volumes:
+      - logs:/var/log/naki
+  event-maintenance:
+    image: naki-live-transcode:local
+    profiles: [maintenance]
+    init: true
+    entrypoint: ["python3", "/usr/local/lib/naki/maintain-logs.py"]
+    command: ["--directory", "/var/log/naki/events", "--kind", "events", "--recover-orphans", "--max-age-days", "7", "--max-total-bytes", "2147483648"]
     volumes:
       - logs:/var/log/naki
 volumes:

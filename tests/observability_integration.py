@@ -12,7 +12,9 @@ import subprocess
 import sys
 import threading
 import time
+import tempfile
 from service_integration import ROOT, BIN, RUN, BASE, PORT, http, start, finished
+from event_logs import read_events
 
 
 def listen():
@@ -29,7 +31,9 @@ def run():
                     "-frames:v","150","-c:v","libx264","-preset","veryfast","-threads","2",
                     "-x264-params","bframes=3:b-adapt=0:keyint=25:scenecut=0","-movflags","+faststart",str(sample)],check=True,timeout=30)
     server_log=(RUN/"server.jsonl").open("w")
+    state_directory=tempfile.mkdtemp(prefix="obs-",dir=os.environ.get("TMPDIR"))
     server=subprocess.Popen([str(BIN/"naki-live"),"--port",str(PORT),"--run-dir",str(RUN/"traces"),
+                             "--state-dir",state_directory,
                              "--log-rotate-bytes","2048","--log-rotate-seconds","1","--status-interval","1"],
                             stdout=server_log,stderr=(RUN/"server.stderr").open("w"),cwd=ROOT)
     try:
@@ -52,12 +56,12 @@ def run():
         assert len(traces)>1 and 0<len(frames)<150
         assert sum(row["decoded_picture_type"]=="I" for row in frames)==state["frame_types"]["i_frame"]["count"]
         assert sum(bool(row["output_key"]) for row in frames)==state["frame_types"]["output_key"]["count"]
-        events=[json.loads(line) for line in (RUN/"server.jsonl").read_text().splitlines()]
+        events=read_events(RUN/"traces/events")
         windows=[r for r in events if r.get("job_id")==state["job_id"] and r["event"]=="status"]
         assert len(windows)>=5 and sum(r["window"]["ingress_to_mux"]["count"] for r in windows)==150
         assert sum(r["window"]["frame_types"]["i_frame"]["count"] for r in windows)==state["frame_types"]["i_frame"]["count"]
         time.sleep(1.1)
-        idle_events=[json.loads(line) for line in (RUN/"server.jsonl").read_text().splitlines()]
+        idle_events=read_events(RUN/"traces/events")
         assert any(r["event"]=="heartbeat" and r.get("last_job_id")==state["job_id"] for r in idle_events)
         print("PASS nonoverlapping latency windows, all-frame counts, separate first/recurring I frames, forced key-frame traces and rotation",flush=True)
 
@@ -133,7 +137,7 @@ def run():
             else:raise AssertionError(("no blocked write observed",stalled))
             http("/health")
             time.sleep(1.2)
-            events=[json.loads(line) for line in (RUN/"server.jsonl").read_text().splitlines()]
+            events=read_events(RUN/"traces/events")
             assert any(row.get("job_id")==stalled["job_id"] and row.get("write_in_progress_ms",0)>500 for row in events)
             http("/v1/job/stop",data={},code=202);finished("stopped",timeout=5)
         finally:hold.set();receiver.join(timeout=3);listener.close()
@@ -176,7 +180,8 @@ def run():
 
     # Verify the real default interval, without overriding it for the accelerated tests.
     default_log=(RUN/"default.jsonl").open("w")
-    default_server=subprocess.Popen([str(BIN/"naki-live"),"--port",str(PORT),"--run-dir",str(RUN/"default-traces")],
+    default_server=subprocess.Popen([str(BIN/"naki-live"),"--port",str(PORT),"--run-dir",str(RUN/"default-traces"),
+                                     "--state-dir",tempfile.mkdtemp(prefix="obs-",dir=os.environ.get("TMPDIR"))],
                                     stdout=default_log,stderr=subprocess.PIPE,cwd=ROOT)
     try:
         for _ in range(100):
@@ -186,7 +191,8 @@ def run():
         time.sleep(10.2)
     finally:default_server.send_signal(signal.SIGTERM);default_server.wait(timeout=5);default_log.close()
     assert default_server.returncode==0
-    events=[json.loads(line) for line in (RUN/"default.jsonl").read_text().splitlines()]
+    events=read_events(RUN/"default-traces/events")
+    events=[e for e in events if e["role"]=="controller"]
     heartbeats=[e for e in events if e["event"]=="heartbeat"]
     assert len(heartbeats)==1 and 9.5<(heartbeats[0]["monotonic_us"]-events[0]["monotonic_us"])/1e6<11
     print("PASS default ten-second control timer; artifacts:",RUN,flush=True)

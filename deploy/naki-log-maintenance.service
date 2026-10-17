@@ -1,5 +1,5 @@
 [Unit]
-Description=Compress and retain sealed NakiLiveTranscode traces
+Description=Maintain independent NakiLiveTranscode event and trace retention
 
 [Service]
 Type=oneshot
@@ -7,3 +7,4 @@ User=naki
 Nice=10
 IOSchedulingClass=idle
 ExecStart=/usr/bin/python3 /opt/naki/scripts/maintain-logs.py --directory /var/log/naki --max-age-days 7 --max-total-bytes 2147483648
+ExecStart=/usr/bin/python3 /opt/naki/scripts/maintain-logs.py --directory /var/log/naki/events --kind events --recover-orphans --max-age-days 7 --max-total-bytes 2147483648

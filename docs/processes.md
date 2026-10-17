@@ -8,11 +8,11 @@
 
 收到任务时优先分配 ready worker，立即开始补充待命数量。每个进程只处理一个任务，完成后退出，避免把旧 codec、网络和日志状态带入新任务。已存在活动任务返回 409；池暂不可用或接管未完成返回 503，没有无界任务队列。待命进程反复失败时按 1..16 秒退避补位。池状态见 `/health.pool`。
 
-worker 通过 `posix_spawn` + exec 创建，子进程只保留标准描述符和初始 IPC fd，不继承 HTTP 监听器、状态锁或其他 worker 通道。两个二进制必须位于同一目录。Linux 接管使用 pidfd，目标为支持 pidfd 的 Linux 5.3+、glibc 2.34+ 环境，已在 Ubuntu 24.04/WSL 和镜像中验证。
+worker 通过 `posix_spawn` + exec 创建，子进程只保留标准描述符和初始 IPC fd，不继承 HTTP 监听器、状态锁或其他 worker 通道。两个二进制必须位于同一目录。工程分支接管使用 `SO_PEERPIDFD` 将 pidfd 原子绑定到已连接的 socket peer，避免读取 peer PID 后再打开数字 pidfd 的复用窗口；因此接管要求 Linux 6.5+、glibc 2.34+。本机 WSL 6.6 已确认支持，目标机器仍须验证；不支持时 fail closed，不向未验证进程发信号。
 
 ## IPC 与快照
 
-采用非阻塞 Unix `SOCK_SEQPACKET`，版本化 JSON，单消息最多 64 KiB。当前命令是 start/stop/final-ack，消息还包括 ready、快照和日志。初次连接通过 socketpair，之后可通过私有具名 socket 接管；没有开放 TCP IPC 端口。原始帧、压缩包和 FFmpeg 指针不跨进程。
+采用非阻塞 Unix `SOCK_SEQPACKET`，IPC v2 JSON，单消息最多 64 KiB。命令区分 start、固定 job/worker instance 的 stop、standby_stop、服务级 drain 和 final-ack，另有 accepted/stop_ack、ready、快照和日志。初次连接通过 socketpair，之后可通过私有具名 socket 接管；没有开放 TCP IPC 端口。原始帧、压缩包和 FFmpeg 指针不跨进程。不兼容版本保持可见并禁止新任务；第一轮不承诺与旧 worker 滚动兼容。
 
 worker 控制线程独立于媒体线程，约每 250 ms 上报一次完整快照。发送缓冲满时不排队堆积快照，下次重新生成最新值，`ipc_snapshots_coalesced` 计数。stop 的发送会在控制端重试，并受退出期限约束；最终快照重发直到收到确认。媒体线程只更新短锁保护的指标和有界日志队列，不等待 IPC。
 
@@ -34,13 +34,15 @@ worker 控制线程独立于媒体线程，约每 250 ms 上报一次完整快�
 
 容器中的监管入口只重新拉起异常退出的 HTTP 进程，避免触发容器级清理。完整容器/宿主机重启仍会结束所有 worker；当前没有磁盘任务数据库或跨主机迁移。监管入口只检测进程退出，尚不检测 HTTP 活着但完全卡死。
 
+监管入口区分 running/backoff/draining/exited；即使 SIGTERM 到达退避窗口，也启动一次 `--drain-only` 控制进程连接已有端点并有界清理，不监听 HTTP、不补 standby、不接受任务。重复信号不重置绝对期限。启动时校验 `worker-stop-timeout + 2秒 < NAKI_LAUNCHER_HARD_TIMEOUT < NAKI_CONTAINER_STOP_GRACE`，后两者默认20/30秒；容器实际 grace 必须与该声明一致。不兼容或无法验证的遗留进程会使 drain 报告失败，不能靠裸 PID 强杀。
+
 崩溃摘要、core 收集与符号化的当前边界见 [C 崩溃诊断](crashes.md)。
 
 0.4.0 在 HTTP 和每个 worker 旁各预启动一个独立 C collector，不计入上述待命 worker 数量。报告只保存限额现场/调用栈，不默认生成完整 core；抓栈子进程仅在故障发生时临时创建。监管入口按本轮假设不做自身崩溃注入。
 
 ## 每个任务额外记录首帧
 
-可传 `X-Request-ID`（最多 128 字节）关联客户请求，未提供时使用 job ID。`request_received` 记录完整 HTTP 请求进入业务回调的时刻；此时 HTTP 库已经收完请求体。
+可传 `X-Request-ID`（最多 128 个 ASCII 字母、数字、下划线或连字符）关联单次 HTTP 尝试，未提供时生成随机 128 位 ID，非法值返回 400。创建关联另存 create_request_id；创建和停止的业务重试使用 operation_id，详见 [服务接口](service.md)。`request_received` 记录完整 HTTP 请求进入业务回调的时刻；此时 HTTP 库已经收完请求体，ACK 等待不会重置它。
 
 不论 `frame_log` 开关，每个任务都尝试记录 `first_frame`：首个输出视频包一条；若首个输出关键帧不是同一包，再记录一条。事件包含请求、dispatch、worker 接单、该帧包 ingress、解码提交/完成、filter 提交/完成、编码提交/完成、mux 开始和 flush 完成的单调时间、分段耗时、总耗时以及帧类型/关键帧分类。最多两个首帧记录保存在 worker 内存中，接管后重发并标记 `replayed_after_reconnect=1`，可按 job/首帧分类去重。常规日志仍受有界队列丢失约束。
 
@@ -60,6 +62,6 @@ worker 控制线程独立于媒体线程，约每 250 ms 上报一次完整快�
 
 当前实现只面向上述小池，控制端以 10 ms 定时器有界扫描，完整快照约 4 Hz；没有宣称几百路容量。扩容应先改成每个连接/pidfd 的事件监听，拆分控制与日志/指标通道，心跳只携带小型进度摘要、完整指标低频或按需提供，限制总队列内存与每轮处理预算，并错开上报/重连时间。
 
-动态变更尚未实现。后续命令必须有 command_id、job/worker 身份、目标配置版本，区分 accepted/applied/rejected；由媒体 owner 在允许的帧/GOP/排空边界实施，回报生效版本/PTS。断线后对账、重复命令去重、过期命令拒绝和状态恢复是业务协议职责，socket 发送成功不能替代“已生效”。控制消息继续适合 socket；只有高带宽原始帧跨进程时才评估共享内存和缓冲区所有权。
+watermark 已接入带 job/output/operation 身份的[组件更新](component-updates.md)，由媒体 owner 结算应用，并在实际 write/flush 后另记 first_written。控制连接恢复时先交换归属/能力，再按每页最多 8 项对账操作结果，完成后开放新写入；周期快照投影当前 desired/effective。worker 正常结束前同样先导出结果。worker 死亡而结果未确认时，缓存查询显式返回 unknown/last_observed，不把旧 pending 当作仍在执行，也不推断 not_written。IPC 保持有界 JSON，不携带帧、包或原生指针；其他动态媒体命令仍需单独设计。
 
 参考：[Unix socket](https://man7.org/linux/man-pages/man7/unix.7.html)、[epoll](https://man7.org/linux/man-pages/man7/epoll.7.html)、[pidfd_open](https://man7.org/linux/man-pages/man2/pidfd_open.2.html)。

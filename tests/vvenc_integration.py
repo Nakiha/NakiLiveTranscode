@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real H.264/HEVC 8/10-bit -> VVC, independent decode, reordered trace and drain."""
 import json
+from event_logs import read_events
 import os
 import pathlib
 import signal
@@ -161,7 +162,7 @@ def run():
         server.wait(timeout=15)
         log.close(); error.close()
     assert server.returncode == 0
-    events = [json.loads(line) for line in (RUN / "server.jsonl").read_text().splitlines()]
+    events = read_events(RUN/"logs/events")
     ready = [event for event in events if event["event"] == "pipeline_ready"]
     assert len(ready) == len(cases)+1 and all("yuv420p10le" in event["filter"] for event in ready)
     for summary in summaries:

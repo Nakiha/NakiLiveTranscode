@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "watermark.h"
 #include "crash.h"
+#include "identity.h"
 #include <curl/curl.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -49,6 +50,13 @@ struct NakiWatermark {
     int pending,ready,required,startup_done,video_known,video_unsupported,activation_set;
     int64_t startup_deadline,activation_us,applied_pts,ready_us;
     char error[192];
+    NakiOperations *operations;Logger *logger;
+    char job_id[64],output_id[33],create_request_id[129];
+    NakiOperationHandle desired_operation,active_operation;
+    NakiOperationState desired_state;
+    struct {Asset *asset;NakiWatermarkConfig config;uint64_t revision;NakiOperationHandle operation;int present;} claim;
+    unsigned disposing;
+    int poisoned;
 };
 struct NakiWatermarkCompositor {
     AVFilterGraph *graph;
@@ -71,6 +79,46 @@ static void asset_free(Asset *a) {
     if(!a||atomic_fetch_sub(&a->refs,1)!=1)return;
     for(int i=0;i<a->count;i++)av_frame_free(&a->frames[i]);
     free(a);
+}
+/* WM mutex -> operation-store mutex is the sole lock order. */
+static int operation_state_locked(NakiWatermark *wm,NakiOperationHandle operation,NakiOperationState state,int owner,int error,const char *reason) {
+    if(!operation)return 0;
+    int ret=naki_operations_transition(wm->operations,operation,state,owner,error,reason,clock_us());
+    if(ret<0)wm->poisoned=AVERROR_INVALIDDATA;
+    if(!ret&&wm->desired_operation==operation)wm->desired_state=state;
+    return ret;
+}
+static void operation_event_locked(NakiWatermark *wm,NakiOperationHandle operation,const char *name) {
+    if(!operation||!wm->logger)return;
+    yyjson_mut_doc *doc=naki_operations_get(wm->operations,operation);
+    if(!doc) {wm->poisoned=AVERROR_INVALIDDATA;return;}
+    yyjson_mut_val *root=yyjson_mut_doc_get_root(doc);
+    yyjson_mut_obj_add_str(doc,root,"event",name);yyjson_mut_obj_add_strcpy(doc,root,"output_id",wm->output_id);yyjson_mut_obj_add_str(doc,root,"component","watermark");
+    yyjson_mut_obj_add_uint(doc,root,"revision",yyjson_mut_get_uint(yyjson_mut_obj_get(root,"accepted_revision")));
+    yyjson_mut_obj_add_strcpy(doc,root,"create_request_id",wm->create_request_id);
+    const char *origin=yyjson_mut_get_str(yyjson_mut_obj_get(root,"origin_request_id"));
+    if(origin)yyjson_mut_obj_add_strcpy(doc,root,"request_id",origin);
+    yyjson_mut_val *frame=!strcmp(name,"update_first_written")?yyjson_mut_obj_get(yyjson_mut_obj_get(root,"delivery"),"first_written"):
+        !strcmp(name,"update_applied")?yyjson_mut_obj_get(root,"applied_checkpoint"):NULL;
+    if(frame&&!yyjson_mut_is_null(frame)) {
+        yyjson_mut_obj_add_uint(doc,root,"frame_id",yyjson_mut_get_uint(yyjson_mut_obj_get(frame,"frame_id")));
+        yyjson_mut_obj_add_sint(doc,root,"source_pts",yyjson_mut_get_sint(yyjson_mut_obj_get(frame,"source_pts")));
+    }
+    logger_submit(wm->logger,NULL,doc);
+}
+static void dispose_generation(NakiWatermark *wm,Asset *asset,int counted) {
+    asset_free(asset);
+    if(counted) {pthread_mutex_lock(&wm->mutex);wm->disposing--;pthread_cond_broadcast(&wm->changed);pthread_mutex_unlock(&wm->mutex);}
+}
+static int claim_candidate_locked(NakiWatermark *wm) {
+    if(wm->claim.present)return 0;
+    if(!wm->ready||wm->prepared!=wm->accepted)return 0;
+    wm->claim.asset=wm->candidate;wm->candidate=NULL;wm->claim.config=wm->requested;
+    wm->claim.revision=wm->prepared;wm->claim.operation=wm->desired_operation;wm->claim.present=1;wm->ready=0;
+    wm->desired_state=NAKI_OP_APPLYING;
+    int ret=operation_state_locked(wm,wm->claim.operation,NAKI_OP_APPLYING,1,0,NULL);
+    if(!ret)operation_event_locked(wm,wm->claim.operation,"update_applying");
+    return ret;
 }
 static int aborted(Load *l) {
     return atomic_load(&l->wm->stop)||atomic_load(l->wm->cancel)||
@@ -293,9 +341,12 @@ static void *loader_main(void *opaque) {
     NakiWatermark *wm=opaque;
     for(;;) {
         pthread_mutex_lock(&wm->mutex);
-        while(!wm->pending&&!atomic_load(&wm->stop))pthread_cond_wait(&wm->changed,&wm->mutex);
+        while((!wm->pending||wm->claim.present||wm->disposing)&&!atomic_load(&wm->stop))pthread_cond_wait(&wm->changed,&wm->mutex);
         if(atomic_load(&wm->stop)) {pthread_mutex_unlock(&wm->mutex);break;}
         NakiWatermarkConfig c=wm->requested;uint64_t rev=wm->accepted;wm->pending=0;
+        NakiOperationHandle operation=wm->desired_operation;wm->desired_state=NAKI_OP_PREPARING;
+        operation_state_locked(wm,operation,NAKI_OP_PREPARING,0,0,NULL);
+        operation_event_locked(wm,operation,"update_preparing");
         int64_t deadline=clock_us()+(int64_t)c.load_timeout_ms*1000;
         if(wm->required&&!wm->startup_done)deadline=FFMIN(deadline,wm->startup_deadline);
         Asset *a=NULL;
@@ -311,12 +362,22 @@ static void *loader_main(void *opaque) {
         av_free(load.data);
         pthread_mutex_lock(&wm->mutex);Asset *discard=NULL;
         if(rev==wm->accepted&&!atomic_load(&wm->stop)) {
-            if(c.enabled&&wm->video_known&&wm->video_unsupported)ret=AVERROR(ENOSYS);
-            if(ret>=0) {
+            int cancelled=atomic_load(wm->cancel);
+            if(cancelled) {
+                wm->ready=0;wm->desired_state=NAKI_OP_CANCELLED;
+                operation_state_locked(wm,operation,NAKI_OP_CANCELLED,0,AVERROR(ECANCELED),"job cancelled before owner claim");
+                operation_event_locked(wm,operation,"update_cancelled");
+            } else if(c.enabled&&wm->video_known&&wm->video_unsupported)ret=AVERROR(ENOSYS);
+            if(cancelled) { /* Cancellation is settled above; never publish a late candidate. */ }
+            else if(ret>=0) {
                 discard=wm->candidate;wm->candidate=a;a=NULL;wm->prepared=rev;wm->ready=1;wm->ready_us=clock_us();
+                wm->desired_state=NAKI_OP_PREPARED;operation_state_locked(wm,operation,NAKI_OP_PREPARED,0,0,NULL);
+                operation_event_locked(wm,operation,"update_prepared");
                 *wm->error=0;
             } else {
                 wm->failed=rev;av_strerror(ret,wm->error,sizeof(wm->error));
+                wm->desired_state=NAKI_OP_FAILED;operation_state_locked(wm,operation,NAKI_OP_FAILED,0,ret,wm->error);
+                operation_event_locked(wm,operation,"update_failed");
             }
             pthread_cond_broadcast(&wm->changed);
         }
@@ -330,6 +391,7 @@ NakiWatermark *naki_watermark_open(const NakiWatermarkConfig *c,int64_t accepted
     pthread_condattr_t attr;pthread_condattr_init(&attr);pthread_condattr_setclock(&attr,CLOCK_MONOTONIC);
     pthread_cond_init(&wm->changed,&attr);pthread_condattr_destroy(&attr);
     wm->cancel=cancel;wm->requested=*c;wm->active_config=*c;wm->required=c->required;wm->accepted=1;wm->pending=c->enabled;
+    wm->desired_state=c->enabled?NAKI_OP_ACCEPTED:NAKI_OP_PREPARED;
     /* The initial configuration is the compatibility baseline until a prepared
      * replacement takes effect. Disabled configurations require no resource. */
     if(!c->enabled) {wm->active_revision=wm->prepared=1;wm->ready=1;wm->ready_us=clock_us();}
@@ -338,6 +400,58 @@ NakiWatermark *naki_watermark_open(const NakiWatermarkConfig *c,int64_t accepted
     if(pthread_create(&wm->loader,NULL,loader_main,wm)) {pthread_cond_destroy(&wm->changed);pthread_mutex_destroy(&wm->mutex);free(wm);return NULL;}
     return wm;
 }
+static Asset *queue_request_locked(NakiWatermark *wm,const NakiWatermarkConfig *c,uint64_t revision,NakiOperationHandle operation) {
+    NakiOperationHandle previous=wm->desired_operation;
+    if(previous) {
+        if(previous!=wm->active_operation&&previous!=wm->claim.operation&&
+           (wm->desired_state==NAKI_OP_ACCEPTED||wm->desired_state==NAKI_OP_PREPARING||wm->desired_state==NAKI_OP_PREPARED)) {
+            operation_state_locked(wm,previous,NAKI_OP_SUPERSEDED,0,0,"replaced before owner claim");
+            operation_event_locked(wm,previous,"update_superseded");
+        }
+        if(naki_operations_pin(wm->operations,previous,0,NAKI_OP_PIN_DESIRED))wm->poisoned=AVERROR_INVALIDDATA;
+    }
+    wm->requested=*c;wm->accepted=revision;wm->desired_operation=operation;wm->desired_state=NAKI_OP_ACCEPTED;
+    if(operation&&naki_operations_pin(wm->operations,operation,NAKI_OP_PIN_DESIRED,0))wm->poisoned=AVERROR_INVALIDDATA;
+    wm->pending=c->enabled;wm->ready=!c->enabled;*wm->error=0;
+    Asset *discard=wm->candidate;wm->candidate=NULL;if(discard)wm->disposing++;
+    if(!c->enabled) {
+        wm->prepared=revision;wm->ready_us=clock_us();wm->desired_state=NAKI_OP_PREPARED;
+        operation_state_locked(wm,operation,NAKI_OP_PREPARING,0,0,NULL);
+        operation_state_locked(wm,operation,NAKI_OP_PREPARED,0,0,NULL);
+        operation_event_locked(wm,operation,"update_prepared");
+    }
+    atomic_store(&wm->wanted,revision);pthread_cond_broadcast(&wm->changed);return discard;
+}
+int naki_watermark_bind(NakiWatermark *wm,NakiOperations *operations,const char *job,const char *output,const char *create_request,Logger *logger) {
+    if(!operations||!naki_id_valid(job,63)||!naki_id_valid(output,32)||!naki_id_valid(create_request,128))return AVERROR(EINVAL);
+    pthread_mutex_lock(&wm->mutex);int ret=wm->operations?AVERROR(EALREADY):0;
+    if(!ret) {wm->operations=operations;wm->logger=logger;strcpy(wm->job_id,job);strcpy(wm->output_id,output);strcpy(wm->create_request_id,create_request);}
+    pthread_mutex_unlock(&wm->mutex);return ret;
+}
+int naki_watermark_submit(NakiWatermark *wm,const NakiUpdateRequest *request,const char *origin,yyjson_mut_doc **result,char *e,size_t n) {
+    *result=NULL;pthread_mutex_lock(&wm->mutex);
+    NakiOperationIntent intent={.kind=NAKI_OP_UPDATE,.job_id=wm->job_id,.operation_id=request->operation_id,.output_id=request->output_id,
+        .fingerprint=request->fingerprint,.origin_request_id=origin,.expected_revision=request->expected_revision,.revision=wm->accepted+1};
+    int ret=wm->operations?naki_operations_replay(wm->operations,&intent,result):AVERROR(EINVAL);
+    if(ret!=-ENOENT) {if(ret<0)snprintf(e,n,"%s",ret==-EEXIST?"operation_id_conflict":"operation lookup unavailable");pthread_mutex_unlock(&wm->mutex);return ret;}
+    const char *error=NULL;
+    if(strcmp(request->output_id,wm->output_id))error="target.output_id: unknown logical output";
+    else if(wm->poisoned)error="operation_mapping_failed";
+    else if(atomic_load(&wm->stop)||atomic_load(wm->cancel))error="job_closing";
+    else if(request->expected_revision!=wm->accepted)error="revision_conflict";
+    else if(wm->accepted>=INT64_MAX)error="revision_exhausted";
+    NakiWatermarkConfig config;
+    if(!error&&naki_watermark_patch_apply(&wm->requested,&request->patch,&config,e,n))error=e;
+    if(!error&&config.enabled&&wm->video_unsupported)error="watermark: HDR or oversized canvas is unsupported";
+    if(error) {if(error!=e)snprintf(e,n,"%s",error);pthread_mutex_unlock(&wm->mutex);return AVERROR(EINVAL);}
+    NakiOperationHandle operation;ret=naki_operations_reserve(wm->operations,&intent,clock_us(),&operation);
+    if(ret<0) {snprintf(e,n,"%s",ret==-ENOSPC?"operation_capacity_exhausted":"operation_id_conflict");pthread_mutex_unlock(&wm->mutex);return ret;}
+    if(!ret) {*result=naki_operations_get(wm->operations,operation);pthread_mutex_unlock(&wm->mutex);return *result?0:AVERROR(ENOMEM);}
+    operation_event_locked(wm,operation,"update_accepted");
+    Asset *discard=queue_request_locked(wm,&config,intent.revision,operation);
+    *result=naki_operations_get(wm->operations,operation);ret=wm->poisoned?wm->poisoned:*result?0:AVERROR(ENOMEM);
+    pthread_mutex_unlock(&wm->mutex);dispose_generation(wm,discard,discard!=NULL);return ret;
+}
 int naki_watermark_request(NakiWatermark *wm,const NakiWatermarkConfig *c,uint64_t revision,char *e,size_t n) {
     pthread_mutex_lock(&wm->mutex);const char *error=NULL;
     if(atomic_load(&wm->stop)||atomic_load(wm->cancel))error="watermark: job is closing";
@@ -345,20 +459,10 @@ int naki_watermark_request(NakiWatermark *wm,const NakiWatermarkConfig *c,uint64
     else if(revision!=wm->accepted+1)error="watermark: revision must equal accepted_revision + 1";
     else if(c->required!=wm->required)error="watermark: startup.required is immutable";
     else if(wm->required&&!c->enabled)error="watermark: required watermark cannot be cleared";
+    else if(wm->operations)error="watermark: use an operation-bound request";
     if(error) {snprintf(e,n,"%s",error);pthread_mutex_unlock(&wm->mutex);return -1;}
-    wm->requested=*c;wm->accepted=revision;wm->pending=c->enabled;wm->ready=!c->enabled;*wm->error=0;
-    if(!c->enabled) {wm->prepared=revision;wm->ready_us=clock_us();}
-    /* Old candidate is not active; freeing here cannot affect the media owner. */
-    Asset *discard=wm->candidate;wm->candidate=NULL;
-    atomic_store(&wm->wanted,revision);pthread_cond_broadcast(&wm->changed);pthread_mutex_unlock(&wm->mutex);
-    asset_free(discard);return 0;
-}
-/* Mutex held; only the media owner (or startup gate) activates a generation. */
-static Asset *activate_candidate_locked(NakiWatermark *wm) {
-    Asset *old=wm->active;wm->active=wm->candidate;wm->candidate=NULL;
-    if(wm->active!=old)wm->activation_set=0;
-    wm->active_config=wm->requested;wm->active_revision=wm->prepared;wm->ready=0;
-    return old;
+    Asset *discard=queue_request_locked(wm,c,revision,0);pthread_mutex_unlock(&wm->mutex);
+    dispose_generation(wm,discard,discard!=NULL);return 0;
 }
 int naki_watermark_wait(NakiWatermark *wm) {
     pthread_mutex_lock(&wm->mutex);int ret=0;
@@ -371,25 +475,34 @@ int naki_watermark_wait(NakiWatermark *wm) {
         struct timespec ts={until/1000000,(until%1000000)*1000};pthread_cond_timedwait(&wm->changed,&wm->mutex,&ts);
     }
     if(!ret&&wm->required&&wm->ready_us>wm->startup_deadline)ret=AVERROR(ETIMEDOUT);
-    Asset *old=NULL;
     if(!ret) {
         wm->startup_done=1;
         /* Retain the initial required resource before opening the media source.
          * A concurrent hot update can replace its candidate but cannot remove
          * this startup generation and expose an unwatermarked first frame. */
         if(wm->required&&wm->ready) {
-            old=activate_candidate_locked(wm);
+            ret=claim_candidate_locked(wm);
         }
     }
-    pthread_mutex_unlock(&wm->mutex);asset_free(old);return ret;
+    pthread_mutex_unlock(&wm->mutex);return ret;
 }
 void naki_watermark_stop(NakiWatermark *wm) {
     if(!wm)return;
-    atomic_store(&wm->stop,1);pthread_mutex_lock(&wm->mutex);pthread_cond_broadcast(&wm->changed);pthread_mutex_unlock(&wm->mutex);
+    atomic_store(&wm->stop,1);pthread_mutex_lock(&wm->mutex);
+    if(wm->desired_operation&&wm->desired_operation!=wm->claim.operation&&
+       (wm->desired_state==NAKI_OP_ACCEPTED||wm->desired_state==NAKI_OP_PREPARING||wm->desired_state==NAKI_OP_PREPARED)) {
+        operation_state_locked(wm,wm->desired_operation,NAKI_OP_CANCELLED,0,0,"component closing before owner claim");
+        operation_event_locked(wm,wm->desired_operation,"update_cancelled");
+    }
+    if(wm->active_operation&&naki_operations_retire(wm->operations,wm->active_operation,clock_us()))wm->poisoned=AVERROR_INVALIDDATA;
+    wm->ready=0;wm->pending=0;
+    pthread_cond_broadcast(&wm->changed);pthread_mutex_unlock(&wm->mutex);
 }
 void naki_watermark_close(NakiWatermark **ptr) {
     NakiWatermark *wm=*ptr;if(!wm)return;
-    naki_watermark_stop(wm);pthread_join(wm->loader,NULL);asset_free(wm->active);asset_free(wm->candidate);
+    naki_watermark_stop(wm);pthread_join(wm->loader,NULL);
+    if(wm->claim.present&&wm->claim.operation)abort(); /* Only the owner may settle an applying claim. */
+    asset_free(wm->active);asset_free(wm->candidate);asset_free(wm->claim.asset);
     pthread_cond_destroy(&wm->changed);pthread_mutex_destroy(&wm->mutex);free(wm);*ptr=NULL;
 }
 void naki_watermark_status(NakiWatermark *wm,yyjson_mut_doc *doc) {
@@ -401,7 +514,7 @@ void naki_watermark_status(NakiWatermark *wm,yyjson_mut_doc *doc) {
     yyjson_mut_obj_add_uint(doc,v,"failed_revision",wm->failed);
     yyjson_mut_obj_add_strcpy(doc,v,"error",wm->error);
     yyjson_mut_obj_add_strcpy(doc,v,"content_sha256",wm->active?wm->active->hash:"");
-    yyjson_mut_obj_add_str(doc,v,"state",wm->failed==wm->accepted?"failed":wm->applied==wm->accepted?"applied":wm->ready?"prepared":"preparing");
+    yyjson_mut_obj_add_str(doc,v,"state",wm->failed==wm->accepted?"failed":wm->applied==wm->accepted?"applied":wm->claim.present&&wm->claim.revision==wm->accepted?"applying":wm->ready?"prepared":"preparing");
     yyjson_mut_obj_add_bool(doc,v,"required",wm->required);
     yyjson_mut_obj_add_bool(doc,v,"video_properties_known",wm->video_known);
     yyjson_mut_obj_add_bool(doc,v,"video_compatible",wm->video_known&&!wm->video_unsupported);
@@ -412,7 +525,19 @@ void naki_watermark_status(NakiWatermark *wm,yyjson_mut_doc *doc) {
     yyjson_mut_obj_add_uint(doc,v,"encoded_limit_bytes",WM_ENCODED_MAX);
     yyjson_mut_obj_add_uint(doc,v,"generation_raw_limit_bytes",WM_RAW_MAX);
     yyjson_mut_obj_add_uint(doc,v,"frame_limit",WM_FRAMES_MAX);
-    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"watermark",v);pthread_mutex_unlock(&wm->mutex);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"watermark",v);
+    yyjson_mut_val *components=yyjson_mut_obj(doc),*component=yyjson_mut_obj(doc);
+    const char *states[]={"accepted","preparing","prepared","applying","applied","failed","superseded","cancelled","stopping","stopped"};
+    yyjson_mut_obj_add_str(doc,component,"state",states[wm->desired_state]);
+    yyjson_mut_obj_add_uint(doc,component,"desired_revision",wm->accepted);yyjson_mut_obj_add_uint(doc,component,"effective_revision",wm->active_revision);
+    yyjson_mut_obj_add_val(doc,component,"desired",naki_watermark_config_json(doc,&wm->requested));
+    if(wm->active_revision)yyjson_mut_obj_add_val(doc,component,"effective",naki_watermark_config_json(doc,&wm->active_config));
+    else yyjson_mut_obj_add_null(doc,component,"effective");
+    yyjson_mut_obj_add_uint(doc,component,"claimed_revision",wm->claim.present?wm->claim.revision:0);
+    yyjson_mut_obj_add_bool(doc,component,"operation_api_bound",wm->operations!=NULL);
+    yyjson_mut_obj_add_int(doc,component,"invariant_error",wm->poisoned);
+    yyjson_mut_obj_add_val(doc,components,"watermark",component);yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"components",components);
+    pthread_mutex_unlock(&wm->mutex);
 }
 static int unsupported_color(const AVFrame *input) {
     return input->color_trc==AVCOL_TRC_SMPTE2084||input->color_trc==AVCOL_TRC_ARIB_STD_B67||
@@ -427,6 +552,9 @@ static Asset *reject_unsupported_update(NakiWatermark *wm) {
     Asset *discard=wm->candidate;wm->candidate=NULL;wm->ready=0;wm->pending=0;
     wm->failed=wm->accepted;
     snprintf(wm->error,sizeof(wm->error),"watermark: unsupported video properties; previous configuration retained");
+    wm->desired_state=NAKI_OP_FAILED;
+    operation_state_locked(wm,wm->desired_operation,NAKI_OP_FAILED,0,AVERROR(ENOSYS),wm->error);
+    operation_event_locked(wm,wm->desired_operation,"update_failed");
     atomic_store(&wm->wanted,0); /* Cancel an in-progress obsolete preparation. */
     return discard;
 }
@@ -434,14 +562,17 @@ int naki_watermark_video(NakiWatermark *wm,const AVFrame *input,int width,int he
     pthread_mutex_lock(&wm->mutex);
     /* Reserve a prepared close at this boundary before inspecting the first
      * video. A later pending enable cannot undo that effective configuration. */
-    Asset *old=NULL;
-    if(wm->ready&&wm->prepared==wm->accepted&&!wm->requested.enabled)old=activate_candidate_locked(wm);
+    int ret=0;
+    if(wm->ready&&wm->prepared==wm->accepted&&!wm->requested.enabled)ret=claim_candidate_locked(wm);
     wm->video_known=1;
     wm->video_unsupported=unsupported_color(input)||
         width<=0||height<=0||(uint64_t)width*height>WM_CANVAS_PIXELS_MAX;
-    int ret=wm->video_unsupported&&wm->active_config.enabled?AVERROR(ENOSYS):0;
+    int enabled=wm->claim.present?wm->claim.config.enabled:wm->active_config.enabled;
+    if(!ret&&wm->video_unsupported&&enabled)ret=AVERROR(ENOSYS);
+    if(!ret&&wm->poisoned)ret=wm->poisoned;
     Asset *discard=wm->video_unsupported&&!ret?reject_unsupported_update(wm):NULL;
-    pthread_mutex_unlock(&wm->mutex);asset_free(old);asset_free(discard);return ret;
+    if(discard)wm->disposing++;
+    pthread_mutex_unlock(&wm->mutex);dispose_generation(wm,discard,discard!=NULL);return ret;
 }
 void naki_watermark_compositor_free(NakiWatermarkCompositor **ptr) {
     NakiWatermarkCompositor *c=*ptr;if(!c)return;
@@ -485,51 +616,11 @@ static int compositor_open(NakiWatermarkCompositor **ptr,const AVFrame *f,AVRati
 fail:
     naki_watermark_compositor_free(&c);return ret;
 }
-int naki_watermark_frame(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame *frame,
-                         AVRational tb,int64_t source_us,uint64_t *revision) {
-    pthread_mutex_lock(&wm->mutex);Asset *old=NULL,*closed=NULL;
-    if(wm->ready&&wm->prepared==wm->accepted&&!wm->requested.enabled)closed=activate_candidate_locked(wm);
-    if(wm->video_unsupported||unsupported_color(frame)||frame->width<=0||frame->height<=0||
-       (uint64_t)frame->width*frame->height>WM_CANVAS_PIXELS_MAX) {
-        wm->video_known=1;wm->video_unsupported=1;
-        if(wm->active_config.enabled) {pthread_mutex_unlock(&wm->mutex);asset_free(closed);return AVERROR(ENOSYS);}
-        Asset *discard=reject_unsupported_update(wm);
-        uint64_t rev=wm->active_revision;
-        if(wm->applied!=rev) {wm->applied=rev;wm->applied_pts=source_us;}
-        *revision=rev;pthread_mutex_unlock(&wm->mutex);asset_free(closed);asset_free(discard);return 0;
-    }
-    if(!*ptr&&(wm->active||(wm->ready&&wm->candidate))) {
-        uint64_t preparing=wm->prepared;
-        pthread_mutex_unlock(&wm->mutex);
-        int setup=compositor_open(ptr,frame,tb);
-        pthread_mutex_lock(&wm->mutex);
-        if(setup<0) {
-            /* The optional first hot enable must not destroy an otherwise
-             * healthy bare stream if its new compositor cannot be prepared. */
-            if(wm->active) {pthread_mutex_unlock(&wm->mutex);asset_free(closed);return setup;}
-            Asset *discard=NULL;
-            if(wm->ready&&wm->prepared==preparing) {
-                discard=wm->candidate;wm->candidate=NULL;wm->ready=0;wm->failed=preparing;
-                av_strerror(setup,wm->error,sizeof(wm->error));
-            }
-            *revision=wm->applied;pthread_mutex_unlock(&wm->mutex);asset_free(closed);asset_free(discard);return 0;
-        }
-    }
-    if(wm->ready&&wm->prepared==wm->accepted) {
-        /* A close was already reserved above; only an enabled candidate can
-         * remain here, and compositor preparation has succeeded. */
-        old=activate_candidate_locked(wm);
-        /* applied is committed only after this frame was composed successfully. */
-    }
-    Asset *a=asset_ref(wm->active);NakiWatermarkConfig config=wm->active_config;
-    uint64_t rev=wm->active_revision;
-    if(a&&!wm->activation_set) {wm->activation_us=source_us;wm->activation_set=1;}
-    int64_t activation=wm->activation_us;
-    pthread_mutex_unlock(&wm->mutex);asset_free(closed);asset_free(old);
+static int compose_asset(NakiWatermarkCompositor *c,AVFrame *frame,AVRational tb,Asset *a,
+                         NakiWatermarkConfig config,int64_t activation,int64_t source_us) {
     int ret=0;
-    if(!a)goto applied;
-    if(!*ptr) {ret=AVERROR_INVALIDDATA;goto done;}
-    NakiWatermarkCompositor *c=*ptr;
+    if(!a)return 0;
+    if(!c)return AVERROR_INVALIDDATA;
     if(frame->width!=c->width||frame->height!=c->height||frame->format!=c->format) {ret=AVERROR(ENOSYS);goto done;}
     if((frame->colorspace==AVCOL_SPC_UNSPECIFIED?AVCOL_SPC_BT470BG:frame->colorspace)!=c->colorspace||
        (frame->color_range==AVCOL_RANGE_UNSPECIFIED?AVCOL_RANGE_MPEG:frame->color_range)!=c->range) {ret=AVERROR(ENOSYS);goto done;}
@@ -569,11 +660,132 @@ int naki_watermark_frame(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame
          * Copying them again appends duplicate side data (SEI, captions, ...). */
         av_frame_unref(frame);av_frame_move_ref(frame,out);
     }
-    av_frame_free(&out);if(ret<0)goto done;
-applied:
-    pthread_mutex_lock(&wm->mutex);
-    if(wm->applied!=rev) {wm->applied=rev;wm->applied_pts=source_us;}
-    pthread_mutex_unlock(&wm->mutex);*revision=rev;
+    av_frame_free(&out);
 done:
-    asset_free(a);return ret;
+    return ret;
+}
+/* Mutex held. Control never settles or discards an owner-held claim. */
+static Asset *fail_claim_locked(NakiWatermark *wm,int error,int cancelled) {
+    if(!wm->claim.present)return NULL;
+    NakiOperationHandle operation=wm->claim.operation;uint64_t revision=wm->claim.revision;
+    char reason[192];
+    if(cancelled)snprintf(reason,sizeof(reason),"owner stopped before application");
+    else av_strerror(error<0?error:AVERROR(ENODATA),reason,sizeof(reason));
+    operation_state_locked(wm,operation,cancelled?NAKI_OP_CANCELLED:NAKI_OP_FAILED,1,error,reason);
+    operation_event_locked(wm,operation,cancelled?"update_cancelled":"update_failed");
+    if(!cancelled)wm->failed=revision;
+    if(revision==wm->accepted) {
+        wm->desired_state=cancelled?NAKI_OP_CANCELLED:NAKI_OP_FAILED;
+        snprintf(wm->error,sizeof(wm->error),"%s",reason);
+    }
+    Asset *discard=wm->claim.asset;memset(&wm->claim,0,sizeof(wm->claim));if(discard)wm->disposing++;
+    pthread_cond_broadcast(&wm->changed);return discard;
+}
+void naki_watermark_owner_finish(NakiWatermark *wm,int error,int cancelled) {
+    if(!wm)return;
+    pthread_mutex_lock(&wm->mutex);Asset *discard=fail_claim_locked(wm,error,cancelled);
+    pthread_mutex_unlock(&wm->mutex);dispose_generation(wm,discard,discard!=NULL);
+}
+static int watermark_frame(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame *frame,AVRational tb,
+                           int64_t source_us,const NakiFrameIdentity *identity,uint64_t *revision,NakiOperationHandle *lease) {
+    if(lease)*lease=0;
+    pthread_mutex_lock(&wm->mutex);
+    if(wm->poisoned||(wm->operations&&!identity)) {
+        int error=wm->poisoned?wm->poisoned:AVERROR(EINVAL);pthread_mutex_unlock(&wm->mutex);return error;
+    }
+    if((atomic_load(&wm->stop)||atomic_load(wm->cancel))&&!wm->claim.present) {pthread_mutex_unlock(&wm->mutex);return AVERROR(ECANCELED);}
+    int ret=0;
+    if(wm->ready&&wm->prepared==wm->accepted&&!wm->requested.enabled)ret=claim_candidate_locked(wm);
+    int unsupported=wm->video_unsupported||unsupported_color(frame)||frame->width<=0||frame->height<=0||
+        (uint64_t)frame->width*frame->height>WM_CANVAS_PIXELS_MAX;
+    Asset *discard=NULL;
+    if(unsupported) {
+        wm->video_known=wm->video_unsupported=1;
+        int enabled=wm->claim.present?wm->claim.config.enabled:wm->active_config.enabled;
+        if(enabled)ret=AVERROR(ENOSYS);
+        else {discard=reject_unsupported_update(wm);if(discard)wm->disposing++;}
+    }
+    if(!ret&&!wm->claim.present&&wm->ready&&wm->prepared==wm->accepted)ret=claim_candidate_locked(wm);
+    if(ret<0) {
+        Asset *failed=fail_claim_locked(wm,ret,0);pthread_mutex_unlock(&wm->mutex);
+        dispose_generation(wm,discard,discard!=NULL);dispose_generation(wm,failed,failed!=NULL);return ret;
+    }
+    int claimed=wm->claim.present,optional_setup=claimed&&!wm->active&&!wm->required;
+    Asset *asset=asset_ref(claimed?wm->claim.asset:wm->active);
+    NakiWatermarkConfig config=claimed?wm->claim.config:wm->active_config;
+    uint64_t rev=claimed?wm->claim.revision:wm->active_revision;
+    NakiOperationHandle operation=claimed?wm->claim.operation:wm->active_operation,held=0;
+    int64_t activation=asset==wm->active&&wm->activation_set?wm->activation_us:source_us;
+    if(!claimed&&operation) {
+        ret=naki_operations_frame_acquire(wm->operations,operation);
+        if(!ret)held=operation;else wm->poisoned=AVERROR_INVALIDDATA;
+    }
+    pthread_mutex_unlock(&wm->mutex);dispose_generation(wm,discard,discard!=NULL);
+    if(ret>=0&&asset&&!*ptr)ret=compositor_open(ptr,frame,tb);
+    if(ret<0&&optional_setup) {
+        pthread_mutex_lock(&wm->mutex);discard=fail_claim_locked(wm,ret,0);
+        uint64_t fallback=wm->active_revision;NakiOperationHandle previous=wm->active_operation;
+        ret=previous?naki_operations_frame_acquire(wm->operations,previous):0;
+        if(!ret) {
+            wm->applied=fallback;wm->applied_pts=source_us;*revision=fallback;if(lease)*lease=previous;
+        } else wm->poisoned=AVERROR_INVALIDDATA;
+        pthread_mutex_unlock(&wm->mutex);asset_free(asset);dispose_generation(wm,discard,discard!=NULL);return ret;
+    }
+    if(ret>=0)ret=compose_asset(*ptr,frame,tb,asset,config,activation,source_us);
+    pthread_mutex_lock(&wm->mutex);Asset *old=NULL,*failed=NULL;
+    if(ret<0) {
+        if(claimed)failed=fail_claim_locked(wm,ret,0);
+    } else if(claimed) {
+        if(!wm->claim.present||wm->claim.revision!=rev)ret=wm->poisoned=AVERROR_INVALIDDATA;
+        else if(operation&&(ret=naki_operations_applied(wm->operations,operation,identity,1,clock_us()))<0)wm->poisoned=AVERROR_INVALIDDATA;
+        else {
+            NakiOperationHandle previous=wm->active_operation;old=wm->active;
+            wm->active=wm->claim.asset;wm->claim.asset=NULL;wm->active_config=config;wm->active_revision=rev;wm->active_operation=operation;
+            if(wm->accepted==rev)wm->desired_state=NAKI_OP_APPLIED;
+            wm->activation_us=activation;wm->activation_set=asset!=NULL;memset(&wm->claim,0,sizeof(wm->claim));
+            if(old)wm->disposing++;
+            if(operation) {
+                held=operation;
+                if(naki_operations_pin(wm->operations,operation,NAKI_OP_PIN_EFFECTIVE,0))wm->poisoned=AVERROR_INVALIDDATA;
+                if(wm->desired_operation==operation)wm->desired_state=NAKI_OP_APPLIED;
+                operation_event_locked(wm,operation,"update_applied");
+                if((atomic_load(&wm->stop)||atomic_load(wm->cancel))&&naki_operations_retire(wm->operations,operation,clock_us()))wm->poisoned=AVERROR_INVALIDDATA;
+            }
+            if(previous&&previous!=operation) {
+                if(naki_operations_retire(wm->operations,previous,clock_us())||naki_operations_pin(wm->operations,previous,0,NAKI_OP_PIN_EFFECTIVE))wm->poisoned=AVERROR_INVALIDDATA;
+            }
+            pthread_cond_broadcast(&wm->changed);
+        }
+    }
+    if(wm->poisoned&&ret>=0)ret=wm->poisoned;
+    if(ret<0&&claimed&&wm->claim.present&&!failed)failed=fail_claim_locked(wm,ret,0);
+    if(ret<0&&held) {
+        if(naki_operations_frame_release(wm->operations,held,clock_us()))wm->poisoned=AVERROR_INVALIDDATA;
+        held=0;
+    }
+    if(ret>=0) {
+        if(wm->applied!=rev) {wm->applied=rev;wm->applied_pts=source_us;}
+        *revision=rev;if(lease)*lease=held;
+    }
+    pthread_mutex_unlock(&wm->mutex);asset_free(asset);
+    dispose_generation(wm,old,old!=NULL);dispose_generation(wm,failed,failed!=NULL);return ret;
+}
+int naki_watermark_frame(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame *frame,AVRational tb,int64_t source_us,uint64_t *revision) {
+    return watermark_frame(wm,ptr,frame,tb,source_us,NULL,revision,NULL);
+}
+int naki_watermark_frame_tracked(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame *frame,AVRational tb,
+                                const NakiFrameIdentity *identity,uint64_t *revision,NakiOperationHandle *lease) {
+    if(!identity||!lease)return AVERROR(EINVAL);
+    return watermark_frame(wm,ptr,frame,tb,identity->source_us,identity,revision,lease);
+}
+int naki_watermark_release_frame(NakiWatermark *wm,NakiOperationHandle lease) {
+    return lease?naki_operations_frame_release(wm->operations,lease,clock_us()):0;
+}
+int naki_watermark_written(NakiWatermark *wm,NakiOperationHandle lease,const NakiFrameIdentity *frame,int64_t written_us) {
+    if(!lease)return 0;
+    pthread_mutex_lock(&wm->mutex);int first=0;
+    int ret=naki_operations_written_once(wm->operations,lease,frame,written_us,&first);
+    if(ret<0)wm->poisoned=AVERROR_INVALIDDATA;
+    else if(first)operation_event_locked(wm,lease,"update_first_written");
+    pthread_mutex_unlock(&wm->mutex);return ret;
 }

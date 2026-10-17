@@ -45,6 +45,15 @@ class ReuseTest(unittest.TestCase):
     def test_unchanged_sdk(self):
         self.assertEqual(sdk.verify(self.root, self.prefix)["schema_version"], 2)
 
+    def test_ffmpeg_object_key_includes_upstream_component(self):
+        before=sdk.sources(self.root)
+        upstream=self.root/sdk.DEPENDENCIES["vvenc"]/"source.c"
+        stamp=upstream.stat();upstream.write_text("changed public header or ABI\n")
+        os.utime(upstream,ns=(stamp.st_atime_ns,stamp.st_mtime_ns))
+        after=sdk.sources(self.root)
+        self.assertEqual(before["sources"]["ffmpeg"],after["sources"]["ffmpeg"])
+        self.assertNotEqual(sdk.object_key(before,"ffmpeg"),sdk.object_key(after,"ffmpeg"))
+
     def test_same_timestamp_source_change_and_untracked_source(self):
         source = self.root / sdk.DEPENDENCIES["ffmpeg"] / "source.c"
         stamp = source.stat()
