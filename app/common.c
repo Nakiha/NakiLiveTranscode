@@ -1,5 +1,6 @@
 #include "live.h"
 #include "crash.h"
+#include "frame_policy_config.h"
 #include <errno.h>
 #include <math.h>
 #include <stdlib.h>
@@ -116,6 +117,20 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     else yyjson_mut_obj_add_null(doc,startup,"request_to_first_key_mux_ms");
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"startup",startup);
     json_int(doc,"frame_log",job->config.frame_log);
+    json_str(doc,"timestamps_mode",job->config.policy.timestamps ? "source_all" : "legacy");
+    static const char *const intra_names[]={"legacy","follow_source","periodic_pts_grid","follow_source_with_max_gap"};
+    json_str(doc,"intra_mode",intra_names[job->config.policy.intra]);
+    json_int(doc,"intra_interval_ms",job->config.policy.interval_ms);
+    json_int(doc,"frame_id_last",job->frame_id_last); json_int(doc,"frames_selected",job->frames_selected);
+    json_int(doc,"frames_dropped_overload",job->frames_dropped_overload); json_int(doc,"frames_protected",job->frames_protected);
+    json_int(doc,"intra_requested",job->intra_requested); json_int(doc,"intra_confirmed",job->intra_confirmed);
+    json_int(doc,"timestamp_wraps",job->timestamp_wraps);
+    json_int(doc,"overload_enabled",job->config.policy.overload_levels!=0); json_int(doc,"overload_level",job->overload.level);
+    json_str(doc,"overload_state",job->overload.failed ? "failed" : job->overload.recovering ? "recovering" : job->overload.level ? "degraded" : "normal");
+    json_num(doc,"overload_oldest_ingress_age_ms",job->oldest_ingress_age_us/1000.0);
+    json_int(doc,"overload_escalations",job->overload.escalations); json_int(doc,"overload_recoveries",job->overload.recoveries);
+    json_num(doc,"overload_fail_write_in_progress_ms",job->overload_fail_write_us/1000.0);
+    json_str(doc,"overload_fail_write_phase",job->overload_fail_write_phase);
     json_str(doc,"encoder",job->config.encoder);
     json_str(doc,"encoder_preset",job->config.encoder_preset);
     json_str(doc,"encoder_profile",job->config.encoder_profile);
@@ -211,6 +226,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         for (size_t i=0; i<count; i++) if (!strcmp(seen[i], name)) { bad(error, cap, "Duplicate key"); goto end; }
         if (count == 32) { bad(error, cap, "Too many keys"); goto end; }
         seen[count++] = name;
+        if(!strcmp(name,"timestamps") || !strcmp(name,"intra") || !strcmp(name,"frame_selection"))continue;
         char *dest = NULL; size_t len = 0;
         if (!strcmp(name,"input")) { dest=c.input; len=sizeof(c.input); }
         else if (!strcmp(name,"output")) { dest=c.output; len=sizeof(c.output); }
@@ -248,9 +264,13 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         *field=(int)yyjson_get_sint(val);
     }
     if (!*c.input || !*c.output) {bad(error,cap,"input and output are required"); goto end;}
+    if(naki_policy_config_parse(root,&c.policy,error,cap))goto end;
     int vvc=!strcmp(c.encoder,"libvvenc");
     if (!vvc && strcmp(c.encoder,"libx264")) {bad(error,cap,"encoder must be libx264 or libvvenc"); goto end;}
     if(!*c.encoder_profile) strcpy(c.encoder_profile,vvc ? "live_3b_2s" : "default");
+    if(vvc && c.policy.timestamps==NAKI_TS_SOURCE_ALL && !strcmp(c.encoder_profile,"reference")) {
+        bad(error,cap,"source_all requires a live VVenC profile; reference uses a nominal frame time base"); goto end;
+    }
     if ((vvc && strcmp(c.encoder_profile,"reference") && strcmp(c.encoder_profile,"live_3b_2s") && strcmp(c.encoder_profile,"live_3b_2s_no_mctf")) ||
         (!vvc && strcmp(c.encoder_profile,"default"))) {bad(error,cap,"Invalid encoder_profile for selected encoder"); goto end;}
     if (!*c.encoder_preset) strcpy(c.encoder_preset,vvc ? "faster" : "veryfast");

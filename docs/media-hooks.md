@@ -36,7 +36,7 @@ video_packet 允许替换/扩展压缩载荷，净增长最多 64KiB；必须保
 - 每个事件还带 time_base，音频包本身保留所观察到的 PTS/DTS，视频包是编码器时间基下的 PTS/DTS。私有实现可以选择墙钟窗口或媒体时间口径，但不能把“在窗口内处理的音频”和“PTS 落在窗口内的声音”混称同一项。
 - 音频仍可能晚交织到达、分析线程也可能滞后；本次 I 画面已编出时不保证结果完整。私有逻辑须选择使用已完成结果、写无效标记、限时等待或失败；当前 packet callback 合同不允许等待，若需要等待，应另设计有界 pending AU/完成通知并计入时延，不能堵住 owner。
 
-input_picture_type 来自原解码画面，不能当成输出帧型。output_picture_type 仅在编码器 AV_PKT_DATA_QUALITY_STATS 有报告时提供，否则为 NONE；当前 x264 提供、VVenC wrapper 未提供。output_key 单独保留，也不等于能识别所有普通非 key I。video_packet 对所有 AU 调用，内网可以据编码器/码流分类选择边界；不要把 NONE 伪装成确定的 P/B/I。本轮未修改 FFmpeg/VVenC 来增加逐帧输出类型。
+input_picture_type 来自原解码画面，不能当成输出帧型。output_picture_type 在编码器 AV_PKT_DATA_QUALITY_STATS 有报告时提供，否则为 NONE；匹配工作区的 x264 和 VVenC wrapper 均提供实际 I/P/B，后者来自 access unit 的 sliceType。output_key 单独保留，不等于普通 I。video_packet 对所有 AU 调用，事件额外保留 frame_id、generation、源 PTS/time_base；这仍是随源码编译的内部接口。实际类型由 `tests/media_hooks_integration.py` 对 x264/TS、VVC/TS 和 VVC/MP4 逐帧独立解码核对，不能只验证“非 NONE”的计数。未匹配的旧库可能不提供类型，不可伪装成确定的 P/B/I。
 
 media_hook_ms 逐帧记录视频 callback 自身耗时；它属于 mux_ms（编码返回至实际写出）的子项。interleave_queue_ms 原有边界仍为编码返回至开始写入，包含包准备和 hook，不能在注册 hook 后把它当成纯队列驻留时间。整体阶段总和仍保持原口径。
 

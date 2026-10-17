@@ -8,6 +8,7 @@
 #include <libavcodec/async.h>
 #include "logger.h"
 #include "netstats.h"
+#include "frame_policy.h"
 
 typedef struct Config {
     char input[2048], output[2048], output_format[16];
@@ -17,6 +18,7 @@ typedef struct Config {
     int queue_capacity, encoder_threads, fps, pace;
     int frame_log, frame_log_every, slow_frame_ms;
     int audio_copy, mux_wait_ms;
+    NakiPolicyConfig policy;
 } Config;
 typedef struct Metric {
     uint64_t count;
@@ -60,6 +62,14 @@ typedef struct Job {
     char write_phase[24];
     uint64_t window_start_input, window_start_output, i_frames;
     AVCodecAsyncAutoStats auto_stats;
+    NakiInFlight policy_inflight;
+    NakiOverloadState overload;
+    int64_t oldest_ingress_age_us;
+    int policy_closing;
+    int64_t overload_fail_write_us;
+    char overload_fail_write_phase[24];
+    uint64_t frame_id_last, frames_selected, frames_dropped_overload, frames_protected;
+    uint64_t intra_requested, intra_confirmed, timestamp_wraps;
 } Job;
 
 int64_t now_us(void);
@@ -75,4 +85,7 @@ yyjson_mut_doc *job_report(Job *job, int final);
 void *pipeline_main(void *opaque);
 int config_parse(const char *body, size_t size, Config *out, char *error, size_t cap);
 int mkdir_tree(const char *path);
+void naki_policy_tick(Job *job, int64_t current_us);
+int naki_policy_track(Job *job, int kind, uint64_t id, int64_t ingress_us);
+int naki_policy_untrack(Job *job, int kind, uint64_t id);
 #endif

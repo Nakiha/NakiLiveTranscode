@@ -8,7 +8,8 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
 WORKDIR /src
 ENV NAKI_BUILD_ROOT=/opt/naki-build
 FROM toolchain AS ffmpeg-local
-COPY scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/archive-symbols.py scripts/
+COPY scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/archive-symbols.py scripts/sdk-identity.py scripts/
+COPY Dockerfile.ffmpeg ./
 COPY third_party/vvenc/ third_party/vvenc/
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/ experiments/decoder-20261016/ffmpeg-7.0.3/
 RUN NAKI_VVENC_SYMBOLS=/opt/naki-build/vvenc-symbols bash scripts/build-ffmpeg.sh && python3 scripts/archive-symbols.py \
@@ -21,11 +22,12 @@ FROM toolchain AS build
 COPY --from=ffmpeg /opt/naki-build/install/ /opt/naki-build/install/
 COPY --from=ffmpeg /opt/naki-build/ffmpeg-symbols/ /symbols/ffmpeg/
 COPY --from=ffmpeg /opt/naki-build/vvenc-symbols/ /symbols/vvenc/
-COPY scripts/build-service.sh scripts/archive-symbols.py scripts/
+COPY scripts/build-service.sh scripts/archive-symbols.py scripts/sdk-identity.py scripts/
 COPY CMakeLists.txt ./
 COPY app/ app/
 COPY third_party/yyjson/src/ third_party/yyjson/src/
-COPY tests/logger_test.c tests/network_probe.c tests/crash_fixture.c tests/crash_unwind_stall.c tests/live_mux_test.c tests/live_transport_fixture.c tests/media_hooks_fixture.c tests/
+COPY tests/logger_test.c tests/network_probe.c tests/probe_test.c tests/probe_budget_test.c tests/crash_fixture.c tests/crash_unwind_stall.c tests/live_mux_test.c tests/live_transport_fixture.c tests/media_hooks_fixture.c tests/
+COPY tests/frame_policy_test.c tests/frame_policy_config_test.c tests/
 ARG NAKI_MEDIA_HOOK_SOURCE=
 RUN NAKI_SKIP_FFMPEG=1 NAKI_MEDIA_HOOK_SOURCE="$NAKI_MEDIA_HOOK_SOURCE" bash scripts/build-service.sh
 ARG SOURCE_REVISION=unknown
@@ -41,6 +43,7 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/ scripts/
 COPY tests/ tests/
+COPY Dockerfile.ffmpeg ./
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/async_probe.c \
      experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_probe.c \
      experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_lifetime_test.c \

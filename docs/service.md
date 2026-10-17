@@ -50,7 +50,7 @@ bash scripts/build-service.sh
 
 机器可读接口规范见 [openapi.json](openapi.json)，包括全部当前路径、请求参数、范围和状态码。它是仓库静态文档，服务尚不提供 `/openapi.json` 或 Swagger UI。未来的有序滤镜、ROI 分析与颜色处理见 [处理链设计草案](pipeline-design.md)；草案字段当前会被拒绝。
 
-过载抽帧、I 帧/PTS/任意 SEI 透传尚未实现，后续合同与冲突处理见 [直播帧策略](live-frame-policy.md)。当前 PTS 追踪与 VFR GOP 支持不代表线上原始 PTS 逐刻度透传。
+工作区已加入可选的 `timestamps`、`intra` 和 `frame_selection`，见 [单路帧策略](frame-policy.md) 与[本地验证](validation-frame-policy.md)，尚待独立源码复审。未提供这三组时保留 legacy 路径。`source_all` 只承诺 demux 后显示时间轴的换算与容器量化，缺失/重复/回退明确失败；source_i_anchors、自动时间戳修复和任意 SEI 透传仍未实现。完整后续合同见 [直播帧策略设计](live-frame-policy.md)。
 
 内网业务可编译接入 [内部媒体 hook](media-hooks.md)，观察音频和编码后的视频包；默认空实现，没有新增 HTTP 参数，也没有启用响度检测或 SEI 注入。
 

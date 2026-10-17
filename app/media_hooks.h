@@ -31,6 +31,9 @@ typedef struct NakiVideoEncodedEvent {
     AVRational time_base; /* encoder time base; packet has not been rescaled */
     int64_t encoded_us;   /* immediately after successful receive_packet */
     int64_t input_sequence;
+    int64_t frame_id, source_pts;
+    AVRational source_time_base;
+    unsigned generation;
     enum AVPictureType input_picture_type;
     /* NONE if encoder statistics do not report it. Key != all intra pictures. */
     enum AVPictureType output_picture_type;

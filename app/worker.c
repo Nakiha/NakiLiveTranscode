@@ -51,6 +51,7 @@ static int start_job(Job *job, yyjson_doc *doc) {
     strcpy(job->id,id); strcpy(job->request_id,request_id); strcpy(job->log_path,path); strcpy(job->state,"starting");
     crash_set_job(job->id);
     job->started_us=yyjson_get_sint(yyjson_obj_get(root,"request_us"));
+    naki_overload_init(&job->overload);
     job->assigned_us=yyjson_get_sint(yyjson_obj_get(root,"assigned_us"));
     job->worker_received_us=now_us(); job->window_start_us=job->started_us;
     job->prewarmed=yyjson_get_bool(yyjson_obj_get(root,"prewarmed"));
@@ -136,6 +137,7 @@ int main(int argc,char **argv) {
         }
         if(fds[0].revents&(POLLERR|POLLHUP|POLLNVAL))channel_close(&channel);
         int64_t current=now_us();
+        if(running && !joined)naki_policy_tick(job,current);
         if(channel.fd<0 && !disconnected_us)disconnected_us=current;
         if(running && !joined && atomic_load(&job->done)) {
             pthread_join(job->thread,NULL); joined=1; next_snapshot=0;

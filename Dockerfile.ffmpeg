@@ -5,7 +5,8 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 ENV NAKI_BUILD_ROOT=/opt/naki-build
-COPY scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/archive-symbols.py scripts/
+COPY scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/archive-symbols.py scripts/sdk-identity.py scripts/
+COPY Dockerfile.ffmpeg ./
 COPY third_party/vvenc/ third_party/vvenc/
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/ experiments/decoder-20261016/ffmpeg-7.0.3/
 ARG FFMPEG_REVISION=unknown

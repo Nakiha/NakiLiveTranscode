@@ -359,6 +359,12 @@ static void handle_request(struct evhttp_request *req,void *opaque) {
         json_int(doc,"worker_stop_timeout_s",s->stop_timeout);
         json_str(doc,"http_library",event_get_version()); json_str(doc,"json_library",YYJSON_VERSION_STRING);
         json_int(doc,"async_api",AVCODEC_ASYNC_API_VERSION); json_int(doc,"network_observer_api",AVFORMAT_NETWORK_OBSERVER_VERSION);
+        json_int(doc,"frame_policy_api",1);
+#ifdef AVCODEC_LIVE_FRAME_INTRA_VERSION
+        json_int(doc,"frame_intra_api",AVCODEC_LIVE_FRAME_INTRA_VERSION);
+#else
+        json_int(doc,"frame_intra_api",0);
+#endif
         json_str(doc,"ffmpeg_version",av_version_info()); json_int(doc,"libavcodec_version",avcodec_version());
         pool_json(s,doc); reply(req,200,doc); return;
     }

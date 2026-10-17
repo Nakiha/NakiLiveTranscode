@@ -78,8 +78,63 @@
           "frame_log_every": {"type": "integer", "minimum": 1, "maximum": 1000000, "default": 1, "description": "Detail sampling only; metrics still count every written video frame. I/key/slow frames override sampling."},
           "slow_frame_ms": {"type": "integer", "minimum": 1, "maximum": 600000, "default": 200},
           "audio_copy": {"type": "boolean", "default": true, "description": "Bounded AAC/MP3 passthrough for FLV/TS; MP4 always video-only. No audio encoding."},
-          "mux_wait_ms": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50, "description": "FLV/TS monotonic wall interleaving wait; polled every 10ms. Excludes encode, scheduling stalls and blocking network I/O."}
-        }
+          "mux_wait_ms": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 50, "description": "FLV/TS monotonic wall interleaving wait; polled every 10ms. Excludes encode, scheduling stalls and blocking network I/O."},
+          "timestamps": {"$ref": "#/components/schemas/TimestampPolicy"},
+          "intra": {"$ref": "#/components/schemas/IntraPolicy"},
+          "frame_selection": {"$ref": "#/components/schemas/FrameSelection"}
+        },
+        "allOf": [
+          {"if": {"required": ["intra"]}, "then": {"required": ["timestamps"], "properties": {"timestamps": {"properties": {"mode": {"const": "source_all"}}}}}},
+          {"if": {"required": ["frame_selection"], "properties": {"frame_selection": {"required": ["mode"], "properties": {"mode": {"const": "live_drop_only"}}}}}, "then": {"required": ["timestamps", "intra"]}},
+          {"not": {"required": ["timestamps", "encoder", "encoder_profile"], "properties": {"encoder": {"const": "libvvenc"}, "encoder_profile": {"const": "reference"}, "timestamps": {"required": ["mode"], "properties": {"mode": {"const": "source_all"}}}}}}
+        ]
+      },
+      "TimestampPolicy": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"const": "legacy"}}},
+          {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {
+            "mode": {"const": "source_all"}, "missing_pts": {"const": "fail"}, "discontinuity": {"const": "fail"},
+            "unwrap": {"const": "source_program_clock"}, "output_precision": {"const": "container_quantized"}
+          }}
+        ],
+        "description": "Omission preserves legacy best-effort/synthetic behavior. source_all rejects missing/duplicate/backward display PTS, permits source gaps and identifiable clock wrap; output quantization must remain monotonic. No I-anchor retiming or dirty timestamp repair."
+      },
+      "IntraPolicy": {
+        "type": "object", "additionalProperties": false, "required": ["mode"],
+        "description": "Requires timestamps.mode=source_all. VVenC reference profile is rejected. Source I matches decoded picture type, not packet key. Startup remains IDR; later requested I are ordinary I, with actual encoder type confirmation. Missing optional constraints use the single accepted behavior below.",
+        "properties": {
+          "mode": {"enum": ["follow_source", "periodic_pts_grid", "follow_source_with_max_gap"]},
+          "period_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+          "max_gap_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+          "source_match": {"const": "decoded_intra_picture"}, "source_pts_holes": {"const": "allow"},
+          "refresh_type": {"const": "encoder_intra"}, "protect_from_drop": {"const": true}
+        },
+        "allOf": [
+          {"if": {"properties": {"mode": {"const": "periodic_pts_grid"}}}, "then": {"required": ["period_ms"], "not": {"required": ["max_gap_ms"]}}},
+          {"if": {"properties": {"mode": {"const": "follow_source_with_max_gap"}}}, "then": {"required": ["max_gap_ms"], "not": {"required": ["period_ms"]}}},
+          {"if": {"properties": {"mode": {"const": "follow_source"}}}, "then": {"not": {"anyOf": [{"required": ["period_ms"]}, {"required": ["max_gap_ms"]}]}}}
+        ]
+      },
+      "FrameSelection": {
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"const": "all"}}},
+          {"type": "object", "additionalProperties": false, "required": ["mode", "overload"], "properties": {"mode": {"const": "live_drop_only"}, "overload": {"$ref": "#/components/schemas/Overload"}}}
+        ],
+        "description": "Omission keeps all decoded pictures. live_drop_only requires explicit source_all and intra policies; first/source-I/due-I pictures are protected. No default overload thresholds."
+      },
+      "Overload": {
+        "type": "object", "additionalProperties": false,
+        "required": ["signal", "levels", "recover_below_ms", "recover_sustain_ms", "max_continuous_degraded_ms", "on_exhausted"],
+        "properties": {
+          "signal": {"const": "oldest_inflight_ingress_age_ms"},
+          "levels": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "object", "additionalProperties": false, "required": ["enter_ms", "sustain_ms", "keep_one_in"], "properties": {
+            "enter_ms": {"type": "integer", "minimum": 1, "maximum": 3600000}, "sustain_ms": {"type": "integer", "minimum": 0, "maximum": 3600000}, "keep_one_in": {"type": "integer", "minimum": 2, "maximum": 256}
+          }}},
+          "recover_below_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+          "recover_sustain_ms": {"type": "integer", "minimum": 0, "maximum": 3600000},
+          "max_continuous_degraded_ms": {"type": "integer", "minimum": 1, "maximum": 86400000}, "on_exhausted": {"const": "fail_task"}
+        },
+        "description": "Server also checks strictly increasing enter_ms and keep_one_in, positive recover_below_ms below level 1, and max_continuous_degraded_ms greater than recover_sustain_ms. Recovery must complete strictly before the continuous degraded deadline; exhaustion wins equality, including late polls. Worker polls about every 50ms independently of mux/control connection. No hard realtime guarantee across an uninterruptible codec call. Inflight metadata cap is 512; overflow fails."
       },
       "Error": {"type": "object", "required": ["event", "error"], "properties": {"event": {"const": "error"}, "error": {"type": "string"}, "unix_us": {"type": "integer"}, "monotonic_us": {"type": "integer"}, "process_id": {"type": "integer"}}},
       "Health": {

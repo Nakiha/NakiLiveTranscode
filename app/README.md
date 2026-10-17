@@ -2,6 +2,10 @@
 
 - `service.c`：libevent evhttp 控制面、任务生命周期、信号退出。
 - `pipeline.c`：有界输入队列、异步解码 + 自动调度、8/10-bit filter、libx264/libvvenc、封装写出及逐帧追踪。
+- `input_probe.c` / `input_probe.h`：带缓存的首条 H.264/HEVC 视频就绪探测；其他音轨/数据可继续晚发现，不在初始化阶段固定完整流集合。
+- `frame_policy.c` / `frame_policy.h`：纯策略核心，包含严格时间轴、接受后推进的 I 调度、因果选择和有界在途身份。
+- `frame_policy_config.c` / `frame_policy_config.h`：可选帧策略组的严格 JSON 合同；缺省兼容 legacy，过载阈值必须显式提供。
+- `frame_policy_runtime.c`：worker 独立轮询、在途年龄和过载失败；媒体 owner 仍独占 filter/encoder/mux。
 - `common.c` / `live.h`：yyjson 配置、JSONL 日志、状态与耗时摘要。
 - `logger.c` / `logger.h`：独立日志线程、有界队列、丢弃计数和追踪文件轮转。
 - `netstats.c` / `netstats.h`：FFmpeg TCP/UDP observer 的无日志原子计数与报表。

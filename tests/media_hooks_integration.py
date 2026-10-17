@@ -10,7 +10,24 @@ import tempfile
 import time
 
 import service_integration as service
-from live_mux_integration import inspect
+from live_mux_integration import inspect, PROBE
+from vvc_structure import decode_frames
+
+
+def check_picture_types(state, output, count):
+    """Compare reported encoder types in display order with actual coded pictures."""
+    prefix=pathlib.Path(state["log_path"])
+    assert not list(prefix.parent.glob(prefix.name+".*.active"))
+    rows=[json.loads(line) for path in prefix.parent.glob(prefix.name+".*.jsonl")
+          for line in path.read_text().splitlines()]
+    rows=sorted((row for row in rows if row["event"]=="frame"),key=lambda row:row["frame_id"])
+    decoded=decode_frames(PROBE,output)
+    assert len(rows)==len(decoded)==count,(len(rows),len(decoded),count)
+    assert [row["frame_id"] for row in rows]==list(range(1,count+1))
+    reported=[row["output_picture_type"] for row in rows]
+    actual=[row["pict_type"] for row in decoded]
+    assert set(reported)<=set("IPB") and reported==actual,(reported,actual)
+    return {"reported_display_types":"".join(reported),"decoded_display_types":"".join(actual)}
 
 
 def run():
@@ -56,13 +73,16 @@ def run():
             if mode=="valid":
                 assert report["audio"]>50 and report["video"]==state["packets_out"]==60,report
                 assert report["keys"]>=2 and report["error_code"]==0,report
-                if encoder=="libvvenc":assert report["reordered_pts"]>0 and report["known_types"]==0,report
-                else:assert report["known_types"]==60,report
+                # Both matching wrappers expose actual I/P/B through quality stats.
+                assert report["known_types"]==60,report
+                if encoder=="libvvenc":assert report["reordered_pts"]>0,report
                 streams=inspect(output)
                 copied=copy and fmt!="mp4"
                 assert len(streams)==1+int(copied) and int(streams[0]["nb_read_frames"])==60,streams
                 if copied:assert streams[1]["codec_name"]=="aac" and int(streams[1]["nb_read_frames"])>50,streams
                 service.check_trace(state,60,reordered=encoder=="libvvenc")
+                types=check_picture_types(state,output,60)
+                (evidence/"picture-types.json").write_text(json.dumps(types,indent=2))
             elif mode!="cancel":
                 assert report["error_code"]<0 and "media hook" in state["error"],(report,state)
             (evidence/"state.json").write_text(json.dumps(state,indent=2))
