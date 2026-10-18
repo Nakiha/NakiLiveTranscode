@@ -128,11 +128,11 @@ def preflight(args, selected, catalog):
     sanitized = values.get('NAKI_SANITIZERS') == 'ON'
     if sanitized != (args.profile == 'sanitize'):
         raise ValueError('Use a separate NAKI_SANITIZERS=ON build for sanitize; normal profiles require OFF')
-    if args.profile == 'full' and args.bin_dir != ROOT / 'out/bin':
-        raise ValueError('Full suite currently requires out/bin: some legacy drivers use that fixed path')
-    listing = subprocess.check_output(['ctest', '--test-dir', str(args.build_dir),
-                                      '--show-only=json-v1'], text=True, timeout=30)
-    tests = json.loads(listing)['tests']
+    tests = []
+    if args.include_native:
+        listing = subprocess.check_output(['ctest', '--test-dir', str(args.build_dir),
+                                          '--show-only=json-v1'], text=True, timeout=30)
+        tests = json.loads(listing)['tests']
     quick = []
     binary_files = set()
     for test in tests:
@@ -144,7 +144,7 @@ def preflight(args, selected, catalog):
             if binary.parent.resolve() != args.bin_dir:
                 raise ValueError('CTest binary directory differs from selected binaries: ' + str(binary))
             binary_files.add(binary)
-    if sorted(quick) != sorted(catalog['native_quick']):
+    if args.include_native and sorted(quick) != sorted(catalog['native_quick']):
         raise ValueError('CTest quick inventory differs from tests/service_suites.json')
     binary_files.update(args.bin_dir / name for name in PRODUCTION)
     for suite in selected:
@@ -172,6 +172,8 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('profile', choices=('quick', 'full', 'sanitize'))
     parser.add_argument('--list', action='store_true', help='Show direct and indirect coverage without running tests')
+    parser.add_argument('--suite', action='append', default=[], metavar='ID',
+                        help='Run only this suite in the profile; repeat to combine. Use native for CTest quick.')
     parser.add_argument('--build-dir', type=pathlib.Path, default=os.environ.get('NAKI_SERVICE_BUILD_DIR', cache / 'service'))
     parser.add_argument('--bin-dir', type=pathlib.Path, default=os.environ.get('NAKI_SERVICE_BIN', ROOT / 'out/bin'))
     parser.add_argument('--ffmpeg-symbols', type=pathlib.Path, default=os.environ.get('NAKI_FFMPEG_SYMBOLS', '/symbols/ffmpeg'))
@@ -184,14 +186,48 @@ def parse_args(argv=None):
     return args
 
 
+def select_suites(args, catalog):
+    available = [suite for suite in catalog['suites'] if args.profile in suite['profiles']]
+    allowed = {'native', *(suite['id'] for suite in available)}
+    unknown = set(args.suite) - allowed
+    if unknown:
+        raise ValueError('Suites unavailable in ' + args.profile + ': ' + ', '.join(sorted(unknown)))
+    if len(args.suite) != len(set(args.suite)):
+        raise ValueError('Duplicate --suite selection')
+    args.include_native = not args.suite or 'native' in args.suite
+    return [suite for suite in available if not args.suite or suite['id'] in args.suite]
+
+
+def commands_for(args, selected):
+    commands = []
+    if args.profile != 'quick':
+        verify = [sys.executable, str(ROOT / 'scripts/sdk-expected.py'), 'verify',
+                  '--prefix', str(args.cache / 'install')]
+        commands.append(('sdk-consumer', verify, 120))
+    if args.include_native:
+        commands.append(('native', ['ctest', '--test-dir', str(args.build_dir), '-L', 'quick',
+                                    '--output-on-failure', '--no-tests=error'], 240))
+    for suite in selected:
+        command = [sys.executable, str(ROOT / suite['script']), *suite.get('args', [])]
+        if suite.get('native_symbols'):
+            command.extend(['--ffmpeg-symbols', str(args.ffmpeg_symbols), '--vvenc-symbols', str(args.vvenc_symbols)])
+        commands.append((suite['id'], command, suite.get('timeout_s', 300)))
+    return commands
+
+
 def main(argv=None):
     args = parse_args(argv)
     catalog = json.loads(CATALOG.read_text())
-    selected = [suite for suite in catalog['suites'] if args.profile in suite['profiles']]
+    selected = select_suites(args, catalog)
     if args.list:
-        print(json.dumps({'native_ctest_quick': catalog['native_quick'], 'suites': selected,
+        print(json.dumps({'native_ctest_quick': catalog['native_quick'] if args.include_native else [], 'suites': selected,
                           'separate_gates': catalog['separate_gates']}, indent=2))
         return 0
+    return execute_run(args, catalog, selected)
+
+
+def execute_run(args, catalog, selected, commands=None, metadata=None):
+    """Common preflight, process bounds and evidence for tests and benchmarks."""
     out = ROOT / 'out'
     out.mkdir(exist_ok=True)
     if args.result_dir:
@@ -205,11 +241,15 @@ def main(argv=None):
     before = source_snapshot()
     write_json(run / 'source-before.json', before)
     summary = {'schema_version': 1, 'profile': args.profile, 'status': 'running',
+               'scope': 'selected' if args.suite else 'profile',
+               'selected_suites': (['native'] if args.include_native else []) + [s['id'] for s in selected],
                'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                'source_sha256': before['sha256'], 'host': platform.platform(),
                'build_dir': str(args.build_dir), 'bin_dir': str(args.bin_dir),
                'steps': [], 'separate_gates': catalog['separate_gates'],
                'instrumentation': 'Application/yyjson/test helpers only; native SDK and system libraries are not instrumented. Deliberate fatal/symbol suites run in full, not sanitize.' if args.profile == 'sanitize' else 'Normal build'}
+    if metadata:
+        summary['benchmark'] = metadata
     summary['source_revision'] = os.environ.get('NAKI_SOURCE_REVISION')
     if (ROOT / '.git').exists() and shutil.which('git'):
         summary['source_revision'] = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True, timeout=30).strip()
@@ -224,17 +264,7 @@ def main(argv=None):
             manifest = prefix / 'share/naki/ffmpeg-build.json'
             summary['sdk'] = {'manifest_sha256': digest(manifest),
                               'identity': json.loads(manifest.read_text())['identity']}
-        commands = []
-        if args.profile != 'quick':
-            verify = [sys.executable, str(ROOT / 'scripts/sdk-expected.py'), 'verify', '--prefix', str(prefix)]
-            commands.append(('sdk-consumer', verify, 120))
-        commands.append(('native', ['ctest', '--test-dir', str(args.build_dir), '-L', 'quick',
-                                    '--output-on-failure', '--no-tests=error'], 240))
-        for suite in selected:
-            command = [sys.executable, str(ROOT / suite['script']), *suite.get('args', [])]
-            if suite.get('native_symbols'):
-                command.extend(['--ffmpeg-symbols', str(args.ffmpeg_symbols), '--vvenc-symbols', str(args.vvenc_symbols)])
-            commands.append((suite['id'], command, suite.get('timeout_s', 300)))
+        commands = commands if commands is not None else commands_for(args, selected)
         for index, (name, command, timeout) in enumerate(commands, 1):
             print(f'[{index}/{len(commands)}] {name}', flush=True)
             previous = set(out.iterdir())

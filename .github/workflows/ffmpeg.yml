@@ -35,7 +35,7 @@ jobs:
           submodules: recursive
           persist-credentials: false
       - name: Check SDK publication policy
-        run: python3 tests/workflow_publication_test.py
+        run: python3 tests/checks/workflow_publication_test.py
       - id: key
         name: Find matching dependency release
         env:

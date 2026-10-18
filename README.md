@@ -21,7 +21,9 @@
 
 ## 当前验证状态（2026-10-18）
 
-第四批模块拆分候选的 full **34 步通过**（含 15 个原生测试），应用/yyjson/helper ASan/UBSan **6 步通过**；两套均含 86 个媒体生命周期场景。逐职责 quick/受影响套件、源码/ELF/SDK 绑定及拆分前后对照见[验证记录](docs/validation-core-refactor.md)。第五批只更新文档，不将本次静态检查冒充新的媒体回归；证据绑定具体源码窗口，不以未提交工作树的 HEAD 代替。
+本次目录与接口整理：full 35 步、应用 ASan/UBSan 6 步、纯服务构建与自定义目录选测通过；性能入口完成短时 smoke，见[本次验证](docs/validation-organization.md)。
+
+下述为第四批冻结源码窗口的验证，不能自动覆盖后续目录/接口整理。第四批模块拆分候选的 full **34 步通过**（含 15 个原生测试），应用/yyjson/helper ASan/UBSan **6 步通过**；两套均含 86 个媒体生命周期场景。逐职责 quick/受影响套件、源码/ELF/SDK 绑定及拆分前后对照见[验证记录](docs/validation-core-refactor.md)。第五批只更新文档，不将本次静态检查冒充新的媒体回归；证据绑定具体源码窗口，不以未提交工作树的 HEAD 代替。
 
 本机证据未覆盖外部可信 HTTPS 水印成功样例（未配置 `NAKI_TEST_HTTPS_URL`）、实际 Docker 镜像/smoke、远程 Actions、真实 Filebeat 采集、目标机器 CPU/RSS/PID/FD 容量与 24/72 小时 soak、迁移回滚和生产验收。镜像和远程流程以对应 PR/提交的检查结果单独确认；最新源码复查见[合并前复查](docs/validation-final-review.md)。核心 native SDK/系统库未重新插桩，没有 TSan；旧版本的镜像/HTTPS 或 n7 性能报告不补齐这些门槛。
 
@@ -56,7 +58,7 @@ VVC 默认配置为 `live_3b_2s`，PTS 顺序 I BBB P…，以首帧 PTS 为起�
 
 Linux amd64 CI 配置将 FFmpeg SDK 构建与应用构建分开复用；通过门槛的 main 构建分别保存镜像包和按 Build ID 索引的独立符号。源码本机通过不代表远程 CI 或发布通过，须核对相应提交的检查和产物，见 [CI 与构建产物](docs/ci.md)。
 
-构建后运行 `bash scripts/test-service.sh quick` 做快速检查，`bash scripts/test-service.sh full` 做完整功能回归，`bash scripts/test-sanitizers.sh` 做独立的应用 ASan/UBSan 检查。完整回归需要匹配的 FFmpeg/VVenC 符号目录；覆盖范围、参数与结果口径见 [测试入口与基线](docs/testing.md)。
+构建后运行 `bash scripts/test-service.sh quick` 做快速检查，`bash scripts/test-service.sh full` 做完整功能回归，`bash scripts/test-sanitizers.sh` 做独立的应用 ASan/UBSan 检查。可用 `--suite service --suite live-mux` 运行选定套件；独立性能入口为 `scripts/bench-service.sh`，见[性能测量](docs/benchmarking.md)。完整回归需要匹配的 FFmpeg/VVenC 符号目录；覆盖范围、参数与结果口径见 [测试入口与基线](docs/testing.md)。
 
 ## 目录
 

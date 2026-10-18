@@ -19,6 +19,7 @@ export PKG_CONFIG_PATH="$prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PAT
 cmake -S "$root" -B "$service_build" -DCMAKE_BUILD_TYPE="${NAKI_BUILD_TYPE:-RelWithDebInfo}" \
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$service_bin" -DNAKI_FFMPEG_PREFIX="$prefix" \
     -DNAKI_SANITIZERS="${NAKI_SANITIZERS:-OFF}" \
+    -DBUILD_TESTING="${NAKI_BUILD_TESTING:-ON}" \
     -DNAKI_MEDIA_HOOK_SOURCE="${NAKI_MEDIA_HOOK_SOURCE:-}"
 cmake --build "$service_build" -j"${FFMPEG_LIVE_BUILD_JOBS:-8}"
 printf 'Service: %s/naki-live\nClient: %s/naki-live-ctl\n' "$service_bin" "$service_bin"

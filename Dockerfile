@@ -28,34 +28,9 @@ COPY out/expected-sdk.json /src/expected-sdk.json
 COPY CMakeLists.txt ./
 COPY app/ app/
 COPY third_party/yyjson/src/ third_party/yyjson/src/
-COPY tests/logger_test.c tests/network_probe.c tests/probe_test.c tests/probe_budget_test.c tests/crash_fixture.c tests/crash_unwind_stall.c tests/live_mux_test.c tests/live_transport_fixture.c tests/media_hooks_fixture.c tests/
-COPY tests/frame_policy_test.c tests/frame_policy_config_test.c tests/
-COPY tests/watermark_config_test.c tests/
-COPY tests/watermark_render_test.c tests/
-COPY tests/watermark_state_test.c tests/
-COPY tests/watermark_operation_test.c tests/
-COPY tests/branch_queue_test.c tests/
-COPY tests/video_filter_test.c tests/
-COPY tests/output_video_probe.c tests/
-COPY tests/live_input_poll_test.c tests/
-COPY tests/identity_intent_test.c tests/
-COPY tests/control_spec_test.c tests/
-COPY tests/control_connect_fault.c tests/
-COPY tests/output_finalize_barrier.c tests/
-COPY tests/event_logger_test.c tests/
-COPY tests/logger_submit_test.c tests/pipeline_lifecycle_fixture.c tests/pipeline_lifecycle_fixture.h tests/
-COPY tests/run_native_test.py tests/
-COPY tests/component_update_test.c tests/
-COPY tests/operation_store_test.c tests/
-COPY tests/operation_cache_test.c tests/
-COPY tests/operation_send_order.c tests/
-COPY tests/audio_signature_test.c tests/
-COPY tests/audio_change_fixture.c tests/
-COPY tests/video_rate_test.c tests/video_rate_guess.c tests/
-COPY tests/sei_test.c tests/sei_fixture.c tests/sei_decode_probe.c tests/
-COPY tests/event_write_fault.c tests/
-COPY tests/control_connect_fault.c tests/
-COPY tests/multi_output_integration.py tests/
+COPY tests/unit/ tests/unit/
+COPY tests/fixtures/ tests/fixtures/
+COPY tests/support/ tests/support/
 ARG NAKI_MEDIA_HOOK_SOURCE=
 ARG DEPENDENCY_KEY=
 RUN NAKI_SKIP_FFMPEG=1 NAKI_EXPECTED_SDK_MANIFEST=/src/expected-sdk.json \

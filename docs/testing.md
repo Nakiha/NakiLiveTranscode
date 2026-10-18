@@ -1,8 +1,8 @@
 # 测试入口与基线
 
-适用于 Linux/WSL 的实验服务。先通过 `bash scripts/build-service.sh` 构建当前源码；已有 SDK 可设置 `NAKI_SKIP_FFMPEG=1`，消费期望和字节校验仍执行。Python 要求 3.11+，编译任务数可用 FFMPEG_LIVE_BUILD_JOBS 设置。当前第四批候选的 full 34 步、应用 sanitizer 6 步及两套各 86 场景见[核心整理验证](validation-core-refactor.md)；文末第一批、[日志](validation-logger-submit.md)和[生命周期](validation-pipeline-lifecycle.md)分别保留各自冻结窗口，不改写历史计数。
+适用于 Linux/WSL 的实验服务。先通过 `bash scripts/build-service.sh` 构建当前源码；已有 SDK 可设置 `NAKI_SKIP_FFMPEG=1`，消费期望和字节校验仍执行。Python 要求 3.11+，编译任务数可用 FFMPEG_LIVE_BUILD_JOBS 设置。历史第四批源码窗口的 full 34 步、应用 sanitizer 6 步及两套各 86 场景见[核心整理验证](validation-core-refactor.md)；文末第一批、[日志](validation-logger-submit.md)和[生命周期](validation-pipeline-lifecycle.md)分别保留各自冻结窗口，不改写历史计数。
 
-## 三个入口
+## 三个功能测试入口
 
 ```sh
 bash scripts/test-service.sh quick
@@ -18,7 +18,35 @@ bash scripts/test-sanitizers.sh
 | full | quick 加原 ci-test.sh 的全部 Python 套件，以及单/多输出生命周期矩阵：构建缓存、媒体/水印/SEI/音频/帧率/队列、真实传输、控制与接管、健康、finalize、崩溃、独立符号；保留原 VVC 单次测量 | 不包含实际 Docker smoke、外部采集、目标机器容量、24/72 小时 soak；单次 VVC 结果不是稳定性能结论 |
 | sanitizers | 独立 ASan/UBSan 构建，15 个快速原生测试及 service、multi-output、watermark-review、lifecycle-media；默认启用 leak 检查及遇错停止 | 不重新插桩 FFmpeg、VVenC、系统 libevent/libcurl/libx264/libunwind；不证明整个媒体栈无泄漏/竞态，也不覆盖 TSan |
 
+构建默认启用测试目标，可用 `NAKI_BUILD_TESTING=OFF` 只构建四个服务可执行文件；此时不能运行 native/完整 profile，但可用相应构建目录和 `--bin-dir` 运行不依赖 helper 的选定套件。
+
 quick/full 需要普通 `NAKI_SANITIZERS=OFF` 构建。sanitizers 使用 Debug 构建和同一已验证 native SDK，将 CMake 缓存放在 `$NAKI_BUILD_ROOT/service-sanitizers`，二进制放入新的 `out/sanitizers-*/bin`，不替换普通 `out/bin`。普通构建仍默认 RelWithDebInfo（可用 `NAKI_BUILD_TYPE` 显式覆盖），编译告警门槛保持。既有 fatal handler 和故意非法写入探针的局部插桩边界保持原样；故意崩溃、preload 故障和离线符号矩阵仍在 full 中正常执行。
+
+## 按套件运行
+
+```sh
+# 保留 full 的 SDK consumer gate，只运行这两套；不会顺带运行 native。
+bash scripts/test-service.sh full --suite service --suite live-mux
+bash scripts/test-service.sh quick --suite native
+bash scripts/test-service.sh full --suite lifecycle-media --list
+```
+
+`--suite ID` 可重复，ID 必须属于所选 profile；未知、跨 profile 或重复选择均失败。执行顺序遵循清单，默认不带参数时仍执行完整 profile。`native` 表示全部 15 项 CTest quick；缺依赖和失败不会隐式跳过。结果中的 `scope=selected` 和 `selected_suites` 明确区分局部通过与完整回归通过。非 quick 选择始终执行 SDK gate；符号目录只在选择 symbols 时要求。
+
+本次新增 organization 检查后，quick 是 7 个步骤，full 是 35 个步骤，sanitize 仍是 6 个步骤；历史记录中的旧计数不回写。独立性能入口见[性能测量](benchmarking.md)，不以性能测量替代功能门槛。
+
+## 测试源码目录
+
+| 目录 | 内容 |
+| --- | --- |
+| `tests/unit/` | C 原生模块测试 |
+| `tests/integration/` | 文件、实流、控制、恢复、故障及符号集成驱动 |
+| `tests/fixtures/` | 媒体生成器、独立探针、故障包装器 |
+| `tests/support/` | 无导入副作用的 HTTP/启动/媒体/图片/进程工具；间接 budget 场景及 native wrapper |
+| `tests/checks/` | 入口、模块边界、SDK、发布绑定和维护工具检查 |
+| `tests/benchmarks/` | 独立媒体负载与 VVenC 时延测量、logger 微基准源码 |
+
+公共启动器显式接收本套件结果目录，不借用另一个套件的 RUN；端口、目录和进程只在运行时创建。Python 场景仍各自拥有服务停止、故障解除和样本语义。原路径迁移表保存在本次整理证据中；专题脚本可通过新路径直接执行。
 
 ## 依赖与选择参数
 
@@ -26,7 +54,7 @@ quick/full 需要普通 `NAKI_SANITIZERS=OFF` 构建。sanitizers 使用 Debug �
 - full 另需 make、GCC、pkg-config、系统 ffmpeg/ffprobe（用于生成与独立检查样本）、OpenSSL CLI、addr2line/nm、带 CLI 的匹配 native SDK、匹配的 FFmpeg/VVenC DWARF。传输服务和端口均为测试本地资源；音频签名套件会下载带校验的 FFmpeg FATE HE-AAC fixture，需要相应 HTTPS 网络。
 - 已有 HE-AAC 样本可通过 `NAKI_HE_AAC_FIXTURE` 提供，套件仍核对固定大小和 SHA-256；不能用未校验的替代样本让检查通过。
 - 默认 SDK/CMake 路径遵循 `NAKI_BUILD_ROOT`，缺省为 `$XDG_CACHE_HOME/naki-live-transcode-n9` 或 `$HOME/.cache/naki-live-transcode-n9`。`--build-dir`/`NAKI_SERVICE_BUILD_DIR` 可指定应用 CMake 目录。
-- `--bin-dir`/`NAKI_SERVICE_BIN` 指定可执行目录；构建入口也支持这两个目录变量，应使用绝对路径。full 暂时要求仓库 `out/bin`，因部分历史驱动使用固定路径；显式指定其他目录会报错，不会悄悄测错版本。
+- `--bin-dir`/`NAKI_SERVICE_BIN` 指定可执行目录；构建入口也支持这两个目录变量，应使用绝对路径。quick/full/sanitize 均将该路径传给相应驱动；原生测试还会核对 CTest 注册的可执行目录，拒绝测错构建。
 - 测试镜像通过独立的 `/src/expected-sdk.json` 继续执行 SDK gate；三份 decoder probe 源码单独放在 `tests/decoder-probes`，由 `NAKI_DECODER_PROBE_SOURCE` 指定，不伪装成不完整的 FFmpeg checkout。源码完整的本地环境继续使用子模块原路径。
 - full 的 native 符号默认 `/symbols/ffmpeg`、`/symbols/vvenc`，可用上述参数或 `NAKI_FFMPEG_SYMBOLS`/`NAKI_VVENC_SYMBOLS` 指定。sanitizers 不要求这些符号目录。
 

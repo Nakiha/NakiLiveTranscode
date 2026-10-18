@@ -33,7 +33,7 @@ FFmpeg 仍保留独立 Git 历史，不能只提交父仓库：
 2. 在父仓库提交新的子模块 gitlink，并推送父仓库。
 3. CI 的依赖键包含 FFmpeg gitlink 和构建配方。新的库提交触发新 SDK、独立符号，再构建和验证服务镜像；只改应用则复用 SDK。
 
-`tests/decoder_integration.py` 会生成短 H.264/HEVC 样本，编译并运行 fork 的探针，验证 B 帧像素/元数据一致性、前台 gate、关闭/flush、容量 1 重放、多 owner 预算与默认预算生命周期。它不依赖本机冻结媒体，已纳入 CI。大规格、10-bit、变分辨率及长样本回归仍使用子模块专项脚本和新的结果目录；旧性能数据不代表升级后的性能。
+`tests/integration/decoder_integration.py` 会生成短 H.264/HEVC 样本，编译并运行 fork 的探针，验证 B 帧像素/元数据一致性、前台 gate、关闭/flush、容量 1 重放、多 owner 预算与默认预算生命周期。它不依赖本机冻结媒体，已纳入 CI。大规格、10-bit、变分辨率及长样本回归仍使用子模块专项脚本和新的结果目录；旧性能数据不代表升级后的性能。
 
 ## 本地 SDK 来源与复用检查
 
@@ -45,9 +45,9 @@ FFmpeg 配置键包括源码位置、configure/构建配方及编译环境；另
 
 需要重新 configure 时，同样先撤销 `.naki-configure-key`，成功返回后才原子提交新配置键；失败或提交前中断不会留下可复用旧键。生成的 `config.h`、`ffbuild/config.mak`、`Makefile` 缺失也触发重新配置。配置成功后发生的编译失败可保留该完整配置键，对象复用仍受整个 SDK 提交凭据约束。
 
-FFmpeg/VVenC 内容改变或无成功凭据时，只清理各自专用构建目录中的对象；代价是内容变化时整组件重编，而不是依赖源码 mtime。`tests/sdk_build_integration.py` 使用真实微型 DSO 及项目默认 build→seal→skip 入口，包含保留旧 mtime 的成功路径，以及部分对象已生成后的编译失败、SIGTERM/SIGKILL、封存失败再恢复旧源码路径。新增失败恢复用例在本机暂因 WSL `E_ACCESSDENIED` 未运行，见 [验证阻塞记录](validation-sdk-failure-recovery.md)。发行 SDK 的 `ffmpeg-key.sh` 另要求两份子模块的实际 HEAD 匹配父 gitlink，源码与配方都已提交；无法读 Git 元数据时明确失败，不猜测版本。先提交库、再更新父 gitlink 的流程保持不变。
+FFmpeg/VVenC 内容改变或无成功凭据时，只清理各自专用构建目录中的对象；代价是内容变化时整组件重编，而不是依赖源码 mtime。`tests/integration/sdk_build_integration.py` 使用真实微型 DSO 及项目默认 build→seal→skip 入口，包含保留旧 mtime 的成功路径，以及部分对象已生成后的编译失败、SIGTERM/SIGKILL、封存失败再恢复旧源码路径。新增失败恢复用例在本机暂因 WSL `E_ACCESSDENIED` 未运行，见 [验证阻塞记录](validation-sdk-failure-recovery.md)。发行 SDK 的 `ffmpeg-key.sh` 另要求两份子模块的实际 HEAD 匹配父 gitlink，源码与配方都已提交；无法读 Git 元数据时明确失败，不猜测版本。先提交库、再更新父 gitlink 的流程保持不变。
 
-快速探流使用 fork 的 `AVFORMAT_LIVE_VIDEO_PROBE_VERSION=1`，libavformat 微版本为 63.3.103。服务选择与探流一致的首条非附图 H.264/HEVC 视频；保留探测包，音频/数据并不保证初始化时完整。码率/帧率只按已知信息估计，VFR 不承诺短探流即可精确识别；字节/时间/输入中断预算仍然生效。NOBUFFER/NOPARSE 明确拒绝。专项入口 `python3 tests/probe_integration.py` 记录完整包账本、像素哈希、时间戳与探流耗时，实流连续性沿用 `tests/live_mux_integration.py`。
+快速探流使用 fork 的 `AVFORMAT_LIVE_VIDEO_PROBE_VERSION=1`，libavformat 微版本为 63.3.103。服务选择与探流一致的首条非附图 H.264/HEVC 视频；保留探测包，音频/数据并不保证初始化时完整。码率/帧率只按已知信息估计，VFR 不承诺短探流即可精确识别；字节/时间/输入中断预算仍然生效。NOBUFFER/NOPARSE 明确拒绝。专项入口 `python3 tests/integration/probe_integration.py` 记录完整包账本、像素哈希、时间戳与探流耗时，实流连续性沿用 `tests/integration/live_mux_integration.py`。
 
 ## 本次版本和 VVenC 边界
 

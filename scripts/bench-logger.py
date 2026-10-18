@@ -32,17 +32,18 @@ def main():
     out = ROOT / 'out'
     out.mkdir(exist_ok=True)
     run = pathlib.Path(tempfile.mkdtemp(prefix='logger-bench-', dir=out))
-    sources = {'before': args.baseline_dir.resolve(), 'after': ROOT / 'app'}
+    sources = {'before': args.baseline_dir.resolve(), 'after': ROOT / 'app/observability'}
     evidence = {'boundary': __doc__, 'host': platform.platform(),
                 'compiler': subprocess.check_output(['cc', '--version'], text=True),
                 'sources': {}, 'builds': [], 'runs': []}
-    common = [ROOT / 'tests/logger_submit_bench.c', ROOT / 'app/crash_client.c', ROOT / 'app/crash.h',
+    common = [ROOT / 'tests/benchmarks/logger_submit_bench.c', ROOT / 'app/crash/crash_client.c', ROOT / 'app/crash/crash.h',
               ROOT / 'third_party/yyjson/src/yyjson.c', ROOT / 'third_party/yyjson/src/yyjson.h']
     evidence['common_sources'] = {str(p): digest(p) for p in common}
     for label, source in sources.items():
         evidence['sources'][label] = {str(source / name): digest(source / name) for name in ('logger.c', 'logger.h')}
         command = ['cc', '-O2', '-g', '-UNDEBUG', '-Wall', '-Wextra', '-Werror', '-pthread',
-                   '-I' + str(source), '-I' + str(ROOT / 'app'), '-I' + str(ROOT / 'third_party/yyjson/src'),
+                   '-I' + str(source), '-I' + str(ROOT / 'app'), '-I' + str(ROOT / 'app/crash'),
+                   '-I' + str(ROOT / 'app/observability'), '-I' + str(ROOT / 'third_party/yyjson/src'),
                    str(common[0]), str(source / 'logger.c'), str(common[1]), str(common[3]),
                    '-Wl,--wrap=pthread_mutex_lock', '-Wl,--wrap=pthread_mutex_unlock', '-o', str(run / label)]
         result = subprocess.run(command, text=True, capture_output=True)

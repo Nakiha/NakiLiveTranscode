@@ -14,9 +14,11 @@
 | 水印 | [单水印 v1](watermark.md) | 每输出 SDR 8/10-bit，JPEG/PNG/GIF，完整 revision 兼容接口与 typed patch；HDR/多水印未实现 |
 | 观测与运维 | [指标](operations.md)、[事件](process-events.md)、[崩溃](crashes.md)、[内部 hook](media-hooks.md) | 成功本地写/flush 边界；socket time 不是 wire time，hook 默认不做响度算法 |
 | 构建/交付 | [FFmpeg 开发](ffmpeg-development.md)、[CI](ci.md)、[Docker](docker.md)、[发布绑定](release-binding.md)、[目标机验收](candidate-migration-runbook.md) | 配置/流程存在不等于远程、镜像或目标机通过；须核对相应提交的检查 |
-| 源码所有权导航 | [app 模块](../app/README.md) | 第四批模块拆分后的实际文件、锁序和 owner；不是通用插件框架 |
+| 源码所有权导航 | [app 模块](../app/README.md) | 当前按职责分目录的文件、锁序和 owner；不是通用插件框架 |
 
 ## 当前验证与历史证据
+
+本次目录、公共设施与接口整理的最终窗口见[目录整理验证](validation-organization.md)，功能入口见[测试说明](testing.md)，独立测量见[性能入口](benchmarking.md)。历史报告继续保留原源码窗口。
 
 五批范围和各自冻结窗口从[核心整理验证](validation-core-refactor.md)进入；最新发现、修复及候选绑定见[合并前复查](validation-final-review.md)，维护入口和结果口径见[测试入口](testing.md)。第四批源码窗口 full 34 步、应用层 sanitizer 6 步通过，两套均含 86 个生命周期场景。第五批只对文档/接口描述作静态核对，不产生新的媒体时延或容量结论。
 
