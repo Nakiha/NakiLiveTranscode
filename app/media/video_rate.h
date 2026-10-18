@@ -23,4 +23,19 @@ static inline int naki_video_rate_resolve(AVRational guessed,int fallback,NakiVi
     *out=(NakiVideoRate){.value=rate,.from_fallback=use_fallback,.nominal_gop_frames=gop>0?(int)gop:1,.nominal_frame_work_us=work>0?work:1};
     return 0;
 }
+/* Explicit integer decimation, never interpolation or timestamp retiming.
+ * Unknown/fractional non-integral ratios fail rather than pretending to be CFR. */
+static inline int naki_video_rate_output(const NakiVideoRate *input,int fps,NakiVideoRate *output,int *divisor) {
+    if(!fps) {*output=*input;*divisor=1;return 0;}
+    int64_t denominator=(int64_t)input->value.den*fps;
+    if(fps<1||fps>240||input->from_fallback||denominator<=0||input->value.num<denominator||
+       input->value.num%denominator)return AVERROR(EINVAL);
+    int64_t ratio=input->value.num/denominator;
+    if(ratio>256)return AVERROR(ERANGE);
+    *divisor=(int)ratio;
+    return naki_video_rate_resolve((AVRational){fps,1},fps,output);
+}
+static inline int naki_video_rate_keep(uint64_t frame_id,int divisor,int protected_picture) {
+    return protected_picture || (frame_id-1)%(unsigned)divisor==0;
+}
 #endif

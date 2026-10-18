@@ -63,14 +63,16 @@ static int64_t local_seek(void *opaque, int64_t offset, int whence) {
 int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     const Config *cfg=&p->job->config;
     int vvc=!strcmp(cfg->encoder,"libvvenc");
-    const char *pixel_format=vvc ? "yuv420p10le" : "yuv420p";
+    int byte_input=vvc&&cfg->encoder_input_bit_depth==8;
+    enum AVPixelFormat output_pixels=vvc&&!byte_input?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_YUV420P;
+    const char *pixel_format=output_pixels==AV_PIX_FMT_YUV420P10LE?"yuv420p10le":"yuv420p";
     char chain[256];
     if(cfg->width)snprintf(chain,sizeof(chain),"scale=%d:%d:flags=bilinear,format=pix_fmts=%s",cfg->width,cfg->height,pixel_format);
     else snprintf(chain,sizeof(chain),"null,format=pix_fmts=%s",pixel_format);
     int ret;
     p->stage="filter initialization";
     ret=naki_video_filter_prepare(&p->graph,&p->source,&p->sink,frame,p->input_tb,
-        cfg->width,cfg->height,vvc?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_YUV420P);
+        cfg->width,cfg->height,output_pixels);
     if(ret<0)return ret;
     p->input_width=frame->width; p->input_height=frame->height; p->input_format=frame->format;
     p->input_colorspace=frame->colorspace;p->input_range=frame->color_range;
@@ -86,16 +88,17 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     p->encoder->height=av_buffersink_get_h(p->sink);
     pthread_mutex_lock(&p->job->mutex);p->job->progress.fixed_output_width=p->encoder->width;p->job->progress.fixed_output_height=p->encoder->height;pthread_mutex_unlock(&p->job->mutex);
     p->encoder->sample_aspect_ratio=av_buffersink_get_sample_aspect_ratio(p->sink);
-    p->encoder->pix_fmt=vvc ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
+    p->encoder->pix_fmt=output_pixels;
     /* The live VVenC fork preserves PTS at 90 kHz and generates DTS from the
        input timestamp FIFO. The reference profile retains upstream timing. */
     int pts_gop=vvc && strcmp(cfg->encoder_profile,"reference");
-    p->encoder->time_base=vvc && !pts_gop ? av_inv_q(p->frame_rate) : (AVRational){1,90000};
-    p->encoder->framerate=p->frame_rate;
+    p->encoder->time_base=vvc && !pts_gop ? av_inv_q(p->output_rate.value) : (AVRational){1,90000};
+    p->encoder->framerate=p->output_rate.value;
     p->encoder->bit_rate=cfg->bitrate;
+    if(cfg->cqf&&!cfg->constrained_crf)p->encoder->rc_max_rate=cfg->maxrate;
     p->encoder->thread_count=cfg->encoder_threads;
     p->encoder->thread_type=FF_THREAD_SLICE;
-    p->encoder->gop_size=p->video_rate.nominal_gop_frames; p->encoder->max_b_frames=0;
+    p->encoder->gop_size=p->output_rate.nominal_gop_frames; p->encoder->max_b_frames=0;
     p->encoder->color_range=av_buffersink_get_color_range(p->sink);
     p->encoder->color_primaries=frame->color_primaries;
     p->encoder->color_trc=frame->color_trc; p->encoder->colorspace=av_buffersink_get_colorspace(p->sink);
@@ -105,11 +108,15 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     if (p->output->oformat->flags&AVFMT_GLOBALHEADER) p->encoder->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
     AVDictionary *options=NULL;
     av_dict_set(&options,"preset",cfg->encoder_preset,0);
+    if(cfg->cqf) {av_dict_set_int(&options,"qp",cfg->qp,0);av_dict_set(&options,"qpa","1",0);}
+    if(cfg->constrained_crf)av_dict_set(&options,"live-qp-feedback","1",0);
+    if(cfg->codec_trace)av_dict_set(&options,"live-frame-trace","1",0);
+    if(cfg->encoder_max_future_frames)av_dict_set_int(&options,"live-max-future",cfg->encoder_max_future_frames,0);
     char vvenc_params[2048]="";
     int intra_frames=0;
     if (vvc && strcmp(cfg->encoder_profile,"reference")) {
         int temporal_filter=strcmp(cfg->encoder_profile,"live_3b_2s_no_mctf")!=0;
-        intra_frames=p->video_rate.nominal_gop_frames;
+        intra_frames=p->output_rate.nominal_gop_frames;
         if (intra_frames<4) return AVERROR(EINVAL);
         p->encoder->gop_size=intra_frames; p->encoder->max_b_frames=3;
         /* Display order I B B B P ... ; coding order P4 B2 B1 B3. The
@@ -126,11 +133,32 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
             "Frame3=B 1 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1:"
             "Frame4=B 3 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1",
             intra_frames,temporal_filter);
+        int minimum=!strcmp(cfg->encoder_profile,"live_3b_2s_qt8")?8:(!strcmp(cfg->encoder_profile,"live_3b_2s_qt16")||!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0"))?16:0;
+        if(minimum) {
+            size_t used=strlen(vvenc_params);
+            int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,
+                ":MinQTISlice=%d:MinQTNonISlice=%d:MinQTChromaISliceInChromaSamples=%d:SearchRange=64:MinSearchWindow=32:FastIntraTools=2",
+                minimum,minimum,minimum/2);
+            if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
+        }
+        if(!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0")) {
+            size_t used=strlen(vvenc_params);const char *extra=!strcmp(cfg->encoder_profile,"live_3b_2s_speed")?":RDOQ=0:SelectiveRDOQ=0:ALF=0:CCALF=0":":RDOQ=0:SelectiveRDOQ=0";
+            if(used+strlen(extra)>=sizeof(vvenc_params))return AVERROR(ENOBUFS);
+            strcat(vvenc_params,extra);
+        }
         av_dict_set(&options,"vvenc-params",vvenc_params,0);
         av_dict_set(&options,"live-pts-gop","1",0);
     }
     else if (vvc) av_dict_set(&options,"period","2",0);
     else av_dict_set(&options,"tune","zerolatency",0);
+    /* Input precision is selected explicitly; 10-bit input preserves the
+       precision-only baseline, byte input uses the matching fork bridge. */
+    if(vvc) {
+        size_t used=strlen(vvenc_params);
+        int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,"%sInternalBitDepth=%d:LiveNative8Ref=%d",used?":":"",cfg->encoder_bit_depth,cfg->encoder_native8_reference);
+        if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
+        av_dict_set(&options,"vvenc-params",vvenc_params,0);
+    }
     if(cfg->policy.intra)av_dict_set(&options,"live-frame-intra","1",0);
     ret=avcodec_open2(p->encoder,codec,&options);
     if (ret>=0 && av_dict_count(options)) ret=AVERROR_OPTION_NOT_FOUND;
@@ -141,7 +169,7 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     if (!p->video) return AVERROR(ENOMEM);
     ret=avcodec_parameters_from_context(p->video->codecpar,p->encoder);
     if (ret<0) return ret;
-    p->video->time_base=p->encoder->time_base; p->video->avg_frame_rate=p->frame_rate;
+    p->video->time_base=p->encoder->time_base; p->video->avg_frame_rate=p->output_rate.value;
     p->output->flags|=AVFMT_FLAG_FLUSH_PACKETS;
     p->output->max_delay=0; p->output->max_interleave_delta=0;
     p->output->interrupt_callback=(AVIOInterruptCB){pipeline_interrupted,&p->write_interrupt};
@@ -156,7 +184,11 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
         if (!p->output->pb) {av_free(buffer); return AVERROR(ENOMEM);}
         p->output->flags|=AVFMT_FLAG_CUSTOM_IO;
     } else {
-        ret=avio_open2(&p->output->pb,cfg->output,AVIO_FLAG_WRITE,&p->output->interrupt_callback,NULL);
+        AVDictionary *io_options=NULL;
+        if(cfg->rtmp_tcp_nodelay&&!strncmp(cfg->output,"rtmp://",7))av_dict_set(&io_options,"tcp_nodelay","1",0);
+        ret=avio_open2(&p->output->pb,cfg->output,AVIO_FLAG_WRITE,&p->output->interrupt_callback,&io_options);
+        if(ret>=0&&av_dict_count(io_options))ret=AVERROR_OPTION_NOT_FOUND;
+        av_dict_free(&io_options);
         if (ret<0) return ret;
     }
     ret=avformat_write_header(p->output,NULL);
@@ -174,11 +206,16 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     json_int(doc,"output_width",p->encoder->width); json_int(doc,"output_height",p->encoder->height);
     json_str(doc,"encoder",cfg->encoder); json_str(doc,"encoder_preset",cfg->encoder_preset);
     json_str(doc,"encoder_profile",cfg->encoder_profile);
+    json_str(doc,"rate_control",cfg->constrained_crf?"constrained_crf":(cfg->cqf?"cqf":"bitrate"));json_int(doc,"target_bitrate",cfg->bitrate);
+    if(cfg->constrained_crf) {json_int(doc,"crf",cfg->qp);json_int(doc,"source_rate_limit",cfg->source_rate_limit);json_int(doc,"rate_window_ms",1000);}
+    if(cfg->cqf) {json_int(doc,"qp",cfg->qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",cfg->maxrate);}
+    json_int(doc,"output_rate_num",p->output_rate.value.num);json_int(doc,"output_rate_den",p->output_rate.value.den);
+    json_int(doc,"rate_decimation_divisor",p->rate_divisor);
     if (vvc) {
         json_str(doc,"vvenc_params",vvenc_params);
         json_int(doc,"rate_control_intra_period_frames",intra_frames);
-        json_str(doc,"keyframe_schedule",pts_gop ? "pts_grid" : "reference_frames");
-        if (pts_gop) json_int(doc,"keyframe_period_ms",2000);
+        json_str(doc,"keyframe_schedule",cfg->policy.intra?"frame_policy":pts_gop?"pts_grid":"reference_frames");
+        if (pts_gop && !cfg->policy.intra) json_int(doc,"keyframe_period_ms",2000);
     }
     json_str(doc,"pixel_format",pixel_format); json_str(doc,"filter",chain);
     json_int(doc,"encoder_time_base_num",p->encoder->time_base.num);
@@ -197,7 +234,7 @@ int pipeline_drain_output(Pipeline *p) {
     p->stage="encoder drain";ret=pipeline_encoder_send(p,NULL);
     if(ret<0||(ret=pipeline_receive_encoded(p))<0)return ret;
     if((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0)return ret;
-    return pipeline_ledger_pending(p)?AVERROR_INVALIDDATA:0;
+    return (pipeline_ledger_pending(p)||(p->job->config.constrained_crf&&p->rate.pending_bits))?AVERROR_INVALIDDATA:0;
 }
 
 /* Call after reader/async shutdown (shared owner) or queue abort (branch owner),

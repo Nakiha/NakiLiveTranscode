@@ -2,6 +2,8 @@
 
 更新日期：2026-10-18。当前为实验性的 Linux/WSL 0.9.0 服务：一个活动 H.264/HEVC 输入、1–4 个固定逻辑输出。FFmpeg 使用 n9.0.2 fork，历史目录名 `ffmpeg-7.0.3` 不代表当前库版本。
 
+最新实验记录：[后续I帧预算与GOP派发细分](validation-i-budget-gop-dispatch-20261018.md)，沿用HEVC 8Mbps输入，分别验证I帧模型、预算及等待边界。
+
 ## 当前合同
 
 | 阅读目的 | 文档 | 状态/边界 |
@@ -20,6 +22,16 @@
 
 本次目录、公共设施与接口整理的最终窗口见[目录整理验证](validation-organization.md)，功能入口见[测试说明](testing.md)，独立测量见[性能入口](benchmarking.md)。历史报告继续保留原源码窗口。
 
+[RTMP CQF 1080p60→540p30实测](validation-rtmp-cqf-20261018.md)记录原生CQF、显式整数降帧与源I/3B核验，以及2/4线程完整素材性能和相关回归；本机两种线程配置均未达到实时30fps。
+
+[CQF 540p30画质检查](validation-quality-cqf-20261018.md)补充出流保存与逐PTS对齐的离线质量入口：4线程QP32完整出流1771帧，PSNR average 33.94dB、VMAF 92.32（原生540p，vmaf_v0.6.1）；分数不涵盖降帧的流畅度损失。
+
+[首次网络读取与双预算基线](validation-live-budget-20261018.md)记录1100kbps、最多4张编码前视画面的逐帧审计、原生CQF排空修复、完整素材性能和PSNR/VMAF。该1100kbps窗口与上述6000kbps历史画质基线不同；测量完成不等于300ms或码率合同通过。
+
+[有界解码泵与受限CRF第二批](validation-constrained-crf-20261018.md)记录reader小队列、独立async前端、编码前质量锚点与双预算QP反馈，以及1080p60→540p30完整素材的性能/PSNR/VMAF对照。保留源I、3B及前视守卫，逐轮报告最大时延、码率合同和关闭编码工具的画质代价；前三轮通过后出现的超时也保留在报告中。
+
+[HEVC 8Mbps与内部逐帧打点](validation-codec-phases-hevc-20261018.md)记录新的1080p60/3B/GOP120 ABR输入，以及原生HEVC、DPB/async交接、VVenC组帧/MCTF/CTU/finalize/AU的逐画面时间点和线程CPU。正式性能关闭诊断，另做开关对照；不把CPU求和当作并行关键路径。
+
 五批范围和各自冻结窗口从[核心整理验证](validation-core-refactor.md)进入；最新发现、修复及候选绑定见[合并前复查](validation-final-review.md)，维护入口和结果口径见[测试入口](testing.md)。第四批源码窗口 full 34 步、应用层 sanitizer 6 步通过，两套均含 86 个生命周期场景。第五批只对文档/接口描述作静态核对，不产生新的媒体时延或容量结论。
 
 - [日志提交记录](validation-logger-submit.md)、[生命周期记录](validation-pipeline-lifecycle.md)分别保留第二、三批的构建、哈希、测量和失败尝试，不能把不同源码的窗口拼成“当前全部通过”。
@@ -31,7 +43,7 @@
 
 | 文档 | 尚未实现的范围 |
 | --- | --- |
-| [处理链草案](pipeline-design.md) | `/v2/jobs`、通用有序滤镜、crop/pad/sharpen 配置、去交错/fps、一对多谱系、HDR/ROI、任意在线输出重建 |
+| [处理链草案](pipeline-design.md) | `/v2/jobs`、通用有序滤镜、crop/pad/sharpen 配置、去交错/任意CFR补帧、一对多谱系、HDR/ROI、任意在线输出重建；现有 output_fps 仅支持显式整数降帧 |
 | [直播帧策略后续设计](live-frame-policy.md) | source_i_anchors、脏时间戳修复、旧示例中的自动 SEI 全保留/迁移；已实现子集以 frame-policy.md / sei.md 为准 |
 | [SCTE-35 草案](scte35-design.md) | TS 节目信令保留、专用 section 输出、注入/查询/取消；不是已开放接口 |
 
@@ -40,3 +52,9 @@
 ## 本机证据未覆盖的项目
 
 外部可信 HTTPS 水印成功样例未配置，full/sanitize 明确记录 not_run；本地 TLS 拒绝路径已执行。本机记录未覆盖实际 Docker 镜像/smoke、远程 Actions、真实 Filebeat 采集/补采、目标机容量与 24/72 小时 soak、真实迁移回滚或生产验收。镜像/远程验收以对应 PR/提交的检查记录单独确认，不把本机配置检查算作镜像通过。ASan/UBSan 仅覆盖应用、yyjson 和 helper，native SDK/系统库未重新插桩，TSan 未完成。未知帧率用例包含测试注入，不宣称真实输入完全无帧率元数据。这些缺口不能由文档、部署示例或短功能回归补齐。
+
+- [Live VVenC 8/10-bit编码精度对照](validation-bitdepth-live-20261019.md)：相近实际码率、CPU/逐帧时延及PSNR/VMAF；原生字节输入另用独立批次验证。
+
+- [VVenC字节输入第一阶段](validation-native8-input-20261019.md)：只读byte API、匹配SDK、同码率质量及未稳定通过300ms的尾延迟证据。
+
+- [VVenC字节参考与整数搜索SIMD](validation-native8-reference-20261019.md)：样本/残差类型、字节参考缓存与SAD、ABBA及10bit控制、逐帧等待/计算和同实际码率质量；保留混合存储成本与超时失败证据。

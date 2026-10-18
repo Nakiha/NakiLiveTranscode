@@ -304,7 +304,7 @@ void service_handle_request(struct evhttp_request *req,void *opaque) {
         snprintf(s->request_id,sizeof(s->request_id),"%s",request_id ? request_id : generated);
         strcpy(record->operation_id,operation_id);strcpy(record->fingerprint,fingerprint);strcpy(record->job_id,job_id);
         strcpy(record->origin_request_id,s->request_id);record->state=NAKI_RECORD_STATE_RESERVED;s->creation=record;
-        if(config.frame_log)snprintf(s->log_path,sizeof(s->log_path),"%s/%s.trace",s->run_dir,s->job_id);
+        if(config.frame_log||config.network_trace||config.codec_trace)snprintf(s->log_path,sizeof(s->log_path),"%s/%s.trace",s->run_dir,s->job_id);
         s->state=NAKI_JOB_STATE_STARTING;
         yyjson_mut_doc *accepted=new_event("request_received",NULL);
         json_str(accepted,"job_id",s->job_id); json_str(accepted,"request_id",s->request_id);

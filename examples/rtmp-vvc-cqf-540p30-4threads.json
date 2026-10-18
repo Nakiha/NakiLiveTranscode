@@ -1,0 +1,20 @@
+{
+  "input": "rtmp://source.example/live/input",
+  "output": "rtmp://receiver.example/live/output",
+  "output_format": "flv",
+  "encoder": "libvvenc",
+  "encoder_profile": "live_3b_2s",
+  "encoder_preset": "faster",
+  "encoder_threads": 4,
+  "width": 960,
+  "height": 540,
+  "output_fps": 30,
+  "rate_control": "cqf",
+  "qp": 32,
+  "maxrate": 6000000,
+  "timestamps": {"mode": "source_all"},
+  "intra": {"mode": "follow_source"},
+  "audio_copy": true,
+  "mux_wait_ms": 50,
+  "frame_log": false
+}

@@ -1304,7 +1304,11 @@
               "default",
               "reference",
               "live_3b_2s",
-              "live_3b_2s_no_mctf"
+              "live_3b_2s_no_mctf",
+              "live_3b_2s_qt8",
+              "live_3b_2s_qt16",
+              "live_3b_2s_speed",
+              "live_3b_2s_rdoq0"
             ],
             "description": "x264 only default. VVenC defaults to live_3b_2s, also accepts reference/live_3b_2s_no_mctf. Live profiles use a PTS-anchored 2s CRA grid, full 3B groups and shorter boundary/tail groups."
           },
@@ -1327,7 +1331,36 @@
             "minimum": 10000,
             "maximum": 100000000,
             "default": 1500000,
-            "description": "Video bits per second."
+            "description": "Target video bits per second in bitrate mode. Must be omitted in native CQF mode."
+          },
+          "rate_control": {
+            "type": "string",
+            "enum": [
+              "bitrate",
+              "cqf",
+              "constrained_crf"
+            ],
+            "default": "bitrate",
+            "description": "bitrate is the default. cqf uses native capped QP/QPA with required maxrate. constrained_crf is an experimental direct-output quality anchor plus causal dual-budget feedback; requires follow_source, output_fps and future guard, excludes qp/bitrate; see vvenc.md."
+          },
+          "qp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 63,
+            "default": 32,
+            "description": "Only accepted with rate_control=cqf; QPA is enabled."
+          },
+          "maxrate": {
+            "type": "integer",
+            "minimum": 10000,
+            "maximum": 100000000,
+            "description": "Required only for cqf. Native approximate bitrate cap in bits/s, not a strict wire-rate bound."
+          },
+          "output_fps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240,
+            "description": "Optional integer decimation after full decode. Known input rate must be an exact integer multiple (divisor <=256); unsupported ratios fail after media rate resolution. Source PTS and protected first/I/SEI pictures are preserved, so this is not a general hard-CFR guarantee."
           },
           "max_threads": {
             "type": "integer",
@@ -1366,7 +1399,7 @@
             "minimum": 1,
             "maximum": 240,
             "default": 25,
-            "description": "Used only when av_guess_frame_rate is unavailable. Effective rational rate drives encoder/RC hints, nominal GOP frame count and queue work charge; source PTS cadence is preserved. See video-rate.md."
+            "description": "Used only when av_guess_frame_rate is unavailable. Input rational rate drives shared queue work; optional output_fps independently adjusts selected output and encoder/RC hints. Source PTS are preserved. See video-rate.md."
           },
           "pace": {
             "type": "boolean",
@@ -1376,6 +1409,23 @@
           "frame_log": {
             "type": "boolean",
             "default": false
+          },
+          "network_trace": {
+            "type": "boolean",
+            "default": false,
+            "description": "Opt-in plain RTMP first media-message TCP recv to actual mux/flush provenance. Forces complete video/input-packet trace through the bounded logger; unsupported or missing origin fails. Not wire or display latency."
+          },
+          "rtmp_tcp_nodelay": {
+            "type": "boolean",
+            "default": false,
+            "description": "Apply TCP_NODELAY to this job's applicable plain RTMP input/output sockets. Other protocols are unaffected. The benchmark applies the same option to its source/capture peers."
+          },
+          "encoder_max_future_frames": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4,
+            "default": 0,
+            "description": "Single direct live VVenC CQF output only. 0 disables; 1..4 enables bounded pending-AU progress and rejects an AU released with more than this number of submitted newer encoding pictures. Not an encoder CPU deadline."
           },
           "frame_log_every": {
             "type": "integer",
@@ -1439,6 +1489,57 @@
               }
             ],
             "description": "One logical output retains the direct execution path and defaults id to main; arrays with two to four entries require explicit unique ids. Status omits outputs for a single logical output. Runtime destinations, encoders, dimensions and output membership are immutable."
+          },
+          "crf": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 63,
+            "default": 32,
+            "description": "Experimental constrained CRF quality anchor, not x264/x265 CRF scale; direct live VVenC only."
+          },
+          "source_rate_limit": {
+            "type": "boolean",
+            "default": false,
+            "description": "constrained_crf only: causal past 1s completed input video rate budget; requires network_trace."
+          },
+          "reader_queue_capacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8,
+            "default": 8
+          },
+          "decoder_pump": {
+            "type": "boolean",
+            "default": false,
+            "description": "Direct output only: dedicated owner of async decode frontend with one bounded dispatch slot."
+          },
+          "codec_trace": {
+            "type": "boolean",
+            "default": false,
+            "description": "Opt-in Linux native HEVC decoder and live VVenC per-picture phase/CPU telemetry; direct output and future guard required; forces complete traces. Diagnostic overhead must be measured separately."
+          },
+          "encoder_bit_depth": {
+            "type": "integer",
+            "enum": [
+              8,
+              10
+            ],
+            "default": 10,
+            "description": "VVenC internal encoding and bitstream precision. Input/filter stays yuv420p10le in a 16-bit container; 8 does not enable byte-storage or 8-bit SIMD kernels. Only libvvenc."
+          },
+          "encoder_input_bit_depth": {
+            "type": "integer",
+            "enum": [
+              8,
+              10
+            ],
+            "default": 10,
+            "description": "Explicit VVenC input/filter sample precision. 8 uses read-only packed byte planes and requires encoder_bit_depth=8, live CQF and encoder_max_future_frames. Internal Pel and residual buffers still use 16-bit storage. Direct output only with current guard."
+          },
+          "encoder_native8_reference": {
+            "type": "boolean",
+            "default": false,
+            "description": "Experimental byte reference buffers and integer ME SIMD; direct guarded live CQF, internal 8-bit only. Fractional prediction and residuals retain signed working precision."
           }
         },
         "allOf": [
@@ -1555,6 +1656,23 @@
           "bitrate": {
             "$ref": "#/components/schemas/JobConfig/properties/bitrate"
           },
+          "rate_control": {
+            "type": "string",
+            "enum": [
+              "bitrate",
+              "cqf"
+            ],
+            "description": "Fixed output branches support existing bitrate/native CQF; experimental constrained_crf requires a direct root output."
+          },
+          "qp": {
+            "$ref": "#/components/schemas/JobConfig/properties/qp"
+          },
+          "maxrate": {
+            "$ref": "#/components/schemas/JobConfig/properties/maxrate"
+          },
+          "output_fps": {
+            "$ref": "#/components/schemas/JobConfig/properties/output_fps"
+          },
           "encoder_threads": {
             "$ref": "#/components/schemas/JobConfig/properties/encoder_threads"
           },
@@ -1618,6 +1736,12 @@
             "minimum": 1048576,
             "maximum": 1073741824,
             "default": 536870912
+          },
+          "encoder_bit_depth": {
+            "$ref": "#/components/schemas/JobConfig/properties/encoder_bit_depth"
+          },
+          "encoder_input_bit_depth": {
+            "$ref": "#/components/schemas/JobConfig/properties/encoder_input_bit_depth"
           }
         },
         "allOf": [

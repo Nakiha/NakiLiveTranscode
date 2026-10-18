@@ -6,6 +6,8 @@
 #include "pipeline_reader.h"
 #include "watermark.h"
 #include "video_filter.h"
+#include "live_rate.h"
+#include "codec_trace.h"
 #include "branch_queue.h"
 #include "crash/crash.h"
 #include "media_hooks.h"
@@ -25,6 +27,7 @@
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 #include <libavformat/live_mux.h>
+#include <libavformat/read_origin.h>
 #include <libavcodec/bsf.h>
 #include <libavutil/buffer.h>
 #include <libavutil/error.h>
@@ -46,6 +49,12 @@
 #endif
 
 typedef struct Stamp {
+    AVLiveDecodeTrace decode_trace;
+    NakiEncoderTrace encode_trace;
+    int64_t network_first_read_us,network_complete_us,demux_finished_us,network_tag_position;
+    int encoder_future_frames,actual_slice_qp,decoder_tracked;
+    NakiRateDecision rate;
+    int64_t async_ready_us,decoder_owner_us;
     int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
     int64_t encoder_submit_us, encoder_accepted_us, scheduled_us, filter_started_us;
     int picture_type, decoded_key, input_key, first_i;
@@ -69,6 +78,11 @@ typedef struct AudioTrack {
     NakiAudioSignature accepted;
     int64_t last_dts, next_input_dts, previous_input_dts;
 } AudioTrack;
+typedef struct DecodePump {
+    pthread_mutex_t mutex;pthread_cond_t changed;pthread_t thread;
+    AVFrame *frame;InputItem audio;
+    int occupied,done,error,started;
+} DecodePump;
 typedef struct Branch Branch;
 typedef struct Pipeline {
     Job *job;
@@ -86,6 +100,8 @@ typedef struct Pipeline {
     int input_width, input_height, input_format, seen_input_i;
     AVRational input_tb, frame_rate;
     NakiVideoRate video_rate;
+    NakiVideoRate output_rate;
+    int rate_divisor;
     int input_wrap_bits;
     enum AVCodecID sei_codec;
     int sei_length_size,sei_read_error;
@@ -95,7 +111,9 @@ typedef struct Pipeline {
     NakiIntraState intra;
     Interrupt read_interrupt, write_interrupt;
     PipelineReader reader;
+    DecodePump pump;
     Ledger ledger[LEDGER_CAPACITY];
+    NakiLiveRate rate;
     int64_t last_pts, synthetic_pts, next_stats_us;
     int have_output_display_pts;
     int64_t last_output_display_pts;
@@ -124,6 +142,14 @@ struct Branch {
 };
 
 /* MODULE INTERFACES */
+void pipeline_decode_notify(void *opaque);
+void pipeline_decode_init(Pipeline *p);
+int pipeline_decode_start(Pipeline *p);
+int pipeline_decode_receive(Pipeline *p,AVFrame *frame,InputItem *audio);
+void pipeline_decode_join(Pipeline *p);
+void pipeline_decode_destroy(Pipeline *p);
+void pipeline_refresh_auto(Pipeline *p);
+int pipeline_prepare_decoded_frame(Pipeline *p,AVFrame *frame);
 /* pipeline.c */
 int pipeline_stamp_valid(const AVBufferRef *ref);
 const NakiSeiBundle *pipeline_stamp_sei(const AVBufferRef *ref);
@@ -138,6 +164,7 @@ int pipeline_filter_output(Pipeline *p);
 void pipeline_ledger_clear(Pipeline *p);
 int pipeline_encoder_send(Pipeline *p, const AVFrame *frame);
 int pipeline_receive_encoded(Pipeline *p);
+int64_t pipeline_source_rate(Pipeline *p,int64_t now);
 int pipeline_encode_frame(Pipeline *p, AVFrame *frame);
 int pipeline_ledger_pending(Pipeline *p);
 

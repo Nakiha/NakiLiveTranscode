@@ -1,0 +1,33 @@
+{
+  "input": "rtmp://127.0.0.1:1935/live/source",
+  "encoder": "libvvenc",
+  "encoder_profile": "live_3b_2s_speed",
+  "encoder_preset": "faster",
+  "encoder_threads": 8,
+  "width": 960,
+  "height": 540,
+  "output_fps": 30,
+  "rate_control": "constrained_crf",
+  "maxrate": 1100000,
+  "audio_copy": true,
+  "mux_wait_ms": 20,
+  "timestamps": {
+    "mode": "source_all"
+  },
+  "intra": {
+    "mode": "follow_source"
+  },
+  "network_trace": true,
+  "encoder_max_future_frames": 4,
+  "rtmp_tcp_nodelay": true,
+  "queue_capacity": 1,
+  "max_threads": 2,
+  "min_threads": 2,
+  "budget_slots": 2,
+  "reader_queue_capacity": 1,
+  "crf": 32,
+  "source_rate_limit": true,
+  "decoder_pump": true,
+  "output": "rtmp://127.0.0.1:1935/live/vvc",
+  "codec_trace": true
+}

@@ -1,8 +1,12 @@
 {
   "schema_version": 1,
-  "native_quick": ["frame-policy", "frame-policy-config", "watermark-config", "branch-queue", "identity-intent", "control-spec", "sei", "component-update", "operation-store", "operation-cache", "audio-signature", "video-rate", "video-filter", "event-logger", "logger-submit"],
+  "native_quick": ["frame-policy", "frame-policy-config", "watermark-config", "branch-queue", "identity-intent", "control-spec", "sei", "component-update", "operation-store", "operation-cache", "audio-signature", "video-rate", "video-filter", "live-rate", "vvenc-input8", "native8", "event-logger", "logger-submit"],
   "suites": [
     {"id":"organization", "script":"tests/checks/organization_test.py", "profiles":["quick","full"], "tools":["cc"]},
+    {"id":"quality-tools", "script":"tests/checks/quality_tools_test.py", "profiles":["quick","full"], "tools":["ffmpeg"], "binaries":["naki-quality-video-export"]},
+    {"id":"codec-phase-tools", "script":"tests/checks/codec_phase_tools_test.py", "profiles":["quick","full"]},
+    {"id":"codec-phases", "script":"tests/integration/codec_phases_integration.py", "profiles":["full"], "binaries":["naki-quality-video-export"]},
+    {"id":"live-budget", "script":"tests/checks/live_budget_test.py", "profiles":["quick","full"]},
     {"id":"entrypoints", "script":"tests/checks/test_entrypoints_test.py", "profiles":["quick","full"], "tools":["bash","cc","git","readelf","objcopy","strip","cmake","ctest"]},
     {"id":"sdk-identity", "script":"tests/checks/sdk_identity_test.py", "profiles":["quick","full"], "tools":["git"]},
     {"id":"sdk-expected", "script":"tests/checks/sdk_expected_test.py", "profiles":["quick","full"], "tools":["git"]},
@@ -22,6 +26,8 @@
     {"id":"probe", "script":"tests/integration/probe_integration.py", "profiles":["full"], "binaries":["naki-probe-test","naki-probe-budget-test"], "indirect":["tests/support/probe_budget_integration.py"]},
     {"id":"decoder", "script":"tests/integration/decoder_integration.py", "profiles":["full"], "tools":["gcc","pkg-config"], "timeout_s":600, "sources":["experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/async_probe.c","experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_probe.c","experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_lifetime_test.c"]},
     {"id":"service", "script":"tests/integration/service_integration.py", "profiles":["full","sanitize"]},
+    {"id":"cqf-rate", "script":"tests/integration/cqf_rate_integration.py", "profiles":["full"]},
+    {"id":"read-origin", "script":"tests/integration/read_origin_integration.py", "profiles":["full"], "binaries":["naki-read-origin-probe","naki-live-transport-fixture"]},
     {"id":"vvenc", "script":"tests/integration/vvenc_integration.py", "profiles":["full"]},
     {"id":"vvenc-pts", "script":"tests/integration/vvenc_pts_integration.py", "profiles":["full"]},
     {"id":"live-mux", "script":"tests/integration/live_mux_integration.py", "profiles":["full"], "binaries":["naki-live-mux-test","naki-live-transport-fixture"]},

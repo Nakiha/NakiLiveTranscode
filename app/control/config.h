@@ -10,6 +10,7 @@
 typedef struct OutputConfig {
     char id[33],output[2048],output_format[16],encoder[16],encoder_preset[16],encoder_profile[24];
     int width,height,bitrate,encoder_threads,audio_copy,mux_wait_ms;
+    int output_fps,cqf,qp,maxrate,encoder_bit_depth,encoder_input_bit_depth,encoder_native8_reference;
     int queue_items,audio_packets,queue_media_ms,max_lag_ms,io_timeout_ms;
     uint64_t queue_bytes,inflight_bytes;
     NakiWatermarkConfig watermark;
@@ -23,7 +24,10 @@ typedef struct Config {
     int width, height, bitrate, max_threads, min_threads, budget_slots;
     int queue_capacity, encoder_threads, fps, pace;
     int frame_log, frame_log_every, slow_frame_ms;
+    int network_trace,encoder_max_future_frames,rtmp_tcp_nodelay;
+    int reader_queue_capacity,constrained_crf,source_rate_limit,decoder_pump,codec_trace;
     int audio_copy, mux_wait_ms;
+    int output_fps,cqf,qp,maxrate,encoder_bit_depth,encoder_input_bit_depth,encoder_native8_reference;
     char single_output_id[33]; /* Logical identity; output_count still selects direct vs branch execution. */
     NakiPolicyConfig policy;
     NakiWatermarkConfig watermark;

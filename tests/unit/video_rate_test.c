@@ -17,5 +17,17 @@ int main(void) {
     assert(naki_video_rate_resolve((AVRational){0,1},0,&r)<0);
     assert(naki_video_rate_resolve((AVRational){INT_MAX,1},25,&r)<0);
     assert(!naki_video_rate_resolve((AVRational){1,10},25,&r));assert(r.nominal_gop_frames==1&&r.nominal_frame_work_us==10000000);
+    int divisor;
+    assert(!naki_video_rate_resolve((AVRational){60,1},25,&r));
+    assert(!naki_video_rate_output(&r,30,&a,&divisor)&&divisor==2&&a.value.num==30&&a.nominal_gop_frames==60);
+    for(uint64_t i=1;i<=120;i++)assert(naki_video_rate_keep(i,divisor,0)==(i%2==1));
+    assert(naki_video_rate_keep(2,divisor,1));
+    assert(naki_video_rate_output(&r,61,&a,&divisor)<0);
+    assert(naki_video_rate_output(&r,24,&a,&divisor)<0);
+    assert(!naki_video_rate_resolve((AVRational){60000,1001},25,&r));
+    assert(naki_video_rate_output(&r,30,&a,&divisor)<0);
+    assert(!naki_video_rate_output(&r,0,&a,&divisor)&&divisor==1&&av_cmp_q(r.value,a.value)==0);
+    assert(!naki_video_rate_resolve((AVRational){0,0},60,&r));
+    assert(naki_video_rate_output(&r,30,&a,&divisor)<0);
     puts("PASS rational effective/fallback rate, reduced fractions, GOP/work hints and overflow bounds");return 0;
 }

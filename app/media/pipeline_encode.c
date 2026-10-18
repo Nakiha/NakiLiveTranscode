@@ -48,6 +48,37 @@ int pipeline_receive_encoded(Pipeline *p) {
             }
         }
         Stamp *mapped=&p->ledger[slot].stamp;
+        if(p->job->config.encoder_max_future_frames) {
+            size_t size=0;const uint8_t *data=av_packet_get_side_data(packet,AV_PKT_DATA_STRINGS_METADATA,&size);
+            AVDictionary *info=NULL;
+            if(!data||av_packet_unpack_dictionary(data,size,&info)<0) {ret=AVERROR_INVALIDDATA;break;}
+            AVDictionaryEntry *entry=av_dict_get(info,"live_future_frames",NULL,0);
+            char *end=NULL;long depth=entry?strtol(entry->value,&end,10):-1;
+            int valid=entry&&end&&!*end&&depth>=0&&depth<=p->job->config.encoder_max_future_frames;
+            if(p->job->config.constrained_crf) {
+                AVDictionaryEntry *qp=av_dict_get(info,"live_slice_qp",NULL,0);
+                char *qp_end=NULL;long actual=qp?strtol(qp->value,&qp_end,10):100;
+                if(!qp||!qp_end||*qp_end||actual < -12||actual>63)valid=0;
+                mapped->actual_slice_qp=(int)actual;
+            }
+            if(p->job->config.codec_trace) {
+                NakiEncoderTrace *t=&mapped->encode_trace;
+#define PARSE_TRACE(key,dest) do { \
+    AVDictionaryEntry *e=av_dict_get(info,key,NULL,0);char *tail=NULL;errno=0; \
+    int64_t value=e?strtoll(e->value,&tail,10):-1; \
+    if(!e||!tail||*tail||errno||value<0) {valid=0;} dest=value; \
+} while(0)
+                PARSE_TRACE("vvenc_trace_version",t->version);PARSE_TRACE("vvenc_trace_cts",t->cts);PARSE_TRACE("vvenc_trace_poc",t->poc);
+#define GET_TRACE(n) PARSE_TRACE("vvenc_"#n,t->n);
+                NAKI_ENCODER_TRACE_FIELDS(GET_TRACE)
+#undef GET_TRACE
+#undef PARSE_TRACE
+                if(t->version!=3||t->cts!=packet->pts||!t->input_us||!t->au_us)valid=0;
+            }
+            av_dict_free(&info);
+            if(!valid){ret=AVERROR_INVALIDDATA;break;}
+            mapped->encoder_future_frames=(int)depth;
+        }
         size_t picture_size=0; const uint8_t *picture_stats=av_packet_get_side_data(packet,AV_PKT_DATA_QUALITY_STATS,&picture_size);
         int output_type=picture_size>=5 ? picture_stats[4] : AV_PICTURE_TYPE_NONE;
         if(mapped->intra_reason) {
@@ -79,6 +110,15 @@ int pipeline_receive_encoded(Pipeline *p) {
         p->stage="selected SEI output repackaging";
         ret=naki_sei_inject(packet,p->encoder->codec_id,pipeline_stamp_sei(p->ledger[slot].owner),&p->job->config.sei);
         if(ret<0)break;
+        if(p->job->config.constrained_crf) {
+            int64_t bits=8*((int64_t)packet->size+(packet->pts==p->first_encoder_pts?p->encoder->extradata_size:0));
+            int kind=output_type==AV_PICTURE_TYPE_I?0:output_type==AV_PICTURE_TYPE_P?1:output_type==AV_PICTURE_TYPE_B?2:-1;
+            /* Match the actual mux time-base rounding, not a display-PTS
+             * forecast. The pending reservation survives until real flush. */
+            int64_t output_dts=av_rescale_q(packet->dts,p->encoder->time_base,p->video->time_base);
+            int64_t media_us=av_rescale_q(output_dts,p->video->time_base,AV_TIME_BASE_Q);
+            if(naki_rate_feedback(&p->rate,&mapped->rate,p->encoder->width*p->encoder->height,bits,kind,media_us)<0) {ret=AVERROR_INVALIDDATA;break;}
+        }
         MuxTrace *meta=av_malloc(sizeof(*meta));
         AVBufferRef *reference=meta?av_buffer_create((uint8_t *)meta,sizeof(*meta),mux_trace_free,NULL,0):NULL;
         if(!reference){av_free(meta);ret=AVERROR(ENOMEM);break;}
@@ -87,7 +127,7 @@ int pipeline_receive_encoded(Pipeline *p) {
         p->ledger[slot].owner=NULL;p->ledger[slot].used=0;
         av_buffer_unref(&packet->opaque_ref);packet->opaque_ref=reference;
         av_packet_rescale_ts(packet,p->encoder->time_base,p->video->time_base);packet->stream_index=p->video->index;
-        if(!packet->duration)packet->duration=av_rescale_q(1,av_inv_q(p->frame_rate),p->video->time_base);
+        if(!packet->duration)packet->duration=av_rescale_q(1,av_inv_q(p->encoder->framerate),p->video->time_base);
         ret=pipeline_submit_mux(p,packet);av_packet_unref(packet);
         if(ret<0)break;
     }
@@ -102,6 +142,7 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     AVRational filter_tb=av_buffersink_get_time_base(p->sink);
     frame->pts=av_rescale_q(frame->pts,filter_tb,p->encoder->time_base);
     frame->duration=av_rescale_q(frame->duration,filter_tb,p->encoder->time_base);
+    if(p->job->config.output_fps)frame->duration=av_rescale_q(1,av_inv_q(p->encoder->framerate),p->encoder->time_base);
     frame->time_base=p->encoder->time_base;
     frame->pict_type=stamp.intra_reason ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
     if (p->last_pts!=AV_NOPTS_VALUE && frame->pts<=p->last_pts) {
@@ -126,6 +167,20 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     int ret;
     AVBufferRef *owner=av_buffer_ref(frame->opaque_ref);
     if(!owner)return AVERROR(ENOMEM);
+    if(p->job->config.constrained_crf) {
+        int64_t began=now_us();
+        int byte_input=frame->format==AV_PIX_FMT_YUV420P;
+        if(!byte_input&&frame->format!=AV_PIX_FMT_YUV420P10LE) {av_buffer_unref(&owner);return AVERROR_INVALIDDATA;}
+        double complexity=naki_rate_complexity_samples(&p->rate,frame->data[0],frame->linesize[0]/(byte_input?1:2),frame->width,frame->height,byte_input);
+        int64_t source=p->job->config.source_rate_limit?pipeline_source_rate(p,began):0;
+        int64_t pts_us=av_rescale_q(frame->pts,p->encoder->time_base,AV_TIME_BASE_Q);
+        int64_t period=av_rescale_q(1,av_inv_q(p->encoder->framerate),AV_TIME_BASE_Q);
+        if(naki_rate_select(&p->rate,p->job->config.qp,p->job->config.maxrate,p->job->config.source_rate_limit,
+            source,began,pts_us,period,frame->width*frame->height,!!stamp.intra_reason,complexity,&stamp.rate)<0) {
+            av_buffer_unref(&owner);return AVERROR_INVALIDDATA;
+        }
+        if(av_dict_set_int(&frame->metadata,"naki_qp_offset",stamp.rate.qp-p->job->config.qp,0)<0) {av_buffer_unref(&owner);return AVERROR(ENOMEM);}
+    }
     stamp.encoder_submit_us=now_us();
     pipeline_checkpoint(p,&p->job->progress.first_encoder_submit_us);
     while ((ret=pipeline_encoder_send(p,frame))==AVERROR(EAGAIN)) {

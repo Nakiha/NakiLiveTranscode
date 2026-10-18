@@ -75,7 +75,7 @@ JSON 请求须无重复键/NUL，ID 为有界 ASCII 字母、数字、下划线�
 
 内网业务可编译接入 [内部媒体 hook](media-hooks.md)，观察音频和编码后的视频包；默认空实现，没有新增 hook HTTP 参数或响度检测算法。显式选择的源 SEI 透传由内建媒体链实现，不依赖私有 hook，也不等于客户任意 SEI 注入 API。
 
-`width`、`height` 同时为正偶数时缩放；同时为零/省略则由首帧确定并固定输出画布。libx264 使用 YUV420P，libvvenc 使用 YUV420P10LE。`bitrate` 默认 1.5 Mbps；`encoder_threads` 默认 2。`max_threads` 默认 12，自动模式 `min_threads` 默认 2，`budget_slots` 默认 12；预算只约束解码任务，不含 filter 和编码器。`queue_capacity` 默认 4，此外有 8 个包的输入 ring。`fps` 是名义帧率不可用时的回退值，不做帧率转换；已知有效分数帧率优先，见[帧率口径](video-rate.md)。`pace=true` 仅用于本地文件按 DTS 实时回放。
+`width`、`height` 同时为正偶数时缩放；同时为零/省略则由首帧确定并固定输出画布。libx264 使用 YUV420P，libvvenc 使用 YUV420P10LE。默认 bitrate 模式为 1.5 Mbps；libvvenc 可显式选 `rate_control="cqf"`、`qp`（默认32）、必填 `maxrate`，此时不能提供 bitrate，原生 QPA 开启，见 [VVenC](vvenc.md)。`encoder_threads` 默认 2。`max_threads` 默认 12，自动模式 `min_threads` 默认 2，`budget_slots` 默认 12；预算只约束解码任务，不含 filter 和编码器。`queue_capacity` 默认 4，此外有 8 个包的输入 ring。`fps` 是名义帧率不可用时的回退值，不做帧率转换；已知有效分数帧率优先。独立的 `output_fps` 可在完整解码后按整数比例显式降帧，保留PTS及受保护I等画面，见[帧率口径](video-rate.md)。`pace=true` 仅用于本地文件按 DTS 实时回放。
 
 `outputs` 接受 1–4 项，不能与顶层 output/watermark 同时出现。单元素默认 id=main，也允许显式 id，归一化为直接媒体路径，状态不增加 outputs 数组；2–4 项必须显式唯一 id。每路参数继承和预算见[固定输出合同](branching-contract.md)。
 
@@ -100,6 +100,8 @@ HTTP 控制进程只管理任务，通过 Unix SOCK_SEQPACKET 与独立 worker �
 worker 默认每 10 秒生成 status，由自身 logger 写进程事件文件；controller 空闲 heartbeat 和生命周期事件写自己的进程事件文件，路径在 run-dir/events。首帧 checkpoint 保留供查询，接管不重放相同 worker 事件。逐帧明细默认关闭，启用 frame_log 后写独立轮转 trace。HTTP 查询读取约每 250 ms 的媒体快照，operation 查询通过有界 RPC 取得 worker 权威结果；重连另发送一次归属信息和操作分页。详见[进程事件](process-events.md)、[组件更新](component-updates.md)及[运行观测](operations.md)。
 
 使用单调时钟计算耗时，另有 `unix_us` 便于关联日志。关联通过 packet opaque_ref 传递到 decoded/filter frame，再按 encoder PTS 匹配输出包；关联缺失、PTS 不递增或有界映射溢出会明确失败。
+
+显式 `network_trace=true` 仅支持plain RTMP：协议层记录源视频媒体消息首个chunk首字节的TCP recv完成时间，随FLV tag位置关联，在探测/完整AU parser缓存之前附上不可变来源。每张成功写出的画面增加 `network_to_mux`，终点仍为实际mux/flush；`network_read` 含严格超过300ms的计数、按输入I/首I/重复I及output-key的分组。它会强制记录全量输入视频包与输出帧trace，仍受logger有界队列及丢失计数约束。旧ingress_to_mux和HTTP-handler首帧口径不改，不能把这三种边界混用。TLS/tunnel、aggregate等暂不支持的追踪场景明确失败。配合 `encoder_max_future_frames=4` 可对单个直接live CQF输出限制已提交未来编码画面数量；不是CPU耗时承诺或CRF实现。测量与双预算审计见[性能入口](benchmarking.md)。
 
 | 字段 | 起止边界 |
 | --- | --- |

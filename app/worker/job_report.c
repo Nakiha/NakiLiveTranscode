@@ -38,6 +38,7 @@ static void add_latencies(yyjson_mut_doc *doc, yyjson_mut_val *obj, const Latenc
 #define ADD(name) yyjson_mut_obj_add_val(doc,obj,#name,metric_json(doc,&m->name))
     ADD(demux_read); ADD(input_queue); ADD(decode); ADD(branch_queue); ADD(setup); ADD(filter); ADD(encode); ADD(encode_submit); ADD(encode_wait); ADD(mux);
     ADD(ingress_to_mux); ADD(scheduled_to_mux); ADD(interleave_call); ADD(avio_flush);
+    ADD(network_to_mux);
 #undef ADD
 }
 static yyjson_mut_val *group_json(yyjson_mut_doc *doc,const FrameGroups *g) {
@@ -82,7 +83,14 @@ static yyjson_mut_val *video_rate_json(yyjson_mut_doc *doc,const Job *job) {
     yyjson_mut_obj_add_int(doc,value,"nominal_gop_frames",rate->nominal_gop_frames);
     const char *schedule=job->config.policy.intra?"frame_policy":!strcmp(job->config.encoder,"libvvenc")&&strcmp(job->config.encoder_profile,"reference")?"source_pts_2s_grid":"nominal_frame_count_max";
     yyjson_mut_obj_add_str(doc,value,"keyframe_schedule",schedule);
-    yyjson_mut_obj_add_int(doc,rc,"num",rate->value.num);yyjson_mut_obj_add_int(doc,rc,"den",rate->value.den);
+    NakiVideoRate output;int divisor;
+    if(naki_video_rate_output(rate,job->config.output_fps,&output,&divisor)<0)return value;
+    yyjson_mut_obj_add_int(doc,value,"output_num",output.value.num);yyjson_mut_obj_add_int(doc,value,"output_den",output.value.den);
+    yyjson_mut_obj_add_int(doc,value,"decimation_divisor",divisor);
+    yyjson_mut_obj_remove_key(value,"nominal_gop_frames");
+    yyjson_mut_obj_add_int(doc,value,"nominal_gop_frames",output.nominal_gop_frames);
+    yyjson_mut_obj_add_sint(doc,value,"output_nominal_frame_work_us",output.nominal_frame_work_us);
+    yyjson_mut_obj_add_int(doc,rc,"num",output.value.num);yyjson_mut_obj_add_int(doc,rc,"den",output.value.den);
     yyjson_mut_obj_add_val(doc,value,"rc_nominal_rate",rc);return value;
 }
 static yyjson_mut_val *finalize_json(yyjson_mut_doc *doc,const Job *job) {
@@ -156,6 +164,13 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_int(doc,"intra_interval_ms",job->config.policy.interval_ms);
     json_int(doc,"frame_id_last",job->stats.frame_id_last); json_int(doc,"frames_selected",job->stats.frames_selected);
     json_int(doc,"frames_dropped_overload",job->stats.frames_dropped_overload); json_int(doc,"frames_protected",job->stats.frames_protected);
+    json_int(doc,"frames_dropped_rate",job->stats.frames_dropped_rate);
+    json_str(doc,"rate_control",job->config.constrained_crf?"constrained_crf":(job->config.cqf?"cqf":"bitrate"));
+    json_int(doc,"decoder_pump",job->config.decoder_pump);
+    json_int(doc,"codec_trace",job->config.codec_trace);
+    json_int(doc,"reader_queue_capacity",job->config.reader_queue_capacity);
+    if(job->config.constrained_crf) {json_int(doc,"crf",job->config.qp);json_int(doc,"source_rate_limit",job->config.source_rate_limit);json_int(doc,"rate_window_ms",1000);}
+    if(job->config.cqf) {json_int(doc,"qp",job->config.qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",job->config.maxrate);}
     json_int(doc,"intra_requested",job->stats.intra_requested); json_int(doc,"intra_confirmed",job->stats.intra_confirmed);
     json_int(doc,"timestamp_wraps",job->stats.timestamp_wraps);
     json_int(doc,"sei_extracted",job->stats.sei_extracted);json_int(doc,"sei_written",job->stats.sei_written);
@@ -172,6 +187,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_str(doc,"encoder",job->config.encoder);
     json_str(doc,"encoder_preset",job->config.encoder_preset);
     json_str(doc,"encoder_profile",job->config.encoder_profile);
+    if(!strcmp(job->config.encoder,"libvvenc")) {json_int(doc,"encoder_bit_depth",job->config.encoder_bit_depth);json_int(doc,"encoder_input_bit_depth",job->config.encoder_input_bit_depth);yyjson_mut_obj_add_bool(doc,yyjson_mut_doc_get_root(doc),"encoder_native8_reference",job->config.encoder_native8_reference);}
     json_int(doc,"crash_collector_pid",crash_collector_pid());
     json_int(doc,"slow_frame_ms",job->config.slow_frame_ms);
     json_int(doc,"audio_tracks",job->stats.audio_tracks); json_int(doc,"audio_packets_out",job->stats.audio_packets_out);
@@ -191,6 +207,14 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_num(doc,"auto_stats_age_ms",job->progress.auto_updated_us ? (current-job->progress.auto_updated_us)/1000.0 : 0);
     add_latencies(doc,yyjson_mut_doc_get_root(doc),&job->stats.lifetime);
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"frame_types",group_json(doc,&job->stats.groups));
+    yyjson_mut_val *network=yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_bool(doc,network,"enabled",job->config.network_trace);
+    yyjson_mut_obj_add_str(doc,network,"boundary","plain_rtmp_first_chunk_recv_complete_to_actual_mux_flush");
+    yyjson_mut_obj_add_uint(doc,network,"deadline_us",300000);
+    yyjson_mut_obj_add_uint(doc,network,"exceeded",job->stats.network_deadline_exceeded);
+    yyjson_mut_obj_add_uint(doc,network,"encoder_future_max",job->stats.encoder_future_max);
+    yyjson_mut_obj_add_val(doc,network,"frame_types",group_json(doc,&job->stats.network_groups));
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"network_read",network);
     yyjson_mut_val *i_stages=yyjson_mut_obj(doc);
     add_latencies(doc,i_stages,&job->stats.i_lifetime);
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"i_frame_stages",i_stages);
@@ -203,6 +227,8 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     yyjson_mut_obj_add_real(doc,window,"output_fps",seconds>0 ? (job->stats.packets_out-job->stats.window_start_output)/seconds : 0);
     add_latencies(doc,window,&job->stats.window);
     yyjson_mut_obj_add_val(doc,window,"frame_types",group_json(doc,&job->stats.window_groups));
+    yyjson_mut_obj_add_uint(doc,window,"network_deadline_exceeded",job->stats.network_window_exceeded);
+    yyjson_mut_obj_add_val(doc,window,"network_frame_types",group_json(doc,&job->stats.window_network_groups));
     i_stages=yyjson_mut_obj(doc); add_latencies(doc,i_stages,&job->stats.i_window);
     yyjson_mut_obj_add_val(doc,window,"i_frame_stages",i_stages);
     key_stages=yyjson_mut_obj(doc); add_latencies(doc,key_stages,&job->stats.key_window);
@@ -210,6 +236,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"window",window);
     if(report) {
         memset(&job->stats.window,0,sizeof(job->stats.window)); memset(&job->stats.window_groups,0,sizeof(job->stats.window_groups));
+        memset(&job->stats.window_network_groups,0,sizeof(job->stats.window_network_groups));job->stats.network_window_exceeded=0;
         memset(&job->stats.i_window,0,sizeof(job->stats.i_window));
         memset(&job->stats.key_window,0,sizeof(job->stats.key_window));
         job->progress.window_start_us=end; job->stats.window_start_input=job->stats.packets_in; job->stats.window_start_output=job->stats.packets_out;
@@ -252,6 +279,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
             yyjson_mut_obj_add_val(bd,yyjson_mut_doc_get_root(bd),"first_frame_checkpoints",first_frame_json(bd,b));
             yyjson_mut_obj_add_val(bd,yyjson_mut_doc_get_root(bd),"output_finalize",finalize_json(bd,b));
             json_int(bd,"frames_decoded",b->stats.frames_decoded);json_int(bd,"frames_filtered",b->stats.frames_filtered);
+            json_int(bd,"frames_dropped_rate",b->stats.frames_dropped_rate);
             json_int(bd,"packets_out",b->stats.packets_out);json_int(bd,"bytes_out",b->stats.bytes_out);
             json_int(bd,"audio_tracks",b->stats.audio_tracks);json_int(bd,"audio_packets_out",b->stats.audio_packets_out);json_int(bd,"audio_dropped",b->stats.audio_dropped);
             json_int(bd,"audio_unsupported",b->stats.audio_unsupported);

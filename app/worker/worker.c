@@ -60,7 +60,7 @@ static int start_job(Job *job, yyjson_doc *doc) {
         .operation_id=yyjson_get_str(yyjson_obj_get(root,"creation_operation_id")),.fingerprint=fingerprint,.origin_request_id=request_id};
     NakiOperationHandle created;
     if(naki_operations_reserve(job->operations,&create,now_us(),&created)!=1||naki_operations_pin(job->operations,created,NAKI_OP_PIN_OWNERSHIP,0))return -1;
-    if(job->config.frame_log && !(job->trace=logger_trace_open(job->logger,job->log_path)))return -1;
+    if((job->config.frame_log||job->config.network_trace||job->config.codec_trace) && !(job->trace=logger_trace_open(job->logger,job->log_path)))return -1;
     job->watermark=naki_watermark_open(&job->config.watermark,job->lifecycle.started_us,&job->lifecycle.cancel);
     if(!job->watermark)return -1;
     if(!job->config.output_count&&naki_watermark_bind(job->watermark,job->operations,job->id,job->output_id,job->request_id,job->logger))return -1;

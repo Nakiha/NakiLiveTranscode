@@ -10,6 +10,7 @@ void naki_logical_output(const Config *c,int index,OutputConfig *o) {
     if(*c->outputs[0].id) {*o=c->outputs[0];return;}
     *o=(OutputConfig){.width=c->width,.height=c->height,.bitrate=c->bitrate,.encoder_threads=c->encoder_threads,
         .audio_copy=c->audio_copy,.mux_wait_ms=c->mux_wait_ms,.watermark=c->watermark,.sei=c->sei,
+        .output_fps=c->output_fps,.cqf=c->cqf,.qp=c->qp,.maxrate=c->maxrate,.encoder_bit_depth=c->encoder_bit_depth,.encoder_input_bit_depth=c->encoder_input_bit_depth,.encoder_native8_reference=c->encoder_native8_reference,
         .queue_items=16,.audio_packets=256,.queue_bytes=128U*1024*1024,.queue_media_ms=5000,.max_lag_ms=10000,
         .io_timeout_ms=5000,.inflight_bytes=512U*1024*1024};
     strcpy(o->id,*c->single_output_id?c->single_output_id:"main");
@@ -30,6 +31,13 @@ int naki_config_fingerprint(const Config *c,char out[65],char *error,size_t cap)
     yyjson_mut_obj_add_str(d,root,"resource_profile",NAKI_LIVE_PROFILE);
 #define I(k) yyjson_mut_obj_add_sint(d,root,#k,c->k)
     I(max_threads);I(min_threads);I(budget_slots);I(queue_capacity);I(fps);I(pace);I(frame_log);I(frame_log_every);I(slow_frame_ms);
+    if(c->reader_queue_capacity!=8) {I(reader_queue_capacity);}
+    if(c->decoder_pump) {I(decoder_pump);}
+    if(c->codec_trace) {I(codec_trace);}
+    if(c->constrained_crf) {I(constrained_crf);I(source_rate_limit);}
+    if(c->network_trace) {I(network_trace);}
+    if(c->rtmp_tcp_nodelay) {I(rtmp_tcp_nodelay);}
+    if(c->encoder_max_future_frames) {I(encoder_max_future_frames);}
 #undef I
     yyjson_mut_val *policy=yyjson_mut_obj(d),*levels=yyjson_mut_arr(d);
 #define I(k) yyjson_mut_obj_add_sint(d,policy,#k,c->policy.k)
@@ -50,6 +58,12 @@ int naki_config_fingerprint(const Config *c,char out[65],char *error,size_t cap)
 #define I(k) yyjson_mut_obj_add_sint(d,v,#k,o.k)
         I(width);I(height);I(bitrate);I(encoder_threads);I(audio_copy);I(mux_wait_ms);
         I(queue_items);I(audio_packets);I(queue_media_ms);I(max_lag_ms);I(io_timeout_ms);
+        if(o.output_fps) {I(output_fps);}
+        if(o.cqf) {I(cqf);I(qp);I(maxrate);}
+        /* Preserve normalized identity for the existing implicit 10-bit path. */
+        if(o.encoder_bit_depth==8) {I(encoder_bit_depth);}
+        if(o.encoder_input_bit_depth==8) {I(encoder_input_bit_depth);}
+        if(o.encoder_native8_reference) {I(encoder_native8_reference);}
 #undef I
         yyjson_mut_obj_add_uint(d,v,"queue_bytes",o.queue_bytes);yyjson_mut_obj_add_uint(d,v,"inflight_bytes",o.inflight_bytes);
         yyjson_mut_obj_add_val(d,v,"watermark",watermark(d,&o.watermark));yyjson_mut_arr_add_val(outputs,v);

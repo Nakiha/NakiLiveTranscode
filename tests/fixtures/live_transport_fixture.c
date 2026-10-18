@@ -61,14 +61,22 @@ static int inspect(const char *path) {
 }
 int main(int argc,char **argv) {
     if(argc==3 && !strcmp(argv[1],"inspect"))return inspect(argv[2]);
-    if(argc!=5)return 2;
+    if(argc!=5&&argc!=6&&argc!=7)return 2;
+    long timeout_seconds=25;
+    if(argc>=6) {
+        char *end=NULL;timeout_seconds=strtol(argv[5],&end,10);
+        if(!*argv[5]||*end||timeout_seconds<1||timeout_seconds>86400)return 2;
+    }
+    if(argc==7 && strcmp(argv[6],"0") && strcmp(argv[6],"1"))return 2;
     int pause_source=!strcmp(argv[1],"serve-pause");
-    int serve=!strcmp(argv[1],"serve")||pause_source;
+    int hold_source=!strcmp(argv[1],"serve-hold");
+    int serve=!strcmp(argv[1],"serve")||pause_source||hold_source;
     FILE *file=fopen(argv[3],serve ? "rb" : "wb");
     if(!file)return 3;
     AVIOContext *io=NULL;AVDictionary *options=NULL;
-    avformat_network_init();deadline=av_gettime_relative()+25000000;
+    avformat_network_init();deadline=av_gettime_relative()+timeout_seconds*1000000;
     if(!strncmp(argv[2],"rtmp://",7))av_dict_set(&options,"listen","1",0);
+    if(argc==7 && !strcmp(argv[6],"1") && !strncmp(argv[2],"rtmp://",7))av_dict_set(&options,"tcp_nodelay","1",0);
     av_dict_set(&options,"rw_timeout","3000000",0);
     AVIOInterruptCB cb={interrupted,NULL};
     int ret=avio_open2(&io,argv[2],serve ? AVIO_FLAG_WRITE : AVIO_FLAG_READ,&cb,&options);
@@ -76,8 +84,9 @@ int main(int argc,char **argv) {
     if(ret<0){fprintf(stderr,"open error %d\n",ret);fclose(file);return 4;}
     puts("CONNECTED_ONCE");fflush(stdout);
     uint8_t buffer[65536];int64_t epoch=av_gettime_relative();uint64_t total=0;
-    if(serve && !strcmp(argv[4],"flv")) {
+    if(serve && (!strcmp(argv[4],"flv")||!strcmp(argv[4],"flv-fast"))) {
         uint8_t header[13];
+        int have_media_clock=0;uint32_t timestamp_origin=0;
         if(!read_exact(file,header,13))return 5;
         avio_write(io,header,13);avio_flush(io);
         while(read_exact(file,header,11)) {
@@ -86,7 +95,14 @@ int main(int argc,char **argv) {
             if(size>4*1024*1024)return 6;
             uint8_t *body=av_malloc(size+4);
             if(!body || !read_exact(file,body,size+4))return 7;
-            pace(epoch+(int64_t)ts*1000);
+            /* The benchmark preserves a nonzero source timeline for strict
+             * DTS. Start pacing at the first coded media tag, not that PTS
+             * origin; sequence headers/metadata at timestamp zero aren't media. */
+            int media=0;
+            if(header[0]==9 && size>=2)media=(body[0]&0x80)?((body[0]&15)==1||(body[0]&15)==3):body[1]==1;
+            if(header[0]==8 && size)media=(body[0]>>4)!=10||(size>=2&&body[1]==1);
+            if(hold_source&&!have_media_clock&&media) {have_media_clock=1;timestamp_origin=ts;epoch=av_gettime_relative();}
+            if(!strcmp(argv[4],"flv"))pace(epoch+((int64_t)ts-timestamp_origin)*1000);
             avio_write(io,header,11);avio_write(io,body,size+4);avio_flush(io);av_free(body);
             if(io->error<0){ret=io->error;break;}
         }
@@ -112,7 +128,8 @@ int main(int argc,char **argv) {
         printf("SOURCE_STOPPED bytes=%llu result=%d elapsed_ms=%.3f\n",
                (unsigned long long)total,ret,(av_gettime_relative()-epoch)/1000.);
         fflush(stdout);
-        av_usleep(3000000); /* Connection liveness alone does not imply continued media delivery. */
+        if(hold_source)while(av_gettime_relative()<deadline)av_usleep(10000);
+        else av_usleep(3000000); /* Connection liveness alone does not imply continued media delivery. */
     }
     avio_closep(&io);fclose(file);
     printf("CLOSED bytes=%llu result=%d\n",(unsigned long long)total,ret);

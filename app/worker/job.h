@@ -56,8 +56,11 @@ typedef struct JobStats {
     Latencies i_lifetime, i_window;
     Latencies key_lifetime, key_window;
     FrameGroups groups, window_groups;
+    FrameGroups network_groups,window_network_groups;
+    uint64_t network_deadline_exceeded,network_window_exceeded,encoder_future_max;
     uint64_t window_start_input, window_start_output, i_frames;
     uint64_t frame_id_last, frames_selected, frames_dropped_overload, frames_protected;
+    uint64_t frames_dropped_rate;
     uint64_t intra_requested, intra_confirmed, timestamp_wraps;
     uint64_t sei_extracted,sei_written,sei_protected;
     uint64_t branch_queued,branch_queue_bytes,branch_queue_media_us,branch_queue_high;

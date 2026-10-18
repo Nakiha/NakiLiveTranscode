@@ -42,7 +42,7 @@ int pipeline_interrupted(void *opaque) {
     return (!atomic_load(&io->cleanup)&&atomic_load(&io->job->lifecycle.cancel)) || (deadline && now_us()>deadline);
 }
 
-static void refresh_auto(Pipeline *p) {
+void pipeline_refresh_auto(Pipeline *p) {
     AVCodecAsyncAutoStats stats={0};
     if (p->async) avcodec_async_get_auto_stats(p->async,&stats);
     pthread_mutex_lock(&p->job->mutex);
@@ -290,11 +290,11 @@ int pipeline_filter_output(Pipeline *p) {
     av_frame_free(&frame);
     return ret==AVERROR(EAGAIN) || ret==AVERROR_EOF ? 0 : ret;
 }
-static int prepare_decoded_frame(Pipeline *p, AVFrame *frame) {
+int pipeline_prepare_decoded_frame(Pipeline *p, AVFrame *frame) {
     if (!pipeline_stamp_valid(frame->opaque_ref)) return AVERROR_INVALIDDATA;
     Stamp *input_stamp=(Stamp *)frame->opaque_ref->data;
     if(input_stamp->sei_size) {
-        p->stage="selected SEI picture association";
+        if(!p->job->config.decoder_pump)p->stage="selected SEI picture association";
         if(frame->flags&AV_FRAME_FLAG_INTERLACED)return AVERROR(ENOSYS);
         int claim=pipeline_reader_sei_obligation(p,input_stamp->sequence,0);if(claim<0)return claim;
     }
@@ -304,6 +304,17 @@ static int prepare_decoded_frame(Pipeline *p, AVFrame *frame) {
     if (ret<0) return ret;
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
     stamp->decoded_us=now_us();
+    if(p->job->config.codec_trace) {
+        AVFrameSideData *sd=av_frame_get_side_data(frame,AV_FRAME_DATA_LIVE_DECODE_TRACE);
+        if(!sd||sd->size!=sizeof(AVLiveDecodeTrace))return AVERROR_INVALIDDATA;
+        const AVLiveDecodeTrace *tr=(const AVLiveDecodeTrace*)sd->data;
+        stamp->decode_trace.version=tr->version;
+#define COPY_TRACE(n) stamp->decode_trace.n=__atomic_load_n(&tr->n,__ATOMIC_ACQUIRE);
+        AV_LIVE_DECODE_TRACE_FIELDS(COPY_TRACE)
+#undef COPY_TRACE
+        if(tr->version!=AV_LIVE_DECODE_TRACE_VERSION||stamp->decode_trace.source_pts!=frame->pts||
+           !stamp->decode_trace.reconstructed_us||!stamp->decode_trace.frontend_us)return AVERROR_INVALIDDATA;
+    }
     pthread_mutex_lock(&p->job->mutex);p->job->progress.last_decoded_us=stamp->decoded_us;p->job->progress.media_phase=NAKI_MEDIA_PHASE_RUNNING;pthread_mutex_unlock(&p->job->mutex);
     pipeline_checkpoint(p,&p->job->progress.first_decoded_us);
     stamp->picture_type=frame->pict_type;
@@ -313,7 +324,7 @@ static int prepare_decoded_frame(Pipeline *p, AVFrame *frame) {
     if(p->next_frame_id==INT64_MAX)return AVERROR(ERANGE);
     stamp->frame_id=++p->next_frame_id; stamp->raw_pts=frame->pts;
     if(p->job->config.policy.timestamps==NAKI_TS_SOURCE_ALL) {
-        p->stage="strict source PTS";
+        if(!p->job->config.decoder_pump)p->stage="strict source PTS";
         if((ret=naki_timeline_resolve(&p->timeline,frame->pts,p->input_wrap_bits,&frame->pts))<0)return ret;
         stamp->timestamp_source=1;
     } else {
@@ -325,6 +336,13 @@ static int prepare_decoded_frame(Pipeline *p, AVFrame *frame) {
     stamp->source_pts=frame->pts;
     stamp->source_us=av_rescale_q(frame->pts,p->input_tb,AV_TIME_BASE_Q);
     stamp->timestamp_wraps=p->timeline.wraps;
+    if(p->job->config.codec_trace) {
+        yyjson_mut_doc *event=new_event("decoder_frame",p->job);
+        json_int(event,"frame_id",stamp->frame_id);json_int(event,"input_sequence",stamp->sequence);
+        json_int(event,"pts_us",stamp->source_us);json_int(event,"decoder_submit_monotonic_us",stamp->submitted_us);
+        json_int(event,"decoded_monotonic_us",stamp->decoded_us);
+        naki_decode_trace_json(event,&stamp->decode_trace);logger_submit(p->job->logger,p->job->trace,event);
+    }
     if(stamp->source_us==INT64_MIN || stamp->source_us==INT64_MAX)return AVERROR(ERANGE);
     return 0;
 }
@@ -356,9 +374,10 @@ static int rebuild_input_filter(Pipeline *p,const AVFrame *frame) {
     json_str(event,"encoder_action","unchanged");logger_submit(p->job->logger,NULL,event);return 0;
 }
 static int process_frame(Pipeline *p,AVFrame *frame) {
-    int ret=p->job->parent?av_buffer_make_writable(&frame->opaque_ref):prepare_decoded_frame(p,frame);
+    int ret=p->job->parent?av_buffer_make_writable(&frame->opaque_ref):p->job->config.decoder_pump?0:pipeline_prepare_decoded_frame(p,frame);
     if(ret<0)return ret;
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
+    if(p->job->config.decoder_pump)stamp->decoder_owner_us=now_us();
     if(p->job->parent) {
         stamp->branch_started_us=now_us();
         pthread_mutex_lock(&p->job->mutex);
@@ -367,23 +386,32 @@ static int process_frame(Pipeline *p,AVFrame *frame) {
         p->job->progress.last_decoded_us=stamp->decoded_us;p->job->progress.media_phase=NAKI_MEDIA_PHASE_RUNNING;
         pthread_mutex_unlock(&p->job->mutex);
     }
-    if((ret=naki_policy_track(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp->frame_id,stamp->ingress_us))<0)return ret;
+    if(!p->rate_divisor) {
+        p->stage="explicit output rate requires a known integer input/output ratio";
+        ret=naki_video_rate_output(&p->video_rate,p->job->config.output_fps,&p->output_rate,&p->rate_divisor);
+        if(ret<0)return ret;
+    }
+    if(!stamp->decoder_tracked&&(ret=naki_policy_track(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp->frame_id,stamp->ingress_us))<0)return ret;
     if(p->graph&&(ret=rebuild_input_filter(p,frame))<0)return ret;
     stamp->intra_reason=naki_intra_decide(&p->job->config.policy,&p->intra,stamp->source_us,stamp->picture_type==AV_PICTURE_TYPE_I);
     int sei_messages=naki_sei_count(pipeline_stamp_sei(frame->opaque_ref),&p->job->config.sei);
     int sei_protected=sei_messages>0;
     int protect=stamp->intra_reason || stamp->picture_type==AV_PICTURE_TYPE_I || stamp->frame_id==1 || sei_protected;
     pthread_mutex_lock(&p->job->mutex);
-    p->job->stats.frames_decoded++; p->job->stats.frame_id_last=(uint64_t)stamp->frame_id; p->job->stats.timestamp_wraps=stamp->timestamp_wraps;
+    p->job->stats.frames_decoded++; if(p->job->stats.frame_id_last<(uint64_t)stamp->frame_id)p->job->stats.frame_id_last=(uint64_t)stamp->frame_id; p->job->stats.timestamp_wraps=stamp->timestamp_wraps;
     if(p->job->parent)p->job->stats.sei_extracted+=sei_messages;
     int level=p->job->flow.overload.level;
     pthread_mutex_unlock(&p->job->mutex);
     int keep=naki_frame_keep(&p->job->config.policy,level,(uint64_t)stamp->frame_id,protect);
     if(keep<0)return keep;
+    int rate_drop=keep && !naki_video_rate_keep((uint64_t)stamp->frame_id,p->rate_divisor,protect);
+    if(rate_drop)keep=0;
     pthread_mutex_lock(&p->job->mutex);
     if(protect)p->job->stats.frames_protected++;
     if(sei_protected)p->job->stats.sei_protected++;
-    if(keep)p->job->stats.frames_selected++; else p->job->stats.frames_dropped_overload++;
+    if(keep)p->job->stats.frames_selected++;
+    else if(rate_drop)p->job->stats.frames_dropped_rate++;
+    else p->job->stats.frames_dropped_overload++;
     pthread_mutex_unlock(&p->job->mutex);
     if(!keep) {
         if(!naki_policy_untrack(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp->frame_id))return AVERROR_INVALIDDATA;
@@ -392,7 +420,7 @@ static int process_frame(Pipeline *p,AVFrame *frame) {
             yyjson_mut_doc *event=new_event("frame_drop",p->job);
             json_int(event,"frame_id",stamp->frame_id); json_int(event,"input_sequence",stamp->sequence);
             json_int(event,"source_pts",stamp->source_pts); json_int(event,"overload_level",level);
-            json_str(event,"reason","overload"); logger_submit(p->job->logger,p->job->trace,event);
+            json_str(event,"reason",rate_drop?"output_rate":"overload"); logger_submit(p->job->logger,p->job->trace,event);
         }
         return 0;
     }
@@ -420,7 +448,15 @@ static int initialize_decoder(Pipeline *p) {
     p->input->max_streams=64;
     atomic_store(&p->read_interrupt.deadline,now_us()+IO_TIMEOUT_US);
     pipeline_checkpoint(p,&p->job->progress.input_open_started_us);
-    int ret=avformat_open_input(&p->input,p->job->config.input,NULL,NULL);
+    AVDictionary *input_options=NULL;
+    if(p->job->config.rtmp_tcp_nodelay&&!strncmp(p->job->config.input,"rtmp://",7))av_dict_set(&input_options,"tcp_nodelay","1",0);
+    if(p->job->config.network_trace) {
+        if(avformat_version()<AV_VERSION_INT(63,3,105))return AVERROR(ENOSYS);
+        av_dict_set(&input_options,"rtmp_read_origin","1",0);
+    }
+    int ret=avformat_open_input(&p->input,p->job->config.input,NULL,&input_options);
+    if(ret>=0&&av_dict_count(input_options))ret=AVERROR_OPTION_NOT_FOUND;
+    av_dict_free(&input_options);
     if (ret<0) return ret;
     pipeline_checkpoint(p,&p->job->progress.input_open_done_us);
     ret=naki_probe_video(p->input);
@@ -455,18 +491,23 @@ static int initialize_decoder(Pipeline *p) {
     p->decoder=avcodec_alloc_context3(codec);
     if (!p->decoder) return AVERROR(ENOMEM);
     if ((ret=avcodec_parameters_to_context(p->decoder,stream->codecpar))<0) return ret;
+    if(p->job->config.codec_trace) {
+        p->stage="codec_trace requires native software HEVC input";
+        if(stream->codecpar->codec_id!=AV_CODEC_ID_HEVC)return AVERROR(ENOSYS);
+        p->decoder->export_side_data|=AV_CODEC_EXPORT_DATA_LIVE_TRACE;
+    }
     p->decoder->pkt_timebase=p->input_tb;
     p->decoder->thread_count=p->job->config.max_threads;
     p->decoder->thread_type=FF_THREAD_FRAME; p->decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;
     p->decoder->max_pixels=NAKI_INPUT_MAX_PIXELS;
     if ((ret=avcodec_open2(p->decoder,codec,NULL))<0) return ret;
-    if ((ret=avcodec_async_create(&p->async,&p->decoder,p->job->config.queue_capacity,wake_job,p->job))<0) return ret;
+    if ((ret=avcodec_async_create(&p->async,&p->decoder,p->job->config.queue_capacity,pipeline_decode_notify,p))<0) return ret;
     AVCodecAsyncBudget *budget=NULL;
     ret=avcodec_async_budget_create(&budget,p->job->config.budget_slots,NULL);
     if (ret>=0) ret=avcodec_async_enable_auto(p->async,p->job->config.min_threads,budget);
     avcodec_async_budget_free(&budget);
     if (ret<0) return ret;
-    refresh_auto(p);
+    pipeline_refresh_auto(p);
     pipeline_checkpoint(p,&p->job->progress.decoder_ready_us);
     pthread_mutex_lock(&p->job->mutex); p->job->lifecycle.state=NAKI_JOB_STATE_RUNNING; pthread_mutex_unlock(&p->job->mutex);
     return event_log(p,"decoder_ready");
@@ -596,7 +637,7 @@ static int admit_branch_items(Pipeline *p,NakiBranchItem *items) {
 }
 static int fanout_frame(Pipeline *p,AVFrame *frame) {
     NakiBranchItem items[4]={0};
-    int ret=prepare_decoded_frame(p,frame);if(ret<0)return ret;Stamp *source=(Stamp *)frame->opaque_ref->data;
+    int ret=pipeline_prepare_decoded_frame(p,frame);if(ret<0)return ret;Stamp *source=(Stamp *)frame->opaque_ref->data;
     pthread_mutex_lock(&p->job->mutex);p->job->stats.frames_decoded++;p->job->stats.frame_id_last=source->frame_id;p->job->stats.timestamp_wraps=p->timeline.wraps;
     metric_add(&p->job->stats.lifetime.decode,(source->decoded_us-source->submitted_us)/1000.0,p->job->config.slow_frame_ms);
     metric_add(&p->job->stats.window.decode,(source->decoded_us-source->submitted_us)/1000.0,p->job->config.slow_frame_ms);pthread_mutex_unlock(&p->job->mutex);
@@ -676,7 +717,7 @@ void *pipeline_main(void *opaque) {
     p.read_interrupt.job=job; p.write_interrupt.job=job;
     atomic_init(&p.read_interrupt.deadline,0); atomic_init(&p.write_interrupt.deadline,0);
     atomic_init(&p.read_interrupt.cleanup,0);atomic_init(&p.write_interrupt.cleanup,0);
-    pipeline_reader_init(&p);
+    pipeline_reader_init(&p);pipeline_decode_init(&p);
     InputItem pending={0}; AVFrame *frame=av_frame_alloc();int branches_joined=0;
     NakiMediaJobInfo info={.job_id=job->id,.request_id=job->request_id,.config=&job->config,.request_us=job->lifecycle.started_us,
         .output_id=job->config.output_count?NULL:job->output_id};
@@ -706,6 +747,7 @@ void *pipeline_main(void *opaque) {
     if(job->config.output_count&&(ret=start_branches(&p))<0)goto cleanup;
     ret=pipeline_reader_start(&p);
     if (ret) {ret=AVERROR(ret); goto cleanup;}
+    if(job->config.decoder_pump&&(ret=pipeline_decode_start(&p))<0)goto cleanup;
     int eof_sent=0, decoder_eof=0;
     while (!atomic_load(&job->lifecycle.cancel) && !decoder_eof) {
         if(p.branches&&(ret=check_branches(&p,0))<0) {p.stage="all outputs failed";goto cleanup;}
@@ -713,8 +755,8 @@ void *pipeline_main(void *opaque) {
         while (read(job->wake_fd,&wake,sizeof(wake))<0 && errno==EINTR) {}
         int progress=0;
         p.stage="async decode receive";
-        for (int batch=0;batch<8;batch++) {
-            ret=avcodec_async_receive_frame(p.async,frame);
+        for (int batch=0;batch<1;batch++) {
+            ret=job->config.decoder_pump?pipeline_decode_receive(&p,frame,&pending):avcodec_async_receive_frame(p.async,frame);
             if (ret==AVERROR_EOF) {decoder_eof=1; ret=0; break;}
             if (ret==AVERROR(EAGAIN)) {ret=0; break;}
             if (ret<0) goto cleanup;
@@ -724,7 +766,7 @@ void *pipeline_main(void *opaque) {
         }
         if (decoder_eof) break;
         int input_done=0, input_error=0;
-        if (!pending.packet && !eof_sent) pending=pipeline_reader_pop(&p,&input_done,&input_error);
+        if (!job->config.decoder_pump && !pending.packet && !eof_sent) pending=pipeline_reader_pop(&p,&input_done,&input_error);
         if(pending.params) {
             if(p.hooks.audio_packet) {
                 NakiAudioPacketEvent event={.packet=pending.packet,.parameters=pending.params,.time_base=pending.tb,
@@ -740,7 +782,7 @@ void *pipeline_main(void *opaque) {
             progress=1;
         }
         if (input_done && input_error<0) {p.stage=p.sei_read_error?"input SEI parsing / complete-AU contract":"input read"; ret=input_error; goto cleanup;}
-        if (pending.packet || (input_done && !eof_sent)) {
+        if (!job->config.decoder_pump && (pending.packet || (input_done && !eof_sent))) {
             p.stage="async decode submit";
             if (pending.packet) ((Stamp *)pending.packet->opaque_ref->data)->submitted_us=now_us();
             ret=avcodec_async_send_packet(p.async,pending.packet);
@@ -754,8 +796,8 @@ void *pipeline_main(void *opaque) {
             ret=pipeline_flush_deferred_audio(&p);
             if(ret<0 || (ret=pipeline_drain_mux(&p,0))<0)goto cleanup;
         }
-        if (now_us()>=p.next_stats_us) {
-            refresh_auto(&p);
+        if (!job->config.decoder_pump && now_us()>=p.next_stats_us) {
+            pipeline_refresh_auto(&p);
             p.next_stats_us=now_us()+1000000;
         }
         if (!progress) {
@@ -806,15 +848,16 @@ cleanup:
         /* Wake a blocked producer and interrupt network reads before joining. */
         if (ret<0) atomic_store(&job->lifecycle.cancel,1);
         pipeline_reader_wake(&p);
+        pipeline_decode_join(&p);
         pipeline_reader_join(&p);
-        refresh_auto(&p);
+        pipeline_refresh_auto(&p);
         avcodec_async_free(&p.async);
         naki_watermark_owner_finish(job->watermark,ret,stopped);
         ret=pipeline_finalize_output(&p,ret,stopped);
         pipeline_input_free(&pending);
         pipeline_reader_clear(&p);
         pipeline_release_media_resources(&p,&frame);
-        pipeline_reader_destroy(&p);
+        pipeline_decode_destroy(&p);pipeline_reader_destroy(&p);
         if(p.branches) {
             for(int i=0;i<p.branch_count;i++)if(p.branches[i].initialized)naki_branch_queue_destroy(&p.branches[i].queue);
             free(p.branches);

@@ -40,7 +40,7 @@ add_executable(naki-live ${NAKI_SERVICE_SOURCES} app/control/operation_cache.c a
     app/platform/runtime.c app/worker/job.c app/observability/metrics.c app/worker/job_report.c app/observability/logger.c app/observability/netstats.c app/crash/crash_client.c ${NAKI_POLICY_SOURCES})
 set(NAKI_PIPELINE_SOURCES
     app/media/pipeline.c app/media/pipeline_reader.c app/media/pipeline_output.c
-    app/media/pipeline_mux.c app/media/pipeline_encode.c)
+    app/media/pipeline_mux.c app/media/pipeline_encode.c app/media/pipeline_decode.c)
 set(NAKI_WORKER_SOURCES
     app/worker/worker.c app/media/watermark.c app/media/video_filter.c app/media/branch_queue.c app/platform/ipc.c
     app/media/input_probe.c app/media/audio_signature.c app/media/sei.c ${NAKI_PIPELINE_SOURCES}
@@ -77,6 +77,19 @@ target_compile_options(naki-live-ctl PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(naki-live-ctl PRIVATE PkgConfig::CURL yyjson)
 include(CTest)
 if(BUILD_TESTING)
+enable_language(CXX)
+add_executable(naki-native8-test tests/unit/native8_test.cpp)
+target_include_directories(naki-native8-test PRIVATE third_party/vvenc/source/Lib/CommonLib)
+target_compile_options(naki-native8-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+add_executable(naki-vvenc-input8-test tests/fixtures/vvenc_input8_test.c)
+target_include_directories(naki-vvenc-input8-test PRIVATE "${NAKI_FFMPEG_PREFIX}/include")
+target_link_libraries(naki-vvenc-input8-test PRIVATE "${NAKI_FFMPEG_PREFIX}/lib/libvvenc.so")
+target_compile_options(naki-vvenc-input8-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+set_target_properties(naki-vvenc-input8-test PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
+add_executable(naki-live-rate-test tests/unit/live_rate_test.c)
+target_include_directories(naki-live-rate-test PRIVATE app)
+target_link_libraries(naki-live-rate-test PRIVATE m)
+target_compile_options(naki-live-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 add_executable(naki-branch-queue-test tests/unit/branch_queue_test.c app/media/branch_queue.c)
 target_include_directories(naki-branch-queue-test PRIVATE app)
 target_link_libraries(naki-branch-queue-test PRIVATE PkgConfig::FFMPEG Threads::Threads)
@@ -90,6 +103,16 @@ set_target_properties(naki-video-filter-test PROPERTIES BUILD_RPATH "${NAKI_FFMP
 add_executable(naki-output-video-probe tests/fixtures/output_video_probe.c)
 target_link_libraries(naki-output-video-probe PRIVATE PkgConfig::FFMPEG)
 set_target_properties(naki-output-video-probe PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
+add_executable(naki-quality-video-export tests/fixtures/quality_video_export.c app/media/video_filter.c)
+target_include_directories(naki-quality-video-export PRIVATE app)
+target_link_libraries(naki-quality-video-export PRIVATE PkgConfig::FFMPEG)
+target_compile_options(naki-quality-video-export PRIVATE -Wall -Wextra -Werror)
+set_target_properties(naki-quality-video-export PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
+add_executable(naki-read-origin-probe tests/fixtures/read_origin_probe.c app/media/input_probe.c)
+target_include_directories(naki-read-origin-probe PRIVATE app)
+target_link_libraries(naki-read-origin-probe PRIVATE PkgConfig::FFMPEG)
+target_compile_options(naki-read-origin-probe PRIVATE -Wall -Wextra -Werror)
+set_target_properties(naki-read-origin-probe PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
     add_executable(naki-sei-test tests/unit/sei_test.c app/media/sei.c app/control/sei_config.c)
     target_include_directories(naki-sei-test PRIVATE app)
     target_link_libraries(naki-sei-test PRIVATE yyjson PkgConfig::FFMPEG)
@@ -247,7 +270,7 @@ set_target_properties(naki-output-video-probe PROPERTIES BUILD_RPATH "${NAKI_FFM
     # Media/transport fixture drivers remain owned by their Python suites.
     foreach(name frame-policy frame-policy-config watermark-config branch-queue
             identity-intent control-spec sei component-update operation-store
-            operation-cache audio-signature video-rate video-filter)
+            operation-cache audio-signature video-rate video-filter live-rate vvenc-input8 native8)
         add_test(NAME ${name} COMMAND naki-${name}-test)
         set_tests_properties(${name} PROPERTIES LABELS "native;quick" TIMEOUT 60)
     endforeach()

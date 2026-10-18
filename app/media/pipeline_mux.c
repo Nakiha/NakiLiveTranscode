@@ -13,6 +13,7 @@ static void sample_latencies(Latencies *m, const Stamp *s, int64_t encoded, int6
     SAMPLE(encode_submit,s->encoder_accepted_us-s->encoder_submit_us); SAMPLE(encode_wait,encoded-s->encoder_accepted_us);
     SAMPLE(mux,written-begin); SAMPLE(ingress_to_mux,written-s->ingress_us);
     SAMPLE(interleave_call,interleaved-begin); SAMPLE(avio_flush,written-interleaved);
+    if(s->network_first_read_us) {SAMPLE(network_to_mux,written-s->network_first_read_us);}
     if(s->scheduled_us) {SAMPLE(scheduled_to_mux,written-s->scheduled_us);}
 #undef SAMPLE
 }
@@ -71,6 +72,10 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     NakiFrameIdentity identity=pipeline_frame_identity(p,&stamp,packet->pts,p->video->time_base);
     int ret=write_packet_now(p,packet,&interleaved,&written);
     if(ret<0)return ret;
+    if(p->job->config.constrained_crf) {
+        int64_t bits=8*((int64_t)bytes+(pts_us==av_rescale_q(p->first_encoder_pts,p->encoder->time_base,AV_TIME_BASE_Q)?p->encoder->extradata_size:0));
+        if(naki_rate_written(&p->rate,av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q),written,bits)<0)return AVERROR_INVALIDDATA;
+    }
     pthread_mutex_lock(&p->job->mutex);
     p->job->stats.sei_written+=naki_sei_count(pipeline_stamp_sei(meta->owner),&p->job->config.sei);
     pthread_mutex_unlock(&p->job->mutex);
@@ -102,6 +107,13 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     sample_latencies(&p->job->stats.window,&stamp,encoded,mux_start,interleaved,written,slow);
     sample_groups(&p->job->stats.groups,&stamp,output_key,first_i,total,slow);
     sample_groups(&p->job->stats.window_groups,&stamp,output_key,first_i,total,slow);
+    if(stamp.network_first_read_us) {
+        double network_ms=(written-stamp.network_first_read_us)/1000.0;
+        sample_groups(&p->job->stats.network_groups,&stamp,output_key,first_i,network_ms,300);
+        sample_groups(&p->job->stats.window_network_groups,&stamp,output_key,first_i,network_ms,300);
+        if(network_ms>300) {p->job->stats.network_deadline_exceeded++;p->job->stats.network_window_exceeded++;}
+    }
+    if((uint64_t)stamp.encoder_future_frames>p->job->stats.encoder_future_max)p->job->stats.encoder_future_max=(uint64_t)stamp.encoder_future_frames;
     if(output_key) {
         sample_latencies(&p->job->stats.key_lifetime,&stamp,encoded,mux_start,interleaved,written,slow);
         sample_latencies(&p->job->stats.key_window,&stamp,encoded,mux_start,interleaved,written,slow);
@@ -117,6 +129,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     pthread_mutex_unlock(&p->job->mutex);
     int trace=p->job->config.frame_log && (!((ordinal-1)%p->job->config.frame_log_every) ||
        stamp.picture_type==AV_PICTURE_TYPE_I || output_key || total>=slow);
+    if(p->job->config.network_trace||p->job->config.codec_trace)trace=1;
     if(!trace && !first_output && !first_output_key)return 0;
     yyjson_mut_doc *doc=new_event("frame",p->job);
     json_int(doc,"frame_id",stamp.frame_id); json_int(doc,"generation",stamp.generation);
@@ -127,7 +140,56 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     json_int(doc,"intra_reason",stamp.intra_reason);
     char output_type[2]={av_get_picture_type_char(actual_picture_type),0}; json_str(doc,"output_picture_type",output_type);
     json_int(doc,"input_sequence",stamp.sequence); json_int(doc,"pts_us",pts_us);
+    json_int(doc,"output_dts_us",av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q));
     json_int(doc,"encoded_bytes",bytes);
+    if(p->job->config.network_trace) {
+        json_int(doc,"network_first_read_monotonic_us",stamp.network_first_read_us);
+        json_int(doc,"rtmp_complete_monotonic_us",stamp.network_complete_us);
+        json_int(doc,"demux_finished_monotonic_us",stamp.demux_finished_us);
+        json_int(doc,"network_tag_position",stamp.network_tag_position);
+        json_int(doc,"mux_flush_done_monotonic_us",written);
+        json_int(doc,"packet_ingress_monotonic_us",stamp.ingress_us);
+        json_int(doc,"decoder_submit_monotonic_us",stamp.submitted_us);
+        json_int(doc,"decoded_monotonic_us",stamp.decoded_us);
+        json_int(doc,"filter_submit_monotonic_us",stamp.filter_started_us);
+        json_int(doc,"filtered_monotonic_us",stamp.filtered_us);
+        json_int(doc,"encoder_submit_monotonic_us",stamp.encoder_submit_us);
+        json_int(doc,"encoder_accepted_monotonic_us",stamp.encoder_accepted_us);
+        json_int(doc,"encoded_monotonic_us",encoded);
+        json_int(doc,"mux_write_begin_monotonic_us",write_begin);
+        json_num(doc,"network_to_mux_ms",(written-stamp.network_first_read_us)/1000.0);
+        json_int(doc,"deadline_300ms_exceeded",written-stamp.network_first_read_us>300000);
+        json_int(doc,"video_config_bytes",first_output?p->encoder->extradata_size:0);
+        json_num(doc,"network_assembly_ms",(stamp.network_complete_us-stamp.network_first_read_us)/1000.0);
+        json_num(doc,"demux_buffer_ms",(stamp.demux_finished_us-stamp.network_complete_us)/1000.0);
+        json_num(doc,"demux_to_ingress_ms",(stamp.ingress_us-stamp.demux_finished_us)/1000.0);
+    }
+    if(p->job->config.encoder_max_future_frames)json_int(doc,"encoder_future_frames",stamp.encoder_future_frames);
+    if(p->job->config.codec_trace) {
+        if(!p->job->config.network_trace) {
+            json_int(doc,"decoder_submit_monotonic_us",stamp.submitted_us);
+            json_int(doc,"decoded_monotonic_us",stamp.decoded_us);
+            json_int(doc,"encoder_submit_monotonic_us",stamp.encoder_submit_us);
+            json_int(doc,"encoded_monotonic_us",encoded);
+        }
+        naki_decode_trace_json(doc,&stamp.decode_trace);naki_encoder_trace_json(doc,&stamp.encode_trace);
+    }
+    if(stamp.async_ready_us) {
+        json_int(doc,"async_ready_monotonic_us",stamp.async_ready_us);
+        json_num(doc,"async_ready_ms",(stamp.async_ready_us-stamp.submitted_us)/1000.0);
+        json_num(doc,"decoded_dispatch_queue_ms",(stamp.decoder_owner_us-stamp.async_ready_us)/1000.0);
+    }
+    if(p->job->config.constrained_crf) {
+        json_int(doc,"rc_qp",stamp.rate.qp);json_int(doc,"rc_actual_slice_qp",stamp.actual_slice_qp);
+        json_int(doc,"rc_source_bps",stamp.rate.source_bps);json_int(doc,"rc_effective_bps",stamp.rate.effective_bps);
+        json_int(doc,"rc_decision_monotonic_us",stamp.rate.decision_us);json_int(doc,"rc_predicted_bits",stamp.rate.predicted_bits);
+        json_int(doc,"rc_saturated",stamp.rate.saturated);json_num(doc,"rc_complexity",stamp.rate.complexity);
+        json_num(doc,"rc_quality_qp",stamp.rate.quality_qp);json_num(doc,"rc_allowance_bits",stamp.rate.allowance_bits);
+        json_int(doc,"rc_model_kind",stamp.rate.kind);json_num(doc,"rc_model_coefficient",stamp.rate.model_coefficient);
+        json_num(doc,"rc_window_room_bits",stamp.rate.window_room_bits);
+        json_int(doc,"rc_media_clock_us",stamp.rate.media_clock_us);
+        json_num(doc,"rc_followup_reserve_bits",stamp.rate.followup_reserve_bits);
+    }
     char picture_type[2]={av_get_picture_type_char(stamp.picture_type),0};
     json_str(doc,"decoded_picture_type",picture_type);
     json_int(doc,"input_packet_key",stamp.input_key); json_int(doc,"decoded_key",stamp.decoded_key);
@@ -145,6 +207,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     json_num(doc,"decode_ms",decode); json_num(doc,"filter_ms",filter);
     json_num(doc,"setup_or_dispatch_ms",(stamp.filter_started_us-stamp.decoded_us)/1000.0);
     json_num(doc,"encode_ms",encode); json_num(doc,"mux_ms",mux);
+    json_num(doc,"encoder_prepare_ms",(stamp.encoder_submit_us-stamp.filtered_us)/1000.0);
     json_num(doc,"media_hook_ms",hook_us/1000.0);
     json_num(doc,"encode_submit_ms",(stamp.encoder_accepted_us-stamp.encoder_submit_us)/1000.0);
     json_num(doc,"encode_wait_ms",(encoded-stamp.encoder_accepted_us)/1000.0);
