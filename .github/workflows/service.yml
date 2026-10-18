@@ -14,6 +14,8 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/ffmpeg.yml
+    with:
+      publish_sdk: false
   service:
     needs: dependency
     runs-on: ubuntu-24.04

@@ -1,7 +1,19 @@
 name: FFmpeg dependency
 on:
   workflow_dispatch:
+    inputs:
+      publish_sdk:
+        description: Explicitly allow creating a missing SDK release
+        type: boolean
+        required: false
+        default: false
   workflow_call:
+    inputs:
+      publish_sdk:
+        description: Explicitly allow creating a missing SDK release
+        type: boolean
+        required: false
+        default: false
     outputs:
       tag:
         description: Immutable SDK release tag
@@ -22,6 +34,8 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+      - name: Check SDK publication policy
+        run: python3 tests/workflow_publication_test.py
       - id: key
         name: Find matching dependency release
         env:
@@ -41,11 +55,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          PUBLISH_SDK: ${{ inputs.publish_sdk }}
           TAG: ${{ steps.key.outputs.tag }}
           KEY: ${{ steps.key.outputs.key }}
         run: |
-          if [ "$EVENT_NAME" = pull_request ]; then
-            echo 'Dependency recipe changed: a maintainer must dispatch FFmpeg dependency on the trusted branch first.' >&2
+          if [ "$EVENT_NAME" = pull_request ] || [ "$PUBLISH_SDK" != true ]; then
+            echo "Exact SDK $TAG is unavailable; SDK publication is disabled for this run." >&2
             exit 1
           fi
           revision=$(git rev-parse HEAD:experiments/decoder-20261016/ffmpeg-7.0.3)
