@@ -50,6 +50,7 @@ COPY tests/operation_send_order.c tests/
 COPY tests/audio_signature_test.c tests/
 COPY tests/audio_change_fixture.c tests/
 COPY tests/video_rate_test.c tests/video_rate_guess.c tests/
+COPY tests/sei_test.c tests/sei_fixture.c tests/sei_decode_probe.c tests/
 COPY tests/event_write_fault.c tests/
 COPY tests/control_connect_fault.c tests/
 COPY tests/multi_output_integration.py tests/
