@@ -2,6 +2,7 @@
 **/.git
 out/*
 !out/ffmpeg-sdk.tar.gz
+!out/expected-sdk.json
 experiments/decoder-20261016/*
 !experiments/decoder-20261016/ffmpeg-7.0.3
 **/__pycache__
