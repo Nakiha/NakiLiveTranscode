@@ -73,8 +73,11 @@ int main(int argc,char **argv) {
     atomic_store(&mode,2);logger_submit(l,NULL,record("visible_while_trace_busy"));
     for(int i=0;i<900;i++)logger_submit(l,trace,record("trace"));
     char active[8192];snprintf(active,sizeof(active),"%s.000001.jsonl.active",o.event_prefix);
+    snprintf(sealed,sizeof(sealed),"%s.000001.jsonl",o.event_prefix);
     int64_t began=now_us(),end=began+750000;struct stat st;int visible=0;
-    while(now_us()<end) {if(!stat(active,&st)&&st.st_size>0) {visible=1;break;}usleep(1000);}
+    /* The one-second rotation uses whole monotonic seconds. The event may
+     * already be sealed when the observer runs across a second boundary. */
+    while(now_us()<end) {if((!stat(active,&st)&&st.st_size>0)||(!stat(sealed,&st)&&st.st_size>0)) {visible=1;break;}usleep(1000);}
     assert(visible);logger_get_stats(l,&stats);assert(stats.queued>100);
     snprintf(sealed,sizeof(sealed),"%s.000001.jsonl",o.event_prefix);end=began+2000000;
     while(access(sealed,F_OK)&&now_us()<end)usleep(1000);

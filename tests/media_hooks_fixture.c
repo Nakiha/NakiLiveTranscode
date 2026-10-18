@@ -1,5 +1,6 @@
 /* Test-only factory: no meter or SEI implementation; packet lifetime and guards. */
 #include "media_hooks.h"
+#include "pipeline_lifecycle_fixture.h"
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
@@ -62,6 +63,7 @@ static int video(void *opaque,const NakiVideoEncodedEvent *event,AVPacket *packe
         }
     }
     if(!strcmp(c->mode,"video_error"))return AVERROR_EXTERNAL;
+    int lifecycle_error=naki_test_lifecycle_video();if(lifecycle_error)return lifecycle_error;
     if(!strcmp(c->mode,"rewrite_pts"))packet->pts++;
     if(!strcmp(c->mode,"growth"))return av_grow_packet(packet,NAKI_MEDIA_HOOK_MAX_ADDED_BYTES+1);
     /* Exercise the writable-payload extension point without adding metadata. */
@@ -70,6 +72,7 @@ static int video(void *opaque,const NakiVideoEncodedEvent *event,AVPacket *packe
 static void close_hook(void *opaque,const NakiMediaEnd *event) {
     Context *c=opaque;
     assert(pthread_equal(c->owner,pthread_self()));
+    naki_test_lifecycle_close();
     if(c->held)assert(hash(c->held)==c->held_hash);
     FILE *report=fopen(c->path,"w");assert(report);
     fprintf(report,"{\"audio\":%llu,\"video\":%llu,\"keys\":%llu,\"known_types\":%llu,"
@@ -81,6 +84,7 @@ static void close_hook(void *opaque,const NakiMediaEnd *event) {
     assert(!fclose(report));av_packet_free(&c->held);free(c);
 }
 int naki_media_hooks_open(const NakiMediaJobInfo *info,NakiMediaHooks *hooks) {
+    naki_test_lifecycle_open(info);
     const char *directory=getenv("NAKI_TEST_MEDIA_HOOK_DIR"),*mode=getenv("NAKI_TEST_MEDIA_HOOK_MODE");
     if(!directory)return AVERROR(EINVAL);
     Context *c=calloc(1,sizeof(*c));if(!c)return AVERROR(ENOMEM);

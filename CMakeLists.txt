@@ -8,6 +8,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Keep unwind information in the runtime ELF and archive DWARF separately.
 add_compile_options(-fno-omit-frame-pointer)
 add_link_options(-Wl,--build-id=sha1)
+option(NAKI_SANITIZERS "Instrument application, yyjson and test helpers with ASan/UBSan" OFF)
+if(NAKI_SANITIZERS)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        message(FATAL_ERROR "NAKI_SANITIZERS requires GCC or Clang")
+    endif()
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all)
+    add_link_options(-fsanitize=address,undefined)
+endif()
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavfilter libavutil libswscale)
@@ -18,8 +26,18 @@ add_library(yyjson STATIC third_party/yyjson/src/yyjson.c)
 target_include_directories(yyjson PUBLIC third_party/yyjson/src)
 set(NAKI_CONTROL_SOURCES app/component_update.c app/operation_store.c)
 set(NAKI_POLICY_SOURCES app/frame_policy.c app/frame_policy_config.c app/frame_policy_runtime.c app/watermark_config.c app/output_config.c app/sei_config.c app/identity.c app/intent.c app/control_spec.c ${NAKI_CONTROL_SOURCES})
-add_executable(naki-live app/service.c app/operation_cache.c app/ipc.c app/common.c app/logger.c app/netstats.c app/crash_client.c ${NAKI_POLICY_SOURCES})
-set(NAKI_WORKER_SOURCES app/worker.c app/watermark.c app/video_filter.c app/branch_queue.c app/ipc.c app/input_probe.c app/audio_signature.c app/sei.c app/pipeline.c app/common.c app/logger.c app/netstats.c app/crash_client.c ${NAKI_POLICY_SOURCES})
+set(NAKI_SERVICE_SOURCES
+    app/service.c app/service_records.c app/service_supervisor.c
+    app/service_http.c app/service_projection.c)
+add_executable(naki-live ${NAKI_SERVICE_SOURCES} app/operation_cache.c app/ipc.c
+    app/common.c app/logger.c app/netstats.c app/crash_client.c ${NAKI_POLICY_SOURCES})
+set(NAKI_PIPELINE_SOURCES
+    app/pipeline.c app/pipeline_reader.c app/pipeline_output.c
+    app/pipeline_mux.c app/pipeline_encode.c)
+set(NAKI_WORKER_SOURCES
+    app/worker.c app/watermark.c app/video_filter.c app/branch_queue.c app/ipc.c
+    app/input_probe.c app/audio_signature.c app/sei.c ${NAKI_PIPELINE_SOURCES}
+    app/common.c app/logger.c app/netstats.c app/crash_client.c ${NAKI_POLICY_SOURCES})
 add_executable(naki-live-worker ${NAKI_WORKER_SOURCES})
 target_link_libraries(naki-live-worker PRIVATE PkgConfig::CURL)
 set(NAKI_MEDIA_HOOK_SOURCE "" CACHE FILEPATH "Private media hook factory source; empty uses no-op implementation")
@@ -69,7 +87,6 @@ if(BUILD_TESTING)
     target_link_libraries(naki-sei-test PRIVATE yyjson PkgConfig::FFMPEG)
     target_compile_options(naki-sei-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     set_target_properties(naki-sei-test PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
-    add_test(NAME sei COMMAND naki-sei-test)
     add_executable(naki-sei-fixture tests/sei_fixture.c)
     target_link_libraries(naki-sei-fixture PRIVATE PkgConfig::FFMPEG)
     target_compile_options(naki-sei-fixture PRIVATE -Wall -Wextra -Werror)
@@ -159,8 +176,16 @@ if(BUILD_TESTING)
     target_include_directories(naki-frame-policy-config-test PRIVATE app)
     target_link_libraries(naki-frame-policy-config-test PRIVATE yyjson)
     target_compile_options(naki-frame-policy-config-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
-    add_executable(naki-live-hook-worker ${NAKI_WORKER_SOURCES} tests/media_hooks_fixture.c tests/operation_send_order.c tests/video_rate_guess.c)
+    add_executable(naki-live-hook-worker ${NAKI_WORKER_SOURCES} tests/media_hooks_fixture.c tests/operation_send_order.c tests/video_rate_guess.c tests/pipeline_lifecycle_fixture.c)
     target_link_options(naki-live-hook-worker PRIVATE -Wl,--wrap=ipc_send -Wl,--wrap=av_guess_frame_rate)
+    foreach(symbol avcodec_alloc_context3 avcodec_free_context avcodec_open2 avcodec_async_create
+            avcodec_async_free avcodec_async_receive_frame avfilter_graph_alloc avfilter_graph_free
+            avfilter_graph_config avformat_alloc_context avformat_open_input avformat_close_input
+            avformat_alloc_output_context2 avformat_free_context avio_open2 avio_closep
+            avio_alloc_context avio_context_free avformat_write_header av_write_trailer avio_flush
+            pthread_create naki_branch_queue_init_limits)
+        target_link_options(naki-live-hook-worker PRIVATE "-Wl,--wrap=${symbol}")
+    endforeach()
     target_link_libraries(naki-live-hook-worker PRIVATE PkgConfig::CURL)
     naki_configure_service(naki-live-hook-worker)
     target_compile_options(naki-live-hook-worker PRIVATE -UNDEBUG)
@@ -182,6 +207,11 @@ if(BUILD_TESTING)
     target_compile_options(naki-event-logger-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
     target_link_options(naki-event-logger-test PRIVATE -Wl,--wrap=fwrite)
     target_link_libraries(naki-event-logger-test PRIVATE yyjson Threads::Threads)
+    add_executable(naki-logger-submit-test tests/logger_submit_test.c app/logger.c app/crash_client.c)
+    target_include_directories(naki-logger-submit-test PRIVATE app)
+    target_compile_options(naki-logger-submit-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_options(naki-logger-submit-test PRIVATE -Wl,--wrap=yyjson_mut_val_write_opts -Wl,--wrap=yyjson_mut_doc_free -Wl,--wrap=pthread_join)
+    target_link_libraries(naki-logger-submit-test PRIVATE yyjson Threads::Threads)
     add_executable(naki-network-probe tests/network_probe.c)
     add_executable(naki-probe-test tests/probe_test.c app/input_probe.c)
     target_include_directories(naki-probe-test PRIVATE app)
@@ -205,4 +235,23 @@ if(BUILD_TESTING)
     endforeach()
     target_link_libraries(naki-network-probe PRIVATE PkgConfig::FFMPEG)
     set_target_properties(naki-network-probe PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
+    # CTest covers native tests, not the complete service acceptance matrix.
+    # Media/transport fixture drivers remain owned by their Python suites.
+    foreach(name frame-policy frame-policy-config watermark-config branch-queue
+            identity-intent control-spec sei component-update operation-store
+            operation-cache audio-signature video-rate video-filter)
+        add_test(NAME ${name} COMMAND naki-${name}-test)
+        set_tests_properties(${name} PROPERTIES LABELS "native;quick" TIMEOUT 60)
+    endforeach()
+    find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+    foreach(name event-logger logger-submit logger)
+        add_test(NAME ${name} COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/run_native_test.py" ${name}
+            "$<TARGET_FILE:naki-${name}-test>")
+        set_tests_properties(${name} PROPERTIES LABELS "native" TIMEOUT 30)
+    endforeach()
+    set_tests_properties(event-logger logger-submit PROPERTIES LABELS "native;quick")
+    # Also directly runnable, but already exercised by live_mux_integration.py.
+    add_test(NAME live-mux COMMAND naki-live-mux-test)
+    set_tests_properties(logger live-mux PROPERTIES LABELS "native;integration-helper" TIMEOUT 30)
 endif()

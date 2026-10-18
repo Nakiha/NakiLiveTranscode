@@ -26,7 +26,11 @@ void logger_stop(Logger *logger);
 TraceSink *logger_trace_open(Logger *logger, const char *prefix);
 void logger_trace_finish(Logger *logger, TraceSink *sink);
 void logger_trace_release(Logger *logger, TraceSink *sink);
-/* Takes ownership of doc, including on queue overflow. Never waits for I/O. */
+/* Takes ownership of doc, including on rejection. Never waits for I/O.
+ * Reservations preserve order across concurrent preparation. Queue counts include
+ * preparing records; bounded preparation overflow uses the normal loss counters.
+ * Do not start submissions with a released sink or after starting logger_stop.
+ * Stop waits for already reserved preparations; callers must let them complete. */
 void logger_submit(Logger *logger, TraceSink *sink, yyjson_mut_doc *doc);
 void logger_submit_record(Logger *logger,LoggerCategory category,TraceSink *sink,yyjson_mut_doc *doc);
 void logger_get_stats(Logger *logger, LoggerStats *out);

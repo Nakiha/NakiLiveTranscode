@@ -1,6 +1,6 @@
 # 单路帧身份、严格时间轴、I 策略与显式过载
 
-工作区已实现本页的单路子集；本地功能验收、独立复审修复与实际 SDK 身份以 [第二批验证记录](validation-frame-policy.md) 为准。当前尚未提交或更新父 gitlink，等待独立源码复审。既有请求不带下面三个配置组时保留原来的时间戳回退、编码器周期与不抽帧行为。服务仍是实验性 Linux 单视频转码；音频仅为既有有界 AAC/MP3 passthrough。
+已实现本页策略，单路直接路径与固定多输出按各路维护运行状态；不带下面三个配置组时保留 legacy 时间戳回退、编码器周期与不抽帧行为。早期复审见[帧策略记录](validation-frame-policy.md)，当前 pin/SDK、回归和未验证项见[核心整理验证](validation-core-refactor.md)。服务仍是实验性 Linux 单输入，音频仅有界 AAC/MP3 passthrough；不宣称脏时间戳修复或 source_i_anchors 已实现。
 
 ```json
 {

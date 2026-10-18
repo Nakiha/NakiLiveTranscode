@@ -1,5 +1,7 @@
 # 带缓存快速探流与 SDK 来源核对：第一批验证
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 独立审查随后发现并修复了旧 mtime 对象复用和预算边界问题；后续状态以 [审查修复记录](validation-buffered-probe-review.md) 为准，下方保留首轮结果及其来源。
 
 基于父仓库 `e3343870fe9bfe219e6d69f20c19b93a90ed52da`、FFmpeg `f511375887a2226fd3971b6c2222785d264901e0` 的未提交实现；两个本地审查分支均为 `codex/buffered-live-probe`。环境为已有 WSL Ubuntu 24.04 x86_64 工具链，构建最多 2 个任务；没有安装依赖、推送、触发远端 CI、合入或部署。开始前的原实验备份在 `out/probe-before-implementation-20261016T204456869/`，原补丁和 `probe_test.c` 均保留。

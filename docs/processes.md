@@ -1,6 +1,6 @@
 # 进程池、首帧追踪与控制接管
 
-0.3.0 仍为 Linux 单路纯视频实验服务。控制进程 `naki-live` 使用 libevent HTTP；独立 `naki-live-worker` 持有本任务全部媒体连接、解码、filter、编码、封装和逐帧追踪文件。容器以 Python 标准库轻量监管入口重启异常退出的控制进程；媒体和 IPC 实现在 C 中。监管入口前台运行，不做 daemon 双重 fork。
+当前 0.9.0 是 Linux 单输入、1–4 个固定逻辑输出实验服务，FLV/TS 支持有界 AAC/MP3 透传，MP4 视频限定。naki-live 使用 libevent HTTP；独立 worker 持有同任务媒体连接、共享解码及各输出 filter/encoder/mux，唯一 logger 写进程事件/trace。容器配置 Python 标准库监管入口重启异常退出的 controller；媒体/IPC 为 C。本机验证与实际镜像/远程验收须分开读取，见[合并前复查](validation-final-review.md)及对应提交的 CI 记录。
 
 ## 小型待命池
 
@@ -12,19 +12,19 @@ worker 通过 `posix_spawn` + exec 创建，子进程只保留标准描述符和
 
 ## IPC 与快照
 
-采用非阻塞 Unix `SOCK_SEQPACKET`，IPC v2 JSON，单消息最多 64 KiB。命令区分 start、固定 job/worker instance 的 stop、standby_stop、服务级 drain 和 final-ack，另有 accepted/stop_ack、ready、快照和日志。初次连接通过 socketpair，之后可通过私有具名 socket 接管；没有开放 TCP IPC 端口。原始帧、压缩包和 FFmpeg 指针不跨进程。不兼容版本保持可见并禁止新任务；第一轮不承诺与旧 worker 滚动兼容。
+采用非阻塞 Unix SOCK_SEQPACKET，IPC v2 的有界 JSON，单消息最多 64 KiB；传递 start/固定 job+worker instance 的 stop、standby_stop、drain/final ACK，以及 accepted/stop_ack、ready、快照、组件更新/结果和恢复分页。进程事件直接本地写入，不经 IPC 转发日志。初连 socketpair，之后私有具名 socket 接管；无 TCP IPC 端口，不传原始帧/包或 FFmpeg 指针。除 IPC 版本外，恢复还要求匹配更新/查询/result_version 能力；不兼容存活 worker 保持可见并关闭新任务，不承诺无条件滚动兼容。
 
 worker 控制线程独立于媒体线程，约每 250 ms 上报一次完整快照。发送缓冲满时不排队堆积快照，下次重新生成最新值，`ipc_snapshots_coalesced` 计数。stop 的发送会在控制端重试，并受退出期限约束；最终快照重发直到收到确认。媒体线程只更新短锁保护的指标和有界日志队列，不等待 IPC。
 
 `GET /v1/job` 读取最近快照，`supervisor.snapshot_age_ms` 表示控制端缓存年龄；worker 的 `last_output_age_ms`、`write_in_progress_ms` 等是生成快照时的数值，不能忽略缓存年龄。worker 自己的 `auto_stats_age_ms` 还表示媒体 owner 更新自动调度数据的年龄。控制在线但整个 worker 不再发送任何消息时，默认 5 秒判定无响应并强制结束；这和控制进程已经断开是不同状态。没有实现依据“持续无媒体输出”自动重启的策略。
 
-当前日志和快照共用 IPC。日志线程采用非阻塞发送；失联/缓冲满会计入 worker 的日志丢失和 I/O 错误，本地追踪轮转继续。控制端统一写 stdout，并另计其日志队列丢失。最终 API 状态在进程退出确认后才公开为 completed/stopped/failed；finishing 仍占用任务名额。
+worker/controller 各自 logger 写本进程 events，trace 另有前缀；stdout 仅保留 launcher 等诊断，不作为事件汇聚通道，见[事件合同](process-events.md)。控制失联期间媒体和本地日志继续，快照合并与日志丢失分开计数。退出确认前 finishing 仍占任务名额；最终可为 completed/completed_partial/stopped/failed。恢复须先重建归属与有界 operation 历史，不能先接受新任务。
 
 ## 控制进程异常退出与接管
 
 控制进程异常退出或 SIGKILL：worker 检测到控制连接关闭，但不设置 cancel、不关闭媒体，不依赖父进程死亡信号。它继续本地媒体、统计和追踪文件轮转，等待新控制端连接。若任务在失联期间完成，worker 释放媒体资源，保留最终状态等待接管确认。不会因为失联无限缓存日志或帧。
 
-新控制进程必须使用相同 run-dir 或显式相同的 `--state-dir`。默认把规范化 run-dir 的哈希映射到 `/tmp/naki-live-<uid>-<hash>`，目录所有者必须为服务用户，权限严格为 0700；显式目录也必须满足该条件。运行中不能删除/清理这些端点。长期原生部署建议提供专用、重启时保留的运行目录。
+新控制进程须使用同一 private state 位置和服务 namespace；默认由规范化 run-dir 派生。未显式 state-dir 时，绝对 TMPDIR（缺省 /tmp）下使用 naki-live-uid-hash，目录 owner 为服务用户、权限严格 0700；显式目录也须核验。运行中不得删除端点；生产迁移前须单独验证目标路径/权限/重启保留策略。
 
 控制进程先获取独占锁，拒绝第二个管理者，然后扫描旧端点，通过 Unix peer credentials 验证 UID/PID，并打开 pidfd 监视与发送信号，避免对被复用的数字 PID 误操作。worker 仅接受同 UID 的控制连接，已有控制连接时拒绝第二条。恢复配置、任务 ID、请求 ID、原始单调时间和新快照后，才恢复新任务 admission；不会重新打开输入或输出。若发现多条活动任务冲突，会停止 admission，保留媒体供人工处理。
 
@@ -44,7 +44,7 @@ worker 控制线程独立于媒体线程，约每 250 ms 上报一次完整快�
 
 可传 `X-Request-ID`（最多 128 个 ASCII 字母、数字、下划线或连字符）关联单次 HTTP 尝试，未提供时生成随机 128 位 ID，非法值返回 400。创建关联另存 create_request_id；创建和停止的业务重试使用 operation_id，详见 [服务接口](service.md)。`request_received` 记录完整 HTTP 请求进入业务回调的时刻；此时 HTTP 库已经收完请求体，ACK 等待不会重置它。
 
-不论 `frame_log` 开关，每个任务都尝试记录 `first_frame`：首个输出视频包一条；若首个输出关键帧不是同一包，再记录一条。事件包含请求、dispatch、worker 接单、该帧包 ingress、解码提交/完成、filter 提交/完成、编码提交/完成、mux 开始和 flush 完成的单调时间、分段耗时、总耗时以及帧类型/关键帧分类。最多两个首帧记录保存在 worker 内存中，接管后重发并标记 `replayed_after_reconnect=1`，可按 job/首帧分类去重。常规日志仍受有界队列丢失约束。
+不论 `frame_log` 开关，每个输出都尝试记录 `first_frame`：首个输出视频包一条；若首个输出关键帧不是同一包，再记录一条。事件包含请求、dispatch、worker 接单、该帧包 ingress、解码提交/完成、filter 提交/完成、编码提交/完成、mux 开始和 flush 完成的单调时间、分段耗时、总耗时以及帧类型/关键帧分类。每输出最多两个 checkpoint 保存在 worker 内存中，随状态快照在接管后查询；本地 first_frame 事件不因重连重放，没有 `replayed_after_reconnect` 字段。常规日志仍受有界队列丢失约束。
 
 最终可用快照仍未观察到首帧时输出 `startup_incomplete`，包含已有快照、原因和请求到退出时间。原生崩溃前可能有尚未上报的输出，不能据此断言绝对没有发送过媒体；需结合首帧日志和快照年龄。`startup` 摘要包含：
 

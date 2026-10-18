@@ -1,6 +1,6 @@
 # 直播帧策略合同与后续设计（部分已实现）
 
-这是对客户合同和后续实现的设计补充，不代表整份合同已经实现或发布。工作区已实现的单路子集为 source_all、三种普通 I 策略及显式过载抽帧，具体可发送字段以 [OpenAPI](openapi.json) 和[单路帧策略](frame-policy.md)为准；本地验证见[第二批记录](validation-frame-policy.md)，当前等待独立源码复审。本页完整配置示例还包含未支持的字段，不可整体发送到 `/v1/job`。source_i_anchors、时间戳修复及 SCTE-35 仍未实现；SEI 已按本轮确认收敛为[模板显式类型选择](sei.md)，不是本页旧示例的自动全保留接口，整体请求结构见 [处理链草案](pipeline-design.md)。
+这是合同与后续设计补充，不代表整页已实现或发布。source_all、三种普通 I 策略和显式过载抽帧已实现，具体字段看[OpenAPI](openapi.json)和[帧策略](frame-policy.md)；历史复审见[早期记录](validation-frame-policy.md)，当前回归见[核心整理验证](validation-core-refactor.md)。完整示例包含未支持字段，不可整体发送到 v1。source_i_anchors、脏时间戳修复和 SCTE-35 仍未实现；SEI 已收敛为[显式类型选择](sei.md)，不是旧示例的自动全保留/迁移策略。整体候选结构见[处理链草案](pipeline-design.md)。
 
 ## 已确认的业务语义
 

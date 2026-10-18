@@ -1,6 +1,6 @@
 # 可扩展处理链草案（未实现）
 
-当前实现和可发送字段以 [OpenAPI](openapi.json) 为准。固定 2–4 路与固定输出动态输入适配已按本轮用户确认接入，见[实现边界](branching-contract.md)；下文更广的 `/v2/jobs` 仍是草案。主链支持 null/scale/format；单水印 v1 的实现边界见 [水印接口](watermark.md)，正在验证。这里的通用 `/v2/jobs`、任意滤镜、ROI、HDR 转换和规格重建仍是草案，不能复制到 `/v1/job` 试运行。
+当前可发送字段以[OpenAPI](openapi.json)为准。固定多输出/输入适配、单水印 v1、typed watermark 更新及显式类型 SEI 已实现，见[文档索引](README.md)和[当前验证](validation-core-refactor.md)。第四批已完成按 owner 的职责搬移，实际文件见[模块导航](../app/README.md)；下文通用 JobSpec/planner/分析节点并非当前文件清单。`/v2/jobs`、任意滤镜、ROI、HDR、通用一对多谱系和在线输出重建仍是草案，不能整体复制到 v1。
 
 直播客户的过载抽帧、随源/固定周期/随源+最大间隔 I 帧、PTS 与 UNKNOWN SEI 合同见 [帧策略草案](live-frame-policy.md)。已确认源 PTS 自身的空洞可以保留，不补帧、不因此终止；源 I 和到期需强制 I 的画面必须先于抽帧决策受到保护。
 
@@ -40,11 +40,11 @@ TS→TS 的 SCTE-35 原始信令、节目时间和客户临时安排注入见 [S
 
 `auto`、HDR 默认、aspect、ROI 坐标等必须在首帧规格可用后解析为明确值，报告 effective spec，禁止悄悄跳过能力。“降采样”分开命名：scale 改空间分辨率，fps 改时间采样，format/chroma 改位深/色度，audio.resample 改音频采样率。音频重采样意味着解码/处理/重新编码，copy 模式不得同时要求 resample。
 
-创建前静态校验 JSON、范围、字段冲突、滤镜白名单与编译能力；等首帧后再校验裁剪范围、色彩来源、编码格式和可实现的预算。HTTP 202 仍只表示已接受，运行期校验失败通过任务状态及字段路径报告。新版本可增加 validate/prepare 能力接口，但不能把纯静态校验宣称为已成功打开直播源。现有 X-Request-ID 仅用于关联，未来幂等键须另设计。
+未来接口应在创建前校验字段/范围/白名单/编译能力，首帧后再校验裁剪/色彩/编码与预算。202 不代表已完成或已打开直播源。当前 v1 已有 job/operation 身份、有限重试和 typed watermark 更新，见[组件更新](component-updates.md)；X-Request-ID 只关联本次 HTTP 尝试。这里没有新增 validate/prepare 接口。
 
 ## 复用 libavfilter 的方式
 
-服务直接链接 libavfilter，C worker 中推入/取出 AVFrame，不通过命令行 FFmpeg 进程。现有 `open_output` 已用结构化 width/height 生成固定 `scale/null,format` 描述，调用 `avfilter_graph_parse_ptr` 和 `avfilter_graph_config`。
+服务直接链接 libavfilter，在 C worker 推入/取出 AVFrame。当前 pipeline_output.c 调用 video_filter.c 的准备函数，按 width/height 生成固定 scale/null,format 描述并调用 avfilter_graph_parse_ptr/config；不开放任意 filtergraph 字符串。
 
 请求边界保持结构化；内部固定线性链可以编译成滤镜描述字符串，让 libavfilter 协商格式、链接及执行。复杂分支、节点级配置或控制建议通过 `avfilter_graph_create_filter`、AVOptions 和 `avfilter_link` 创建图。两者最终使用同一套滤镜执行机制。用 API 连接节点并不会消除滤镜本身的排队或重排。
 
@@ -54,7 +54,7 @@ TS→TS 的 SCTE-35 原始信令、节目时间和客户临时安排注入见 [S
 
 ## app 模块划分
 
-建议逐步将 pipeline.c 拆成以下职责，先搬运行为，保持现有回归：
+第四批实际拆分见[模块导航](../app/README.md)。下面是更广处理链的候选职责，不表示 planner/analysis/通用 JobSpec 已实现，也不要求为每项增加线程：
 
 | 模块 | 职责 |
 | --- | --- |
@@ -81,6 +81,8 @@ ROI 检测属于分析支路：低分辨率采样可降低成本，结果记录�
 落地顺序建议：模块搬运和 JobSpec → crop/pad/scale/sharpen 保帧链 → 追踪一对多后接解交错/fps → 完整颜色模型与 HDR→SDR → ROI 分支和编码器适配 → 在线 revision 更新。每一步补实际像素/色彩/时间戳、EOF 和缓存上限验证，不用只检查滤镜名能否找到。
 
 ## 可热更新的图片/动画水印
+
+状态说明：每输出单水印、required 起播与 revision 更新已经实现，typed watermark patch/CAS/操作查询也已实现。下面仅保留多 layer、百分比及其他策略的早期候选，不表示整段请求可发送。
 
 以下保留早期设计讨论，不是 v1 请求结构。用户现已确认单水印 `/v1/job/watermark`、完整 revision 替换、required 起播失败及热更失败保留旧图；当前实现和资源限制以 [单水印 v1](watermark.md) 为准。百分比、多水印、HDR 和其他列出的候选策略没有随本批开放。
 
@@ -121,6 +123,8 @@ prepare 成功后通过有界消息发布 immutable layer set，媒体 owner 在
 
 ## 必需水印与起播等待
 
+当前 v1 已有 waiting_assets、请求起点的 required deadline、等待期间不打开媒体输入和可停止查询。多 required layer/分阶段资源直方图等仍属下文候选；当前实际合同以 watermark.md 和 component-updates.md 为准。
+
 用户要求：部分客户第一帧起必须带水印，资源未就绪则等待至水印拉取超时。它是 startup gate，与运行中资源更新不同；不能自动套用“失败保留旧图”，因为起播时可能没有旧图。
 
 建议 task 状态增加 preparing/waiting_assets，并在 startup 日志记录资源准备起止、下载/解码/缩放耗时、重试次数及等待原因。HTTP 仍异步返回 202，状态查询和停止始终可用；取消需要中断等待、下载及解码任务。在 required layer 的资源、布局和首张可合成帧全部 ready 前，不提交任何视频到编码器，也不输出无水印视频包。多个 required layer 是一个联合 gate，所有 layer ready 才起播。
@@ -132,6 +136,8 @@ prepare 成功后通过有界消息发布 immutable layer set，媒体 owner 在
 运行中更新默认 keep_previous；没有旧资源的新增可选 layer 在新资源 ready 后才启用，期间视频继续。若客户要求“更新请求到达立即遮挡/停画，直到新图 ready”，那是另外的业务连续性策略，需单独配置并评估接收端超时，不能隐式套用到所有热更新。
 
 ## 一入多出与缩放分支并行
+
+当前已经实现共享解码、2–4 路独立 owner、有界 FIFO、固定输出适配和可返回错误的 fail_branch，使用 output_id。下文共享编码、任意 rendition/destination 层、独立降帧率、block_all/drop_raw_frames、ABR 对齐与更多分支池仍是设计候选，不是现有 API 或性能承诺。
 
 建议未来 JobSpec 用稳定 output/rendition id 的列表，视频 processing/encoder 归属于 rendition，交付 URL/封装归属于 destination。同分辨率、处理链、码率、编码/GOP 设置完全一致的多个推流目标可以共享编码，再按引用分发压缩包到各自 mux；不同规格/水印的 rendition 各自编码。不能只按尺寸相同就共享编码器，需要完整 effective spec 匹配且编码头/封装要求兼容。
 

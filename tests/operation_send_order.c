@@ -1,6 +1,7 @@
 /* Test-only socket backpressure: hold a captured applied/pending RPC until
  * newer terminal history has actually been sent on the same worker channel. */
 #include "ipc.h"
+#include "pipeline_lifecycle_fixture.h"
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@ static void save(const char *directory,const char *name,yyjson_mut_doc *doc) {
     FILE *f=fopen(path,"w");assert(f);assert(fwrite(text,1,bytes,f)==bytes);assert(!fclose(f));free(text);
 }
 int __wrap_ipc_send(int fd,yyjson_mut_doc *doc) {
+    naki_test_lifecycle_snapshot(doc);
     const char *directory=getenv("NAKI_TEST_OPERATION_ORDER_DIR"),*id=getenv("NAKI_TEST_OPERATION_ORDER_ID");
     if(!directory||!id)return __real_ipc_send(fd,doc);
     yyjson_mut_val *root=yyjson_mut_doc_get_root(doc);const char *kind=yyjson_mut_get_str(yyjson_mut_obj_get(root,"ipc_kind"));

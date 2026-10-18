@@ -61,7 +61,7 @@ out/bin/naki-live-ctl stop-job JOB_ID STOP_OPERATION_ID
 
 旧命令保留。旧 watermark 仍要求 job_id、递增 revision，多路还要求 output_id；完整配置转为相同 operation 模型。其 startup timeout 不改变创建策略，required 必须与原策略一致。兼容操作 ID 由 controller 分配，旧请求不获得调用者自选幂等键保证，超时仍须核对原 revision。
 
-验收入口为 tests/update_api_integration.py 和 tests/watermark_operation_test.c；具体通过范围看工程检查点，接口文档不代表候选全量通过。
+验收入口为 tests/update_api_integration.py 和 tests/watermark_operation_test.c；当前源码绑定的完整回归与未验证项见[核心整理验证](validation-core-refactor.md)。接口文档本身不证明候选已部署或在目标机通过。
 
 ## Result ordering
 

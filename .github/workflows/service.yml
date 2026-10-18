@@ -19,7 +19,7 @@ jobs:
   service:
     needs: dependency
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: write
     steps:
@@ -45,9 +45,8 @@ jobs:
           echo "DEPENDENCY_KEY=${SDK_TAG#ffmpeg-linux-amd64-}" >> "$GITHUB_ENV"
       - name: Build application and matching debug files (no FFmpeg compilation)
         run: |
-          # Release-key fixtures need Git; the test container intentionally has no Git dependency.
-          python3 tests/sdk_identity_test.py
-          python3 tests/sdk_expected_test.py
+          # Generate the independent expectation from the trusted full checkout.
+          # SDK/release-key fixtures run in the full test entry point (with Git).
           python3 scripts/sdk-expected.py generate --output out/expected-sdk.json
           docker build --target test --build-arg FFMPEG_STAGE=ffmpeg-prebuilt \
             --build-arg SOURCE_REVISION="$GITHUB_SHA" --build-arg DEPENDENCY_KEY="$DEPENDENCY_KEY" \
@@ -63,8 +62,12 @@ jobs:
       - name: Media, observation, recovery, bounded crash collection and offline symbols
         run: |
           mkdir -p out/ci-results
-          docker run --rm --init -v "$PWD/out/ci-results:/src/out/results" naki-live-transcode:test \
-            bash -c 'trap "cp -a out/service-test-* out/symbols-test-* out/decoder-test-* out/probe-test-* out/sdk-build-* out/frame-policy-* out/vvenc-test-* out/vvenc-latency-* out/vvenc-pts-* out/live-mux-* out/media-hooks-* out/watermark-* out/multi-output-* out/mixed-queue-* out/audio-signature-* out/video-rate-* out/sei-* out/update-api-* out/control-lifecycle-* out/input-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/ci-test.sh'
+          docker run --rm --init -e NAKI_SOURCE_REVISION="$GITHUB_SHA" -v "$PWD/out/ci-results:/src/out/results" naki-live-transcode:test \
+            bash -c 'trap "cp -a out/checks-* out/event-logger-* out/logger-submit-* out/pipeline-lifecycle-* out/service-test-* out/symbols-test-* out/decoder-test-* out/probe-test-* out/sdk-build-* out/frame-policy-* out/vvenc-test-* out/vvenc-latency-* out/vvenc-pts-* out/live-mux-* out/media-hooks-* out/watermark-* out/multi-output-* out/mixed-queue-* out/audio-signature-* out/video-rate-* out/sei-* out/update-api-* out/control-lifecycle-* out/input-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/ci-test.sh'
+      - name: Application and yyjson ASan UBSan checks
+        run: |
+          docker run --rm --init -e NAKI_SOURCE_REVISION="$GITHUB_SHA" -v "$PWD/out/ci-results:/src/out/results" naki-live-transcode:test \
+            bash -c 'trap "cp -a out/checks-* out/sanitizers-* out/event-logger-* out/logger-submit-* out/pipeline-lifecycle-* out/service-test-* out/watermark-* out/multi-output-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/test-sanitizers.sh'
       - name: Runtime image recovery and source-line symbolization
         env:
           NAKI_SYMBOLS_DIR: ${{ github.workspace }}/out/symbols

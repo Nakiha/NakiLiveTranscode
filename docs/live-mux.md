@@ -6,7 +6,7 @@
 
 ## 实现边界
 
-FFmpeg fork 新增 `libavformat/live_mux.h` API 1，libavformat 次版本升至 63.3.102。普通上游 muxer API 并未自动支持动态加流，必须显式启用本扩展。`avformat_write_header` 之后调用 `avformat_live_mux_init`，然后 `avformat_live_add_audio`。注册复制完整参数且不进行网络 I/O，失败回滚新流；新轨道的 sequence header/PMT 在其媒体之前写出。
+FFmpeg fork 提供 `libavformat/live_mux.h` API 1；63.3.102 是该扩展最初的版本窗口，当前固定 n9.0.2 fork 的 libavformat 为 63.3.104，依赖身份见[当前验证](validation-core-refactor.md)。普通上游 muxer API 并未自动支持动态加流，必须显式启用本扩展。`avformat_write_header` 之后调用 `avformat_live_mux_init`，然后 `avformat_live_add_audio`。注册复制完整参数且不进行网络 I/O，失败回滚新流；新轨道的 sequence header/PMT 在其媒体之前写出。
 
 FLV 扩容每轨状态数组，保持已有 track id 和时间戳，先发新增 AAC 配置/多轨元数据再发媒体。TS 为新音轨分配未用 PID，增加 PMT version、重发 PAT/PMT，保持视频 PID、PCR 源、计数器和原 PES 状态；每次实际输出后排空当前 PES 和 AVIO，避免音频聚合隐含额外缓存。当前只支持单 service、无显式 AVProgram、非 M2TS。FLV keyframe-index 模式不支持追加。
 

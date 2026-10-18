@@ -1,10 +1,10 @@
 # 固定多输出与动态输入适配（v1，实验实现）
 
-本批合同已确认。主聊天明确提出固定 2–4 路、单路失败释放及固定输出适配三个建议，用户回复：“我觉得就这样就行”。早期客户完整逐字需求仍未检得，不能把旧 `/v2/jobs` 草案当作额外合同。水印完整功能已本地提交 `5052d203bc438dd1796bfb5273c1d82a5013ea77`，本批多输出改动已通过独立源码复审，按授权保存本地完整提交，不推送。
+当前已实现固定 2–4 路、可返回的分支故障隔离与固定输出适配，单逻辑输出仍走直接路径。早期确认/提交过程见[历史多输出记录](validation-multi-output.md)，当前候选与未验证项见[核心整理验证](validation-core-refactor.md)。旧 `/v2/jobs` 草案不是额外合同或现有 API。
 
 ## 创建和控制
 
-沿用 `POST /v1/job`，只允许一个活动输入任务。旧的顶层 `output` 单路请求继续有效；多路使用 `outputs` 数组，禁止同时提交顶层 `output` 或 `watermark`。
+只允许一个活动输入任务。`POST /v1/jobs` 的 spec 或兼容 `POST /v1/job` 接受以下配置。顶层 output 单路继续有效；outputs 数组允许 1–4 项，禁止同时提交顶层 output/watermark。单元素默认 id=main（也可显式指定），归一化为直接路径，状态不增加 outputs 数组；2–4 项必须显式唯一 id。
 
 ```json
 {
@@ -22,10 +22,10 @@
 
 id 为唯一的 1–32 字节 ASCII 字母、数字、下划线或连字符，目标 URI 也不能完全重复。每路支持 output/output_format、encoder/preset/profile、width/height、bitrate、encoder_threads、audio_copy、mux_wait_ms、watermark、sei 和下表预算。没有覆盖的媒体字段继承顶层配置或原默认值；更换编码器时继承的 preset/profile 仍须匹配该编码器。input、pace、decoder 参数、timestamps、intra 和 frame_selection 位于任务级；I/过载运行状态及编码关联则各路独立。不做运行中增删路、编码共享、独立降帧率或 ABR 对齐。
 
-水印仍是每路单水印，像素位置相对于各自输出画布；初始化资源及 accepted/prepared/applied/failed revision 各路独立。多路热更必须指定目标，单路请求禁止 output_id：
+水印仍是每路单水印，像素位置相对于各自画布；资源/revision 各路独立。推荐[typed 更新](component-updates.md)。兼容 `POST /v1/job/watermark` 须真实 job_id，多路须 output_id；单路可省略，给出时须匹配逻辑 ID：
 
 ```json
-{"output_id":"preview","revision":2,"watermark":{"enabled":true,"resource":{"uri":"/media/logo.png"}}}
+{"job_id":"JOB_ID","output_id":"preview","revision":2,"watermark":{"enabled":true,"resource":{"uri":"/media/logo.png"}}}
 ```
 
 整组热更规则、required 不可清空及失败保留旧图不变。未知或已结束分支返回 409，revision 必须等于该路 accepted_revision+1。HTTP 同时仍只保留一个待 ACK 请求，token 区分跨路同 revision 的旧 ACK。
@@ -39,7 +39,7 @@ id 为唯一的 1–32 字节 ASCII 字母、数字、下划线或连字符，�
 | video_items（兼容别名 queue_items） | 16 | 1–16 个视频项；两种拼写不能同时给出 |
 | audio_packets | 256 | 1–256 个音频包，和视频独立名额；仍共用一个 FIFO |
 | queue_bytes | 128MiB | 4KiB–256MiB，按实际保留缓冲及参数计费 |
-| queue_media_ms | 5000 | 1–30000ms，视频按任务 fps 的名义处理时长累计；音频按包/采样时长。不是首尾 PTS 差，不因源时间戳空洞立即超限 |
+| queue_media_ms | 5000 | 1–30000ms，视频按已解析的有效名义分数帧率计 work（库未知时才用 fps 回退）；音频按包/采样时长。不是首尾 PTS 差，不因源时间戳空洞立即超限 |
 | max_lag_ms | 10000 | 100–30000ms，从 ingress 到实际 mux 的在途年龄，含队列/encoder lookahead/mux 等待；无新到达也轮询 |
 | io_timeout_ms | 5000 | 100–10000ms，输出打开、写出和收尾的 interrupt 截止 |
 | inflight_bytes | 512MiB | 1MiB–1GiB，保留源缓冲加固定编码输入像素的预算，直到实际 mux/flush 才退休；另限 128 张在途视频帧 |
@@ -70,7 +70,7 @@ primaries/transfer 变化（包括 SDR↔HDR）明确失败该分支，不做假
 
 顶层 frames_decoded 和 decode 只统计共同解码一次；packets_out、frames_filtered、bytes_out 为分支输出之和。各路摘要位于 outputs，提供 output_id、终态、错误、队列/在途计数、filter_generations、水印、实际首/末 mux 时刻与时延。完整逐帧和首帧记录带 output_id；每路窗口独立、不重叠，公共解码与各路端到端时延不能相加后充当 CPU/显示时延。
 
-本轮最终证据为 `out/multi-output-acceptance-20261017T1430/`，本轮 15 项实流场景、13 套功能回归及单测/符号检查通过，独立源码复审已通过，结果以该目录 ACCEPTANCE.json 为准。开发窗口 attempt-4 已通过 13 项真实场景，后续补入 PTS 空洞及全部 required 门禁失败，共 15 项。使用独立同步解码 probe 检查实际 H.264/VVC 画面，另核对音频 payload 顺序及写出+显式丢弃数量闭合。它们是功能证据，不是生产性能、容量或任意长时间稳定性证明。
+早期证据为 `out/multi-output-acceptance-20261017T1430/`，其 15 项场景、13 套回归和后续修正窗口分别见[历史记录](validation-multi-output.md)，不把不同源码结果拼成最终全量通过。当前第四批候选另有 full 34 步、应用 sanitizer 6 步及各 86 场景，见[当前验证](validation-core-refactor.md)。独立解码、音频载荷和计数闭合是功能证据，不是生产性能、容量或长时稳定性证明。
 
 ## Pressure recovery before refill
 

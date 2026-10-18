@@ -139,6 +139,11 @@ def run(expect_stale=False,identity_script=None,expect_stale_transitive=False):
                        SDK_TEST_ALIGN_INSTALL_TIMES=str(cache / "install/lib/libvvenc.so"))
     environment.pop("NAKI_VVENC_SYMBOLS", None)
     environment.pop("LD_LIBRARY_PATH", None)
+    # This fixture builds its own miniature application, never the caller's bin/cache.
+    for name in ("NAKI_SERVICE_BIN", "NAKI_SERVICE_BUILD_DIR", "NAKI_SANITIZERS", "NAKI_BUILD_TYPE"):
+        environment.pop(name, None)
+    for name in ("NAKI_EXPECTED_SDK_MANIFEST", "NAKI_EXPECTED_DEPENDENCY_KEY"):
+        environment.pop(name, None)
     for name in ("SDK_TEST_TARGET", "SDK_TEST_BARRIER", "SDK_TEST_MUTATE_SOURCE", "SDK_TEST_CONFIGURE_MODE"):
         environment.pop(name, None)
 

@@ -1,5 +1,7 @@
 # Linux 服务完整链路验证：2026-10-16
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 环境：本机 WSL Ubuntu 24.04，GCC，系统 libevent `2.1.12-stable-9ubuntu2.2`、libcurl `8.5.0-2ubuntu10.16`、libx264 `0.164.3108`；JSON 子模块 yyjson `0.13.0` / `6447536015f3d600f3d65323b10976103b337ca7`。FFmpeg 自定义 API 2 固定为 `382492970c62d0c77ce0110d731d5ad78973b2b4`，未修改底层源码。
 
 执行 `scripts/build-service.sh` 和 `python3 tests/service_integration.py`：

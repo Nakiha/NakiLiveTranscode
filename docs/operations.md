@@ -2,7 +2,7 @@
 
 ## 定时状态与时延统计
 
-服务默认每 10 秒由 HTTP 控制事件循环生成一条 JSONL `status`，由独立日志线程写 stdout。输入打开、解封装、编码或网络写出阻塞不阻塞该定时器。输入初始化完成前也能报告 starting。无任务时产生 heartbeat；任务结束立即尝试记录最终状态，停止重复打印该任务摘要。
+worker 控制线程默认每 10 秒生成 status，交给本进程唯一 logger 写进程事件文件；controller 空闲时产生自己的 heartbeat。两者的事件位于 run-dir/events，各有独立 instance_id/event_seq；事件不经 IPC 汇集 stdout。媒体打开、解码或写出不会直接堵住控制轮询，状态可能是旧媒体快照，须结合 freshness/progress 判断。任务结束尝试最终报表并停止重复该摘要。当前事件合同见[进程事件](process-events.md)，当前验收见[核心整理验证](validation-core-refactor.md)。
 
 ```sh
 ./out/bin/naki-live --status-interval 10 --run-dir out/runs \
@@ -11,7 +11,7 @@
 
 时延统计不对帧抽样：**每个成功写出的输出帧都计入**累计指标和当前窗口。HTTP 查询仅查看，不清空窗口；只有定时报表和最终报表切换窗口。字段 `window` 包含窗口长度、输入/输出 FPS、阶段耗时及帧类型统计；根级指标累计到当前任务。所有时间差使用单调时钟。
 
-各阶段包含 demux_read、input_queue、decode、setup、filter、encode、mux、ingress_to_mux；实时文件回放另含 scheduled_to_mux。`interleave_call` 和 `avio_flush` 分开计时，前者仍包括封装器内部发生的网络 I/O，不应解释为纯交织队列等待。
+各阶段包含 demux_read、input_queue、decode、setup、branch_queue、filter、encode、mux、ingress_to_mux；pace 回放另含 scheduled_to_mux。reader 的 ingress 在解封装、可选 pace 和追踪元数据准备之后记录、进入 ring 等待之前；input_queue 包含等 ring 空位和 async pending 重试。demux_read 覆盖本次取包过程，含 resumable EAGAIN/poll 等待。interleave_call 从编码包返回到 mux/PES 写入返回，包含交织驻留及可能的网络 I/O；avio_flush 单列其后的 flush。逐帧 interleave_queue 是实际开始写前的子区间，不能把这些重叠字段相加。完整边界见[服务](service.md)。
 
 每项报告 count、mean_ms、max_ms、slow_count，以及 `p50_upper_ms` / `p95_upper_ms` / `p99_upper_ms`。分位数是固定直方图的桶上界估计：0–200 ms 用 1 ms 桶，200–1000 ms 用 20 ms 桶，1–16 s 用 1 s 桶，超过 16 s 单列 overflow。分位数落到溢出桶时返回 null，真实最大值仍保留。不能把上界估计当成精确分位数。count=0 表示未观察到样本。
 
@@ -23,7 +23,7 @@
 
 `frame_types` 分别记录解码后的 I/P/B 帧的服务内部端到端时延；`first_i` 单列本任务首个 I 帧，`recurring_i` 记录之后的 I 帧，避免首帧初始化成本污染稳态判断。`i_frame_stages` 是 I 帧的各阶段拆分。
 
-同时分别记录 decoded_key 和 output_key。I 帧不必然等于可随机接入的 IDR；这里依赖 FFmpeg 输出帧类型/KEY 标志，不解析 H.264 IDR、HEVC CRA/IDR 细分类别。输出关键帧来自编码包 KEY 标志，与输入 GOP 不必相同。编码器自主选择 GOP，输入 picture_type 只用于追踪，不用于强制输出帧类型。
+同时分别记录 decoded_key 和 output_key，不能把解码 I 等同输出 KEY 或 IDR/CRA。输出关键帧取编码包 KEY 标志，实际输出 I/P/B 另由编码器统计。未配置 intra 时保留原编码器周期/profile；显式 intra 策略可请求普通 I，选帧保护和 SEI 保护也按各自合同执行，见[帧策略](frame-policy.md)。这些分类不因普通 I 被确认而合并为一个 key 指标。
 
 不为降低 I 帧数字而改变解码或显示顺序，也不绕过参考依赖。大 I 帧的计算、编码包突发和发送积压需要结合分阶段记录分析。
 
@@ -35,11 +35,11 @@
 {"input":"/data/input.mp4","output":"/data/output.ts","frame_log":true,"frame_log_every":10,"slow_frame_ms":200}
 ```
 
-`frame_log_every=10` 只抽取普通帧明细，I 帧、输出关键帧和达到慢帧阈值的帧总是尝试入队。统计仍然覆盖全部成功输出帧。默认 every=1 即保留全部帧明细。默认关闭时不为每帧构造 JSON 文本。
+`frame_log_every=10` 只抽取普通帧明细，I 帧、输出关键帧和达到慢帧阈值的帧总是尝试入队。统计覆盖全部成功写出帧。默认 every=1 即全部明细；关闭时不为每帧构造 trace，但首个视频/首个输出 KEY 的 first_frame checkpoint 无条件生成并保留供恢复查询，不受明细开关或采样抑制。
 
-worker 日志线程独占追踪文件的写入、flush、关闭与轮转；stdout 记录通过非阻塞 IPC 交由控制进程日志线程统一写入，避免多个进程交错写 JSONL。入队不等待磁盘或网络；每个 logger 队列默认 512 条，单条序列化文本限制 64 KiB，另最多一条正在写出。16 个队列名额为状态/生命周期消息预留；满时丢弃日志并计数，不丢媒体帧、不让转码因日志失败终止。状态类日志在全部名额耗尽时也会丢弃，不能作为无损审计日志。
+每个进程的 logger 独占 event/trace 文件写入、flush、关闭和轮转。队列默认 512、最多 8192 项，为 event 留出 16 个 trace 不可占用的名额；单条文本最多 65536 字节。提交先短锁预留 FIFO/event_seq，再锁外准备、短锁发布；并发准备另限 32、trace 16，输入遍历和 scratch 也有硬上限。queued 包含准备占位和正在写出的一项，最多 capacity+1，high_water 只计队列。producer 不等日志 I/O，满额/准备失败按类别计丢失；状态也会丢失，不能当作无损审计。完整限额和 sink/stop 调用方责任见[事件合同](process-events.md)。
 
-HTTP 状态含 `logging.queued/capacity/high_water/dropped_frames/dropped_status/io_errors/rotations`，这些是本任务 worker 的 logger 累计计数。控制端失联或 IPC 发送缓冲满时 stdout 记录也会计为丢失，不积压无限日志；本地追踪轮转继续。控制进程另有 `supervisor.log_dropped_status/log_io_errors`。磁盘满或慢 sink 的影响通过这些值暴露。控制进程 stdout 长期不可写时，其日志线程及优雅退出可能等待；容器监管入口的退出期限和 stop grace period 是最终退出约束，不承诺日志完整落盘。
+HTTP 的 logging.queued/capacity/high_water/dropped_frames/dropped_status/io_errors/rotations 是 worker 进程 logger 累计值，多输出只在根报告一次；controller 另有 supervisor.log_dropped_status/log_io_errors。控制失联不停止 worker 本地事件/trace，IPC 快照合并丢失另见 ipc_snapshots_coalesced，不能混作日志丢失。磁盘满/慢 I/O 经日志统计暴露；优雅退出仍受 sink 和生产者准备完成影响，stop 期限/强杀不保证最终日志完整。事件落盘不是 operation 的持久化 WAL 或外部采集确认。
 
 启用追踪后 `log_path` 是路径前缀，实际文件如：
 
@@ -54,25 +54,25 @@ HTTP 状态含 `logging.queued/capacity/high_water/dropped_frames/dropped_status
 ## 外部压缩与清理
 
 ```sh
-python3 scripts/maintain-logs.py --directory out/runs \
+python3 scripts/maintain-logs.py --directory out/runs --kind trace \
   --max-age-days 7 --max-total-bytes 2147483648
 ```
 
 脚本仅处理本目录内符合 `<job>.trace.<数字>.jsonl[.gz]` 的普通文件，不递归、不跟随文件符号链接、不处理 `.active`。默认等封存文件至少 60 秒才压缩，使用 gzip level 1、临时文件、fsync 和原子发布；成功后删除原始封存文件。维护锁防止多个实例同时运行。压缩失败保留原文件；已有目标冲突也保留原文件供检查。
 
-先按 7 天过期清理，再按封存文件实际总大小从最旧文件开始清理到 2 GiB。此配额不包含活跃/异常 `.active`、临时文件、无关文件、Docker stdout 日志和媒体文件，不能替代整卷空间监控。断电遗留的压缩 `.tmp-*` 也应在确认维护程序未运行后检查清理。
+先按 7 天过期清理，再按封存文件实际总大小从最旧文件开始清到 2 GiB。此处是 trace 策略，不包含 active/异常段、临时文件、events、crash、stdout 或媒体，不能替代整卷监控。events 另用 --kind events --recover-orphans，须成功取得同前缀生命周期锁并校验 envelope 后才恢复遗留段，首版不 gzip；不能用裸 PID 判断可处理 active，见[事件维护](process-events.md)。
 
 可调整并安装 `deploy/naki-log-maintenance.service` / `.timer`，由宿主机 systemd 每五分钟执行一次，低 CPU/I/O 优先级。模板使用 naki 用户和 `/opt/naki`，部署前修改路径与所有权；本项目不自动修改宿主机 systemd。
 
 ## FFmpeg TCP/UDP 网络埋点
 
-fork 新增 `libavformat/network_observer.h`，API 1 / libavformat 61.2.100。进程在打开任何协议之前注册 observer，所有上下文及其后台线程关闭后才可清除/更换。回调可能并发运行，不可分配、写日志、阻塞或重入 FFmpeg。服务回调只更新固定大小的原子计数器。
+fork 提供 `libavformat/network_observer.h` API 1；61.2.100 是早期 n7 接入窗口，当前 n9 依赖身份见[当前验证](validation-core-refactor.md)。进程在打开任何协议之前注册 observer，所有上下文及其后台线程关闭后才可清除/更换。回调可能并发运行，不可分配、写日志、阻塞或重入 FFmpeg。服务回调只更新固定大小的原子计数器。
 
 覆盖 TCP recv/send；UDP 直接 recvfrom/send/sendto；UDP 后台接收和限速发送线程。后台 RX 埋点在数据进入 FFmpeg FIFO 之前。disabled 时不读时钟；回调前后保存/恢复 errno（Windows 网络构建另保存 Winsock 错误）。不改变返回值、超时或重试语义。
 
 公开事件提供协议、方向、后台线程标志、socket fd、opaque 连接身份、请求/实际字节数或错误，以及操作开始、syscall 开始、完成的单调时间戳。TCP/UDP 直接路径的操作耗时包括显式 readiness wait；后台 UDP recv 的 syscall 本身可能等待新数据。**recv 调用耗时不是网络传播时延。**
 
-服务按 tcp_receive/tcp_send/udp_receive/udp_send 汇总 calls/bytes/errors/would_block/EOF、后台调用数、调用均值/最大值、syscall 累计耗时、最后成功收发时刻和距今时长；提供累计及窗口值。would_block 合并可重试的 EAGAIN/EINTR。原子计数快照近似一致，窗口边界附近各字段可能跨过同一个事件。当前单路任务开始前重置这些计数，输出协议握手/控制数据也可能计入，不能等同媒体负载字节。
+服务按 tcp_receive/tcp_send/udp_receive/udp_send 汇总 calls/bytes/errors/would_block/EOF、后台调用数、调用均值/最大值、syscall 累计耗时、最后成功收发时刻和距今时长；提供累计及窗口值。would_block 合并可重试的 EAGAIN/EINTR。原子计数快照近似一致，窗口边界附近各字段可能跨过同一个事件。任务开始前重置这些进程级计数，多输出共用，输出协议握手/控制数据也可能计入，不能等同单输出媒体负载字节。
 
 这是 socket API 边界，send 成功只代表操作系统接受数据，不是已上网线或已到接收端。未覆盖 connect/accept/close、内核/NIC 时间戳和非 TCP/UDP 传输；没有实现网络字节区间与视频帧的逐帧映射。原 `ingress_to_mux` 边界不因此改变。
 
@@ -84,11 +84,11 @@ FLV/TS 已支持有界 AAC/MP3 passthrough 和原连接上的晚音轨追加；M
 
 ## 7×24 小时的进程结构
 
-无需传统 daemon 双重 fork。0.3.0 为“Docker/init → 前台轻量监管入口 → 可重启的 HTTP 控制进程”，独立 worker 持有媒体连接及状态。HTTP 进程使用 spawn/exec 启动小型待命池；其异常退出不会取消转码。容器内监管入口只重启控制进程，新控制进程经私有 socket 接管原 worker，期间不重启容器、不重新打开媒体输出。详见 [进程池与接管](processes.md)。
+无需传统 daemon 双重 fork。当前采用“Docker/init → 前台轻量监管入口 → 可重启的 HTTP 控制进程”，独立 worker 持有媒体连接及状态。HTTP 进程使用 spawn/exec 启动小型待命池；其异常退出不会取消转码。容器内监管入口只重启控制进程，新控制进程经私有 socket 接管原 worker，期间不重启容器、不重新打开媒体输出。详见 [进程池与接管](processes.md)。
 
 worker 崩溃会令任务失败，保留诊断，不自动重播或重建媒体任务；待命进程退出会退避补位。stop/SIGTERM 是明确的停止意图，会停止全部 worker。容器或宿主机重启会结束媒体进程，当前没有跨容器/主机的任务持久化恢复。原生 systemd 部署也必须避免监管器在 HTTP 故障后清理整个 cgroup，否则无法接管幸存 worker。
 
-还需要多路 admission、控制/观测通道分离、可确认的动态变更协议、媒体进度 watchdog、CPU/内存/FD 限额、网络重连、任务持久化及长时间 soak test。当前单路进程池不证明几百路容量或 7×24 小时可用性。
+固定多输出的预算 admission、控制 RPC 与本地日志分离、水印 typed operation 确认已经实现。多任务调度、依据媒体停滞自动恢复的 watchdog、目标机 CPU/内存/FD 容量、网络断线自动重连、任务持久化及长时间 soak 仍需另做。当前单活动任务/固定多输出的进程池不证明几百路容量或 7×24 小时可用性。
 
 0.4.0 默认启用轻量外部崩溃采集，信号处理函数只发送固定现场；collector 限时抓栈并维护有大小/数量上限的私有 JSON 报告目录，不依赖完整 core。查看 [崩溃诊断](crashes.md) 的路径、权限、限额、导出和不完整报告语义。
 

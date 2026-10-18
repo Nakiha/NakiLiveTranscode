@@ -14,7 +14,13 @@
 
 #define MAX_RECORD_BYTES 65536
 #define CONTROL_RESERVE 16
-typedef struct Record { char *text; size_t size; TraceSink *sink; LoggerCategory category; } Record;
+/* Bound concurrent work independently of a potentially 8192-slot queue. */
+#define PREPARE_CAPACITY 32
+#define MAX_WRITE_SCRATCH (1024U*1024)
+#define MAX_INPUT_BYTES (256U*1024)
+#define MAX_INPUT_NODES 65536
+typedef enum RecordState { PREPARING, READY, DROPPED } RecordState;
+typedef struct Record { char *text; size_t size; TraceSink *sink; LoggerCategory category; RecordState state; } Record;
 struct TraceSink {
     struct TraceSink *next;
     char prefix[4096], active[4176], sealed[4160];
@@ -33,7 +39,7 @@ struct Logger {
     LoggerOptions options;
     LoggerStats stats;
     Record *queue;
-    unsigned head, count, writing;
+    unsigned head, count, writing, preparing, preparing_frames;
     int stopping;
     TraceSink *sinks;
     TraceSink *events;
@@ -101,7 +107,7 @@ static void *writer_main(void *opaque) {
     int64_t maintained=monotonic_us();
     for (;;) {
         pthread_mutex_lock(&l->mutex);
-        if (!l->count && !l->stopping) {
+        if ((!l->count && !l->stopping) || (l->count && l->queue[l->head].state==PREPARING)) {
             struct timespec deadline; clock_gettime(CLOCK_REALTIME,&deadline);
             deadline.tv_nsec+=100000000;
             if(deadline.tv_nsec>=1000000000) {deadline.tv_sec++; deadline.tv_nsec-=1000000000;}
@@ -113,9 +119,24 @@ static void *writer_main(void *opaque) {
             if(stop) {if(l->event_lock_fd>=0)close(l->event_lock_fd);l->event_lock_fd=-1;break;}
             continue;
         }
+        if(l->queue[l->head].state==PREPARING) {
+            pthread_mutex_unlock(&l->mutex);
+            maintenance(l,0);maintained=monotonic_us();
+            continue;
+        }
         Record record=l->queue[l->head];
         l->head=(l->head+1)%l->options.queue_capacity; l->count--; l->writing=1;
         pthread_mutex_unlock(&l->mutex);
+        if(record.state==DROPPED) {
+            free(record.text);
+            pthread_mutex_lock(&l->mutex);
+            if(record.sink)record.sink->pending--;
+            l->writing=0;
+            pthread_mutex_unlock(&l->mutex);
+            int64_t now=monotonic_us();
+            if(now-maintained>=(int64_t)l->options.flush_interval_ms*1000) {maintenance(l,0);maintained=now;}
+            continue;
+        }
         FILE *file=stdout;
         TraceSink *s=record.sink;
         if (s) {
@@ -181,26 +202,58 @@ Logger *logger_start(const LoggerOptions *options) {
     }
     return l;
 }
-static void envelope(Logger *l,yyjson_mut_doc *doc,uint64_t sequence) {
-    yyjson_mut_val *root=yyjson_mut_doc_get_root(doc);struct timespec now;clock_gettime(CLOCK_REALTIME,&now);
+static int envelope(Logger *l,yyjson_mut_doc *doc,uint64_t sequence,struct timespec now,int64_t mono) {
+    yyjson_mut_val *root=yyjson_mut_doc_get_root(doc);
     struct tm utc;gmtime_r(&now.tv_sec,&utc);char stamp[40],date[24];strftime(date,sizeof(date),"%Y-%m-%dT%H:%M:%S",&utc);
     unsigned micros=(unsigned)(now.tv_nsec/1000)%1000000;
     snprintf(stamp,sizeof(stamp),"%s.%06uZ",date,micros);
     const char *keys[]={"schema_version","category","role","instance_id","pid","tid","event_seq","ts_utc","mono_us"};
     for(unsigned i=0;i<sizeof(keys)/sizeof(*keys);i++)yyjson_mut_obj_remove_key(root,keys[i]);
-    yyjson_mut_obj_add_int(doc,root,"schema_version",1);yyjson_mut_obj_add_str(doc,root,"category","event");
-    yyjson_mut_obj_add_strcpy(doc,root,"role",*l->options.role?l->options.role:"unknown");
-    if(*l->options.instance_id)yyjson_mut_obj_add_strcpy(doc,root,"instance_id",l->options.instance_id);
-    yyjson_mut_obj_add_int(doc,root,"pid",getpid());yyjson_mut_obj_add_sint(doc,root,"tid",syscall(SYS_gettid));
-    yyjson_mut_obj_add_uint(doc,root,"event_seq",sequence);yyjson_mut_obj_add_strcpy(doc,root,"ts_utc",stamp);
-    yyjson_mut_obj_add_sint(doc,root,"mono_us",monotonic_us());
+    return yyjson_mut_obj_add_int(doc,root,"schema_version",1)&&yyjson_mut_obj_add_str(doc,root,"category","event")&&
+        yyjson_mut_obj_add_strcpy(doc,root,"role",*l->options.role?l->options.role:"unknown")&&
+        (!*l->options.instance_id||yyjson_mut_obj_add_strcpy(doc,root,"instance_id",l->options.instance_id))&&
+        yyjson_mut_obj_add_int(doc,root,"pid",getpid())&&yyjson_mut_obj_add_sint(doc,root,"tid",syscall(SYS_gettid))&&
+        yyjson_mut_obj_add_uint(doc,root,"event_seq",sequence)&&yyjson_mut_obj_add_strcpy(doc,root,"ts_utc",stamp)&&
+        yyjson_mut_obj_add_sint(doc,root,"mono_us",mono);
+}
+static int input_budget(yyjson_mut_val *value,unsigned depth,size_t *nodes,size_t *bytes) {
+    if(depth>24||++*nodes>MAX_INPUT_NODES)return -1;
+    if(yyjson_mut_is_str(value)||yyjson_mut_is_raw(value)) {
+        size_t size=yyjson_mut_get_len(value);
+        if(size>MAX_INPUT_BYTES-*bytes)return -1;
+        *bytes+=size;
+    } else if(yyjson_mut_is_arr(value)) {
+        size_t index,max;yyjson_mut_val *child;
+        yyjson_mut_arr_foreach(value,index,max,child)if(input_budget(child,depth+1,nodes,bytes))return -1;
+    } else if(yyjson_mut_is_obj(value)) {
+        size_t index,max;yyjson_mut_val *key,*child;
+        yyjson_mut_obj_foreach(value,index,max,key,child)
+            if(input_budget(key,depth+1,nodes,bytes)||input_budget(child,depth+1,nodes,bytes))return -1;
+    }
+    return 0;
+}
+static void *scratch_malloc(void *ctx,size_t size) {(void)ctx;return size<=MAX_WRITE_SCRATCH?malloc(size):NULL;}
+static void *scratch_realloc(void *ctx,void *ptr,size_t old,size_t size) {
+    (void)ctx;(void)old;return size<=MAX_WRITE_SCRATCH?realloc(ptr,size):NULL;
+}
+static void scratch_free(void *ctx,void *ptr) {(void)ctx;free(ptr);}
+static char *serialize(yyjson_mut_doc *doc,size_t *size) {
+    yyjson_alc alc={scratch_malloc,scratch_realloc,scratch_free,NULL};
+    /* Value writer avoids sizing scratch from unused values in the caller's pool. */
+    char *work=yyjson_mut_val_write_opts(yyjson_mut_doc_get_root(doc),0,&alc,size,NULL),*text=NULL;
+    if(work&&*size<=MAX_RECORD_BYTES) {
+        text=malloc(*size+1);if(text)memcpy(text,work,*size+1);
+    }
+    free(work);return text;
 }
 static int redact(yyjson_mut_doc *doc,yyjson_mut_val *value,unsigned depth) {
     if(depth>24)return -1;
     if(yyjson_mut_is_str(value)) {
-        const char *text=yyjson_mut_get_str(value),*scheme=strstr(text,"://");
+        const char *text=yyjson_mut_get_str(value),*limit=text+yyjson_mut_get_len(value);
+        const char *scheme=memmem(text,(size_t)(limit-text),"://",3);
         if(scheme) {
-            const char *authority=scheme+3,*end=authority+strcspn(authority,"/?#"),*host=authority;
+            const char *authority=scheme+3,*end=authority,*host=authority;
+            while(end<limit&&*end!='/'&&*end!='?'&&*end!='#')end++;
             for(const char *p=authority;p<end;p++)if(*p=='@')host=p+1;
             size_t prefix=(size_t)(scheme-text)+3,host_bytes=(size_t)(end-host);
             if(prefix+host_bytes+12>4096)return -1;
@@ -219,32 +272,55 @@ static int redact(yyjson_mut_doc *doc,yyjson_mut_val *value,unsigned depth) {
     return 0;
 }
 void logger_submit_record(Logger *l,LoggerCategory category,TraceSink *sink,yyjson_mut_doc *doc) {
-    pthread_mutex_lock(&l->mutex);
     int valid=doc&&yyjson_mut_is_obj(yyjson_mut_doc_get_root(doc));
+    uint64_t sequence=0;struct timespec now={0};int64_t mono=0;
+    pthread_mutex_lock(&l->mutex);
     if(category==LOGGER_EVENT) {
         sink=l->events;
         if(l->stats.event_sequence==UINT64_MAX)valid=0;
-        else if(valid)envelope(l,doc,++l->stats.event_sequence);
-        else l->stats.event_sequence++;
-    } else if(category==LOGGER_FRAME_TRACE&&valid&&sink&&sink!=l->events) {
+        else sequence=++l->stats.event_sequence;
+    } else if(category!=LOGGER_FRAME_TRACE||!sink||sink==l->events)valid=0;
+    unsigned limit=l->options.queue_capacity-(category==LOGGER_FRAME_TRACE ? CONTROL_RESERVE : 0);
+    if(!valid||l->stopping||l->count>=limit||l->preparing>=PREPARE_CAPACITY||
+       (category==LOGGER_FRAME_TRACE&&l->preparing_frames>=PREPARE_CAPACITY-CONTROL_RESERVE)||
+       (sink&&sink->finished)) {
+        if(category==LOGGER_FRAME_TRACE)l->stats.dropped_frames++;else l->stats.dropped_status++;
+        pthread_mutex_unlock(&l->mutex);
+        if(doc)yyjson_mut_doc_free(doc);
+        return;
+    }
+    unsigned slot=(l->head+l->count)%l->options.queue_capacity;
+    l->queue[slot]=(Record){.sink=sink,.category=category,.state=PREPARING};
+    l->count++;l->preparing++;
+    if(category==LOGGER_FRAME_TRACE)l->preparing_frames++;
+    if(sink)sink->pending++; /* Pins the sink throughout preparation and queue residence. */
+    if(l->count>l->stats.high_water)l->stats.high_water=l->count;
+    if(category==LOGGER_EVENT) {clock_gettime(CLOCK_REALTIME,&now);mono=monotonic_us();}
+    pthread_mutex_unlock(&l->mutex);
+
+    size_t nodes=0,bytes=0;
+    valid=!input_budget(yyjson_mut_doc_get_root(doc),0,&nodes,&bytes);
+    if(valid&&category==LOGGER_EVENT)valid=envelope(l,doc,sequence,now,mono)&&!redact(doc,yyjson_mut_doc_get_root(doc),0);
+    else if(valid) {
         yyjson_mut_val *root=yyjson_mut_doc_get_root(doc);
         yyjson_mut_obj_remove_key(root,"category");yyjson_mut_obj_remove_key(root,"event_seq");
-        yyjson_mut_obj_add_str(doc,root,"category","frame_trace");
-    } else valid=0;
-    if(valid&&category==LOGGER_EVENT&&redact(doc,yyjson_mut_doc_get_root(doc),0))valid=0;
-    size_t size=0;
-    char *text=valid ? yyjson_mut_write(doc,0,&size) : NULL;
-    if(doc) yyjson_mut_doc_free(doc);
-    unsigned limit=l->options.queue_capacity-(category==LOGGER_FRAME_TRACE ? CONTROL_RESERVE : 0);
-    if(!text || size>MAX_RECORD_BYTES || l->stopping || l->count>=limit || (sink && sink->finished)) {
-        if(category==LOGGER_FRAME_TRACE) l->stats.dropped_frames++; else l->stats.dropped_status++;
-        pthread_mutex_unlock(&l->mutex); free(text); return;
+        valid=yyjson_mut_obj_add_str(doc,root,"category","frame_trace");
     }
-    l->queue[(l->head+l->count)%l->options.queue_capacity]=(Record){text,size,sink,category};
-    l->count++;
-    if(sink) sink->pending++;
-    if(l->count>l->stats.high_water) l->stats.high_water=l->count;
-    pthread_cond_signal(&l->ready); pthread_mutex_unlock(&l->mutex);
+    size_t size=0;
+    char *text=valid?serialize(doc,&size):NULL;
+    yyjson_mut_doc_free(doc);
+
+    pthread_mutex_lock(&l->mutex);
+    l->preparing--;
+    if(category==LOGGER_FRAME_TRACE)l->preparing_frames--;
+    if(!text||l->stopping||(sink&&sink->finished)) {
+        if(category==LOGGER_FRAME_TRACE)l->stats.dropped_frames++;else l->stats.dropped_status++;
+        l->queue[slot].text=text;l->queue[slot].state=DROPPED;text=NULL;
+    } else {
+        l->queue[slot].text=text;l->queue[slot].size=size;l->queue[slot].state=READY;text=NULL;
+    }
+    pthread_cond_signal(&l->ready);pthread_mutex_unlock(&l->mutex);
+    free(text);
 }
 void logger_submit(Logger *l,TraceSink *sink,yyjson_mut_doc *doc) {logger_submit_record(l,sink?LOGGER_FRAME_TRACE:LOGGER_EVENT,sink,doc);}
 TraceSink *logger_trace_open(Logger *l, const char *prefix) {

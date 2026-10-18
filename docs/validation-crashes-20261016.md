@@ -1,5 +1,7 @@
 # 0.4.0 轻量崩溃采集验证
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 日期：2026-10-16（Asia/Hong_Kong）。环境：WSL Ubuntu 24.04 x86_64、GCC、系统 libunwind 1.6.2；Docker Desktop Linux engine，镜像 Ubuntu 24.04，以 UID/GID 10001 运行。FFmpeg 与 yyjson 的已固定子模块没有改变，未重跑冻结解码器基准，未修改宿主机 core_pattern。
 
 ## 实现边界

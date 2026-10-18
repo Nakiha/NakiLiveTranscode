@@ -18,12 +18,12 @@ reader 独占 demux，通过同一个 8 项有界队列向 pipeline owner 交付
 
 | 接口 | 时点与用途 |
 | --- | --- |
-| naki_media_hooks_open | 每个任务在 pipeline owner 上调用，创建私有任务上下文，配置 callback table |
+| naki_media_hooks_open | 直接输出一个上下文；多路先开共享输入上下文（output_id=NULL），再由各输出 owner 开独立上下文 |
 | audio_packet | 每个接受的输入音频项恰好一次，尚未进行 copy 参数修改/暂存；可引用压缩包交给自己的分析队列 |
 | video_packet | 每个编码视频 AU 返回后、时间基换算和 mux 之前，包括 EOF 排空；观察编码返回时刻，或附加私有 SEI |
 | close | 正常完成、停止、失败时一次清理；工厂失败但已设置 close 时也调用。崩溃/强杀不保证执行 |
 
-所有 callback 串行运行在同一个 pipeline owner，不持有应用锁；不是在 HTTP 或 demux reader 上执行。跨线程分析需要扩展自身拥有有界队列及独立上下文，packet callback 不能等待分析、网络或磁盘。主服务不因为注册 hook 自动开线程、解码音频、缓存 PCM 或构建客户状态机。不要将音频 decoder、SEI serializer 和 mux 写入互相调用，建议各自只通过私有 typed result/context 对接。
+每个上下文的 callback 在自己的 owner 串行执行，不持应用锁，不在 HTTP/reader 上执行；不同输出上下文可并发，不能共享未同步可变 opaque。多路音频只由共享上下文观察一次，编码视频由各路上下文观察。跨线程分析须自有有界队列，packet callback 不等待分析、网络或磁盘；注册 hook 不自动创建线程/音频解码链/PCM 缓存或响度算法。
 
 事件和指针只借用至 callback 返回。持有音频包用 av_packet_clone，参数另做 avcodec_parameters_copy；复制 AVPacket 指针或结构体浅拷贝不转移所有权。视频 payload 修改先 make_writable；异步线程不得在返回后继续修改已经交还管线的包。不要把客户状态塞进服务使用的 opaque_ref。
 

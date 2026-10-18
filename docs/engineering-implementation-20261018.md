@@ -1,5 +1,7 @@
 # 工程落地追踪（2026-10-18）
 
+范围说明：本页保留原 W01–W11 / A01–A22 工程功能交付的源快照与检查点，末尾 candidate-ehp5SC 是该次窗口，不是后续未提交修改的验证身份。后续“测试入口→日志→生命周期→模块→文档”五批记录与当前候选见[核心整理验证](validation-core-refactor.md)。不把旧窗口未做的 ASan/线程故障注入说成当前仍缺失，也不把本地回归说成目标机/远程发布验收。
+
 原始规格：Library `libfile_47049d428cd88191b84555677daef399`，文件 `NakiLiveTranscode-Engineering-Implementation-Plan-20261018.md`，80,393 字节、998 行，SHA-256 `6c48639f5a9b5895c214aee0b7191d06d946c121e9090c8da7a1ab4dca76cae5`。已完整读取并通过当前 Library helper 下载到本机 `out/engineering-plan-20261018/source/`；不修改或替换原文件。
 
 实际起点：主仓 `6fa891f168ac2c66c3979742f5b4c4a90c5294f8`，FFmpeg `4bee779b3dd59407a07baa8d6fc386cf95d8398b`，VVenC `29e3dc57a91d03833ead6370f5cd03f6d61242a5`。本地工程分支 `codex/engineering-plan-20261018`。原规格基于旧 57b2721，其中 F06 的即时失败与阻塞输入轮询已经修复；保留持续压力窗口、小容量防重置、真实 EOF/错误、GENPTS 及 HTTP/section 验收，不退回低突发成功源。
