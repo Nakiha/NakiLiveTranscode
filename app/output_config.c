@@ -10,7 +10,7 @@ void naki_output_config(Config *out,const Config *common,int index) {
     strcpy(out->output,o->output);strcpy(out->output_format,o->output_format);strcpy(out->encoder,o->encoder);
     strcpy(out->encoder_preset,o->encoder_preset);strcpy(out->encoder_profile,o->encoder_profile);
     out->width=o->width;out->height=o->height;out->bitrate=o->bitrate;out->encoder_threads=o->encoder_threads;
-    out->audio_copy=o->audio_copy;out->mux_wait_ms=o->mux_wait_ms;out->watermark=o->watermark;
+    out->audio_copy=o->audio_copy;out->mux_wait_ms=o->mux_wait_ms;out->watermark=o->watermark;out->sei=o->sei;
 }
 int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
     yyjson_val *list=yyjson_obj_get(root,"outputs");if(!list)return 0;
@@ -51,7 +51,7 @@ int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
                 if(!yyjson_is_uint(value)||yyjson_get_uint(value)<low||yyjson_get_uint(value)>high) {fail=1;break;}
                 if(integer)*integer=(int)yyjson_get_uint(value);else *wide=yyjson_get_uint(value);continue;
             }
-            const char *allowed[]={"output","output_format","encoder","encoder_preset","encoder_profile","width","height","bitrate","encoder_threads","audio_copy","mux_wait_ms","watermark"};
+            const char *allowed[]={"output","output_format","encoder","encoder_preset","encoder_profile","width","height","bitrate","encoder_threads","audio_copy","mux_wait_ms","watermark","sei"};
             int allowed_key=0;for(unsigned k=0;k<sizeof(allowed)/sizeof(*allowed);k++)if(!strcmp(allowed[k],name))allowed_key=1;
             if(!allowed_key) {fail=1;break;}
             yyjson_mut_obj_remove_key(merged,name);
@@ -68,13 +68,15 @@ int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
         strcpy(o->output,sub.output);strcpy(o->output_format,sub.output_format);strcpy(o->encoder,sub.encoder);
         strcpy(o->encoder_profile,sub.encoder_profile);strcpy(o->encoder_preset,sub.encoder_preset);
         o->width=sub.width;o->height=sub.height;o->bitrate=sub.bitrate;o->encoder_threads=sub.encoder_threads;
-        o->audio_copy=sub.audio_copy;o->mux_wait_ms=sub.mux_wait_ms;o->watermark=sub.watermark;
+        o->audio_copy=sub.audio_copy;o->mux_wait_ms=sub.mux_wait_ms;o->watermark=sub.watermark;o->sei=sub.sei;
         encoder_threads+=o->encoder_threads;count++;
     }
     if(encoder_threads>16)return bad(e,n,"sum of encoder_threads must not exceed 16");
     *out=first;out->output_count=count==1?0:(int)count;memcpy(out->outputs,outputs,sizeof(outputs));
     if(count==1) {strcpy(out->single_output_id,outputs[0].id);return 1;}
     memset(&out->watermark,0,sizeof(out->watermark));
+    out->sei=(NakiSeiConfig){0};
+    for(unsigned k=0;k<count;k++)if(naki_sei_union(&out->sei,&outputs[k].sei))return bad(e,n,"SEI union budget exceeded");
     /* Root's reader must deliver audio if any branch needs it. */
     out->audio_copy=0;for(unsigned k=0;k<count;k++)if(outputs[k].audio_copy&&strcmp(outputs[k].output_format,"mp4"))out->audio_copy=1;
     return 1;

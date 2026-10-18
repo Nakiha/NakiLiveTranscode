@@ -11,6 +11,7 @@
 #include "frame_policy.h"
 #include "watermark_config.h"
 #include "video_rate.h"
+#include "sei.h"
 typedef struct NakiWatermark NakiWatermark;
 typedef struct NakiOperations NakiOperations;
 #define NAKI_OUTPUT_MAX 4
@@ -20,6 +21,7 @@ typedef struct OutputConfig {
     int queue_items,audio_packets,queue_media_ms,max_lag_ms,io_timeout_ms;
     uint64_t queue_bytes,inflight_bytes;
     NakiWatermarkConfig watermark;
+    NakiSeiConfig sei;
 } OutputConfig;
 
 typedef struct Config {
@@ -33,6 +35,7 @@ typedef struct Config {
     char single_output_id[33]; /* Logical identity; output_count still selects direct vs branch execution. */
     NakiPolicyConfig policy;
     NakiWatermarkConfig watermark;
+    NakiSeiConfig sei;
     int output_count;
     OutputConfig outputs[NAKI_OUTPUT_MAX];
 } Config;
@@ -99,6 +102,7 @@ typedef struct Job {
     char overload_fail_write_phase[24];
     uint64_t frame_id_last, frames_selected, frames_dropped_overload, frames_protected;
     uint64_t intra_requested, intra_confirmed, timestamp_wraps;
+    uint64_t sei_extracted,sei_written,sei_protected;
     uint64_t branch_queued,branch_queue_bytes,branch_queue_media_us,branch_queue_high;
     unsigned branch_video_queued,branch_audio_queued,branch_video_high,branch_audio_high,branch_rejection_reason;
     uint64_t branch_rejected[6];

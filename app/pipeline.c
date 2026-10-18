@@ -50,6 +50,7 @@ typedef struct Stamp {
     unsigned generation;
     uint64_t timestamp_wraps;
     int64_t branch_enqueued_us,branch_started_us;
+    uint32_t sei_size;
 } Stamp;
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; atomic_int cleanup; } Interrupt;
 typedef struct Ledger { int used; int64_t pts; Stamp stamp; AVBufferRef *owner; } Ledger;
@@ -79,6 +80,10 @@ typedef struct Pipeline {
     AVRational input_tb, frame_rate;
     NakiVideoRate video_rate;
     int input_wrap_bits;
+    enum AVCodecID sei_codec;
+    int sei_length_size,sei_read_error;
+    NakiSeiConfig sei_input;
+    int64_t sei_pending[NAKI_INFLIGHT_CAPACITY]; /* sequence+1, until decoded exactly once */
     int64_t next_frame_id;
     NakiTimeline timeline;
     NakiIntraState intra;
@@ -122,6 +127,27 @@ static void free_input(InputItem *item) {
 }
 static int handle_audio(Pipeline *p, const InputItem *item);
 static int flush_deferred_audio(Pipeline *p);
+static int stamp_valid(const AVBufferRef *ref) {
+    if(!ref||ref->size<sizeof(Stamp))return 0;
+    const Stamp *s=(const Stamp *)ref->data;
+    if(ref->size!=sizeof(*s)+s->sei_size)return 0;
+    if(!s->sei_size)return 1;
+    if(s->sei_size<sizeof(NakiSeiBundle))return 0;
+    const NakiSeiBundle *b=(const NakiSeiBundle *)(ref->data+sizeof(*s));
+    return b->count>0&&b->count<=NAKI_SEI_MESSAGES&&b->bytes<=NAKI_SEI_PAYLOAD_BYTES&&s->sei_size==naki_sei_bundle_size(b);
+}
+static const NakiSeiBundle *stamp_sei(const AVBufferRef *ref) {
+    return ((const Stamp *)ref->data)->sei_size?(const NakiSeiBundle *)(ref->data+sizeof(Stamp)):NULL;
+}
+static int sei_obligation(Pipeline *p,int64_t sequence,int add) {
+    int result=AVERROR_INVALIDDATA;
+    pthread_mutex_lock(&p->ring_mutex);
+    if(add) {
+        result=AVERROR(ENOBUFS);
+        for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(!p->sei_pending[i]) {p->sei_pending[i]=sequence+1;result=0;break;}
+    } else for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(p->sei_pending[i]==sequence+1) {p->sei_pending[i]=0;result=0;break;}
+    pthread_mutex_unlock(&p->ring_mutex);return result;
+}
 static void trace_pts(yyjson_mut_doc *doc, const char *key, int64_t pts) {
     if(pts==AV_NOPTS_VALUE)yyjson_mut_obj_add_null(doc,yyjson_mut_doc_get_root(doc),key);
     else json_int(doc,key,pts);
@@ -275,15 +301,27 @@ static void *reader_main(void *opaque) {
         if (ret<0) {free_input(&item); break;}
         if (video) {
             av_buffer_unref(&packet->opaque_ref);
+            NakiSeiBundle *sei=NULL;
+            ret=naki_sei_extract(packet,p->sei_codec,p->sei_length_size,&p->sei_input,&sei);
+            if(ret<0) {p->sei_read_error=1;free_input(&item);break;}
+            size_t sei_size=naki_sei_bundle_size(sei);
             {
-                uint8_t *data=av_mallocz(sizeof(Stamp));
-                packet->opaque_ref=data ? av_buffer_create(data,sizeof(Stamp),packet_stamp_free,job,0) : NULL;
+                uint8_t *data=av_mallocz(sizeof(Stamp)+sei_size);
+                if(data&&sei)memcpy(data+sizeof(Stamp),sei,sei_size);
+                packet->opaque_ref=data ? av_buffer_create(data,sizeof(Stamp)+sei_size,packet_stamp_free,job,0) : NULL;
                 if(!packet->opaque_ref)av_free(data);
             }
+            av_free(sei);
             if (!packet->opaque_ref) {free_input(&item); ret=AVERROR(ENOMEM); break;}
             Stamp *stamp=(Stamp *)packet->opaque_ref->data;
+            stamp->sei_size=(uint32_t)sei_size;
             if(seq==INT64_MAX) {free_input(&item); ret=AVERROR(ERANGE); break;}
             stamp->sequence=seq++; stamp->read_us=finished-began;
+            if(sei_size) {
+                ret=sei_obligation(p,stamp->sequence,1);
+                if(ret<0) {free_input(&item);break;}
+                pthread_mutex_lock(&job->mutex);job->sei_extracted+=stamp_sei(packet->opaque_ref)->count;pthread_mutex_unlock(&job->mutex);
+            }
             stamp->ingress_us=now_us(); stamp->scheduled_us=due;
             stamp->packet_pts=packet->pts; stamp->packet_dts=packet->dts;
             ret=naki_policy_track(job,NAKI_TRACK_PACKET,(uint64_t)stamp->sequence,stamp->ingress_us);
@@ -531,6 +569,9 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     NakiFrameIdentity identity=frame_identity(p,&stamp,packet->pts,p->video->time_base);
     int ret=write_packet_now(p,packet,&interleaved,&written);
     if(ret<0)return ret;
+    pthread_mutex_lock(&p->job->mutex);
+    p->job->sei_written+=naki_sei_count(stamp_sei(meta->owner),&p->job->config.sei);
+    pthread_mutex_unlock(&p->job->mutex);
     if(stamp.delivery_lease&&(ret=naki_watermark_written(stamp.delivery_owner,stamp.delivery_lease,&identity,written))<0)return ret;
     if(!naki_policy_untrack(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp.frame_id))return AVERROR_INVALIDDATA;
     naki_branch_release(p->job,(uint64_t)stamp.frame_id,stamp.branch_charge);
@@ -747,6 +788,9 @@ static int receive_encoded(Pipeline *p) {
                 (int64_t)packet->size-size>NAKI_MEDIA_HOOK_MAX_ADDED_BYTES))ret=AVERROR(EINVAL);
             if(ret<0)break;
         }
+        p->stage="selected SEI output repackaging";
+        ret=naki_sei_inject(packet,p->encoder->codec_id,stamp_sei(p->ledger[slot].owner),&p->job->config.sei);
+        if(ret<0)break;
         MuxTrace *meta=av_malloc(sizeof(*meta));
         AVBufferRef *reference=meta?av_buffer_create((uint8_t *)meta,sizeof(*meta),mux_trace_free,NULL,0):NULL;
         if(!reference){av_free(meta);ret=AVERROR(ENOMEM);break;}
@@ -959,7 +1003,7 @@ static int flush_deferred_audio(Pipeline *p) {
     return 0;
 }
 static int encode_frame(Pipeline *p, AVFrame *frame) {
-    if (!frame->opaque_ref || frame->opaque_ref->size!=sizeof(Stamp)) return AVERROR_INVALIDDATA;
+    if (!stamp_valid(frame->opaque_ref)) return AVERROR_INVALIDDATA;
     Stamp stamp=*(Stamp *)frame->opaque_ref->data;
     stamp.filtered_us=now_us();
     AVRational filter_tb=av_buffersink_get_time_base(p->sink);
@@ -1010,7 +1054,7 @@ static int filter_output(Pipeline *p) {
     while ((ret=av_buffersink_get_frame(p->sink,frame))>=0) {
         frame->sample_aspect_ratio=p->encoder->sample_aspect_ratio;
         if(p->job->filter_generations>1) {frame->colorspace=p->encoder->colorspace;frame->color_range=p->encoder->color_range;}
-        if(!frame->opaque_ref||frame->opaque_ref->size!=sizeof(Stamp)) {ret=AVERROR_INVALIDDATA;break;}
+        if(!stamp_valid(frame->opaque_ref)) {ret=AVERROR_INVALIDDATA;break;}
         uint64_t watermark_revision=0;
         Stamp stamp=*(Stamp *)frame->opaque_ref->data;NakiOperationHandle lease=0;
         AVRational time_base=av_buffersink_get_time_base(p->sink);
@@ -1020,8 +1064,10 @@ static int filter_output(Pipeline *p) {
             time_base,&identity,&watermark_revision,&lease);
         if(ret>=0) {
             stamp.watermark_revision=watermark_revision;stamp.delivery_owner=p->job->watermark;stamp.delivery_lease=lease;
-            Stamp *owned=av_memdup(&stamp,sizeof(stamp));
-            AVBufferRef *reference=owned?av_buffer_create((uint8_t *)owned,sizeof(*owned),delivery_stamp_free,NULL,0):NULL;
+            size_t owned_size=frame->opaque_ref->size;
+            Stamp *owned=av_memdup(frame->opaque_ref->data,owned_size);
+            if(owned)*owned=stamp;
+            AVBufferRef *reference=owned?av_buffer_create((uint8_t *)owned,owned_size,delivery_stamp_free,NULL,0):NULL;
             if(!reference) {
                 av_free(owned);if(naki_watermark_release_frame(p->job->watermark,lease))abort();ret=AVERROR(ENOMEM);
             } else {av_buffer_unref(&frame->opaque_ref);frame->opaque_ref=reference;}
@@ -1043,7 +1089,13 @@ static int filter_output(Pipeline *p) {
     return ret==AVERROR(EAGAIN) || ret==AVERROR_EOF ? 0 : ret;
 }
 static int prepare_decoded_frame(Pipeline *p, AVFrame *frame) {
-    if (!frame->opaque_ref || frame->opaque_ref->size!=sizeof(Stamp)) return AVERROR_INVALIDDATA;
+    if (!stamp_valid(frame->opaque_ref)) return AVERROR_INVALIDDATA;
+    Stamp *input_stamp=(Stamp *)frame->opaque_ref->data;
+    if(input_stamp->sei_size) {
+        p->stage="selected SEI picture association";
+        if(frame->flags&AV_FRAME_FLAG_INTERLACED)return AVERROR(ENOSYS);
+        int claim=sei_obligation(p,input_stamp->sequence,0);if(claim<0)return claim;
+    }
     naki_policy_untrack(p->job,NAKI_TRACK_PACKET,(uint64_t)((Stamp *)frame->opaque_ref->data)->sequence);
     /* Stamp is a private packet property propagated by AV_CODEC_FLAG_COPY_OPAQUE. */
     int ret=av_buffer_make_writable(&frame->opaque_ref);
@@ -1116,15 +1168,19 @@ static int process_frame(Pipeline *p,AVFrame *frame) {
     if((ret=naki_policy_track(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp->frame_id,stamp->ingress_us))<0)return ret;
     if(p->graph&&(ret=rebuild_input_filter(p,frame))<0)return ret;
     stamp->intra_reason=naki_intra_decide(&p->job->config.policy,&p->intra,stamp->source_us,stamp->picture_type==AV_PICTURE_TYPE_I);
-    int protect=stamp->intra_reason || stamp->picture_type==AV_PICTURE_TYPE_I || stamp->frame_id==1;
+    int sei_messages=naki_sei_count(stamp_sei(frame->opaque_ref),&p->job->config.sei);
+    int sei_protected=sei_messages>0;
+    int protect=stamp->intra_reason || stamp->picture_type==AV_PICTURE_TYPE_I || stamp->frame_id==1 || sei_protected;
     pthread_mutex_lock(&p->job->mutex);
     p->job->frames_decoded++; p->job->frame_id_last=(uint64_t)stamp->frame_id; p->job->timestamp_wraps=stamp->timestamp_wraps;
+    if(p->job->parent)p->job->sei_extracted+=sei_messages;
     int level=p->job->overload.level;
     pthread_mutex_unlock(&p->job->mutex);
     int keep=naki_frame_keep(&p->job->config.policy,level,(uint64_t)stamp->frame_id,protect);
     if(keep<0)return keep;
     pthread_mutex_lock(&p->job->mutex);
     if(protect)p->job->frames_protected++;
+    if(sei_protected)p->job->sei_protected++;
     if(keep)p->job->frames_selected++; else p->job->frames_dropped_overload++;
     pthread_mutex_unlock(&p->job->mutex);
     if(!keep) {
@@ -1178,6 +1234,14 @@ static int initialize_decoder(Pipeline *p) {
     AVStream *stream=p->input->streams[p->stream_index];
     if (stream->codecpar->codec_id!=AV_CODEC_ID_H264 && stream->codecpar->codec_id!=AV_CODEC_ID_HEVC) return AVERROR(ENOSYS);
     p->input_tb=stream->time_base;
+    p->sei_codec=stream->codecpar->codec_id;
+    p->sei_length_size=naki_sei_length_size(p->sei_codec,stream->codecpar->extradata,stream->codecpar->extradata_size);
+    p->sei_input=p->job->config.sei;
+    if(p->job->config.output_count) {
+        p->sei_input=(NakiSeiConfig){0};
+        for(int i=0;i<p->job->config.output_count;i++)if(naki_sei_union(&p->sei_input,&p->job->config.outputs[i].sei))return AVERROR(ENOBUFS);
+    }
+    if(p->sei_input.count&&p->sei_length_size<0)return AVERROR_INVALIDDATA;
     p->input_wrap_bits=stream->pts_wrap_bits;
     ret=naki_video_rate_resolve(av_guess_frame_rate(p->input,stream,NULL),p->job->config.fps,&p->video_rate);
     if(ret<0)return ret;
@@ -1492,7 +1556,7 @@ void *pipeline_main(void *opaque) {
             if(ret<0)goto cleanup;
             progress=1;
         }
-        if (input_done && input_error<0) {p.stage="input read"; ret=input_error; goto cleanup;}
+        if (input_done && input_error<0) {p.stage=p.sei_read_error?"input SEI parsing / complete-AU contract":"input read"; ret=input_error; goto cleanup;}
         if (pending.packet || (input_done && !eof_sent)) {
             p.stage="async decode submit";
             if (pending.packet) ((Stamp *)pending.packet->opaque_ref->data)->submitted_us=now_us();
@@ -1518,6 +1582,12 @@ void *pipeline_main(void *opaque) {
             do {n=poll(&fd,1,p.branches?20:p.live_mux ? 10 : 1000);} while(n<0 && errno==EINTR && !atomic_load(&job->cancel));
             if (n<0) {ret=AVERROR(errno); goto cleanup;}
         }
+    }
+    if(!atomic_load(&job->cancel)) {
+        pthread_mutex_lock(&p.ring_mutex);
+        for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(p.sei_pending[i]) {ret=AVERROR_INVALIDDATA;break;}
+        pthread_mutex_unlock(&p.ring_mutex);
+        if(ret<0) {p.stage="selected SEI has no decoded picture at EOF";goto cleanup;}
     }
     if(p.branches) {
         ret=finish_branches(&p,atomic_load(&job->cancel));branches_joined=1;

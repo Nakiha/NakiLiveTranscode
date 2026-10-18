@@ -197,6 +197,7 @@
           "intra": {"$ref": "#/components/schemas/IntraPolicy"},
           "frame_selection": {"$ref": "#/components/schemas/FrameSelection"},
           "watermark": {"$ref": "#/components/schemas/Watermark"},
+          "sei": {"$ref": "#/components/schemas/SeiPolicy"},
           "outputs": {"type":"array","minItems":1,"maxItems":4,"items":{"$ref":"#/components/schemas/OutputConfig"},"allOf":[{"if":{"minItems":2},"then":{"items":{"required":["id"]}}}],"description":"One logical output retains the direct execution path and defaults id to main; arrays with two to four entries require explicit unique ids."}
         },
         "allOf": [
@@ -255,6 +256,7 @@
           "watermark": {
             "$ref": "#/components/schemas/JobConfig/properties/watermark"
           },
+          "sei": {"$ref": "#/components/schemas/SeiPolicy"},
           "queue_items": {
             "type": "integer",
             "minimum": 1,
@@ -296,6 +298,11 @@
           }
         }
       },
+      "SeiPolicy": {
+        "type": "object", "additionalProperties": false, "required": ["types"],
+        "properties": {"types": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"oneOf": [{"const": "uuid"}, {"type": "integer", "minimum": 0, "maximum": 65535}]}}},
+        "description": "Explicit opaque type/payload preservation; uuid aliases numeric type 5 without UUID layout validation. Alias/numeric duplicates are rejected. Omission or an empty list disables preservation. Root list is inherited by each output; branch sei replaces the whole list. Selected pictures are protected from overload dropping. H.264/HEVC input to H.264/VVC output is reframed with unchanged type and payload. Complete single-picture single-layer AUs only; up to 64 selected messages and 65536 payload bytes per input AU across the output union. Overflow, malformed outer framing, unsupported AU association or missing decoded mapping fails explicitly. No payload semantics, HDR/geometry adjustment or hot updates. See sei.md."
+      },
       "VideoRate": {
         "type": "object", "description": "Resolved startup nominal rational rate; source PTS cadence is unchanged. See video-rate.md.",
         "properties": {
@@ -310,6 +317,10 @@
         "type": "object",
         "description": "Private output owner summary; all per-frame latency metrics end at actual local write/flush. output_id also labels trace and unconditional startup checkpoints. On teardown queued/inflight counters return to zero.",
         "properties": {
+          "sei_types": {"type": "array", "items": {"type": "integer"}},
+          "sei_extracted": {"type": "integer", "description": "Selected messages received by this output owner."},
+          "sei_written": {"type": "integer", "description": "Selected source messages after successful local write/flush."},
+          "sei_protected_frames": {"type": "integer", "description": "Pictures protected because they carry selected source SEI."},
           "progress": {"type": "object", "description": "Scoped owner admission/video decode/encode/write times, ages at sampled_monotonic_us, phase and bounded oldest video/FIFO observations; see health-progress.md."},
           "output_id": {
             "type": "string"
@@ -699,6 +710,10 @@
         "type": "object", "required": ["event", "state", "supervisor", "pool"],
         "description": "Extensible snapshot; see service.md, operations.md and live-mux.md for remaining telemetry. Non-required media fields are absent before the first worker snapshot. Latencies end at local mux/AVIO completion, not peer display.",
         "properties": {
+          "sei_types": {"type": "array", "items": {"type": "integer"}, "description": "Single-output selection, or union of output selections."},
+          "sei_extracted": {"type": "integer", "description": "Selected source messages extracted once across the output union."},
+          "sei_written": {"type": "integer", "description": "Messages successfully written locally; sum across outputs when multiple."},
+          "sei_protected_frames": {"type": "integer", "description": "Pictures protected by selected SEI; sum across outputs when multiple."},
           "progress": {"type": "object", "description": "Scoped media progress sampled by the worker; not a live observation merely because HTTP responds."},
           "snapshot_generation": {"type": "integer", "minimum": 1},
           "freshness": {"type": "object", "description": "Worker generation/time, controller receipt/observation time and receipt age/staleness; see health-progress.md."},

@@ -2,6 +2,8 @@
 
 当前已接入可编译的 C 扩展点，默认为空实现；不实现响度测量、I 帧窗口统计、具体 SEI 格式或时间戳修复，也不新增 HTTP 字段。客户特有逻辑后续由内网实现。声明在 [media_hooks.h](../app/media_hooks.h)，默认工厂在 [media_hooks_default.c](../app/media_hooks_default.c)。这是随源码编译的内部接口，不是稳定的动态插件 ABI。
 
+选中源消息的[SEI 透传](sei.md)由服务独立处理：解码前提取，私有 `video_packet` hook 返回后统一注入，再交 mux。该模块不替客户生成新的响度 SEI；私有 hook 不应重复注入同一批源消息。
+
 ## 当前音视频路径
 
 reader 独占 demux，通过同一个 8 项有界队列向 pipeline owner 交付视频包或带 codecpar/time_base 快照的音频项。

@@ -1,0 +1,8 @@
+{
+  "input": "/data/input.ts",
+  "output": "/data/output.ts",
+  "output_format": "mpegts",
+  "encoder": "libx264",
+  "timestamps": {"mode": "source_all"},
+  "sei": {"types": ["uuid", 100, 101]}
+}

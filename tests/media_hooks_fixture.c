@@ -91,6 +91,7 @@ int naki_media_hooks_open(const NakiMediaJobInfo *info,NakiMediaHooks *hooks) {
     const char *gate=getenv("NAKI_TEST_MEDIA_HOOK_GATE");if(gate)snprintf(c->gate,sizeof(c->gate),"%s",gate);
     const char *paused_output=getenv("NAKI_TEST_MEDIA_HOOK_PAUSE_OUTPUT");
     if(!strcmp(c->mode,"pause_video")&&(!paused_output||(info->output_id&&!strcmp(paused_output,info->output_id))))c->pause_us=40000;
+    if(!strcmp(c->mode,"sei_pause_video"))c->pause_us=400000;
     c->owner=pthread_self();
     *hooks=(NakiMediaHooks){.api_version=NAKI_MEDIA_HOOK_API,.opaque=c,.audio_packet=audio,.video_packet=video,.close=close_hook};
     return !strcmp(c->mode,"open_error") ? AVERROR_EXTERNAL : 0;

@@ -3,7 +3,7 @@ FROM ubuntu:24.04 AS toolchain
 RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
     build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev zlib1g-dev libevent-dev libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends libunwind-dev python3 \
+RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends libunwind-dev python3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 ENV NAKI_BUILD_ROOT=/opt/naki-build
@@ -50,6 +50,7 @@ COPY tests/operation_send_order.c tests/
 COPY tests/audio_signature_test.c tests/
 COPY tests/audio_change_fixture.c tests/
 COPY tests/video_rate_test.c tests/video_rate_guess.c tests/
+COPY tests/sei_test.c tests/sei_fixture.c tests/sei_decode_probe.c tests/
 COPY tests/event_write_fault.c tests/
 COPY tests/control_connect_fault.c tests/
 COPY tests/multi_output_integration.py tests/
