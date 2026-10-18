@@ -20,7 +20,7 @@
 }
 ```
 
-id 为唯一的 1–32 字节 ASCII 字母、数字、下划线或连字符，目标 URI 也不能完全重复。每路支持 output/output_format、encoder/preset/profile、width/height、bitrate、encoder_threads、audio_copy、mux_wait_ms、watermark 和下表预算。没有覆盖的媒体字段继承顶层配置或原默认值；更换编码器时继承的 preset/profile 仍须匹配该编码器。input、pace、decoder 参数、timestamps、intra 和 frame_selection 位于任务级；I/过载运行状态及编码关联则各路独立。不做运行中增删路、编码共享、独立降帧率或 ABR 对齐。
+id 为唯一的 1–32 字节 ASCII 字母、数字、下划线或连字符，目标 URI 也不能完全重复。每路支持 output/output_format、encoder/preset/profile、width/height、bitrate、encoder_threads、audio_copy、mux_wait_ms、watermark、sei 和下表预算。没有覆盖的媒体字段继承顶层配置或原默认值；更换编码器时继承的 preset/profile 仍须匹配该编码器。input、pace、decoder 参数、timestamps、intra 和 frame_selection 位于任务级；I/过载运行状态及编码关联则各路独立。不做运行中增删路、编码共享、独立降帧率或 ABR 对齐。
 
 水印仍是每路单水印，像素位置相对于各自输出画布；初始化资源及 accepted/prepared/applied/failed revision 各路独立。多路热更必须指定目标，单路请求禁止 output_id：
 

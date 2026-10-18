@@ -1,6 +1,6 @@
 # 直播帧策略合同与后续设计（部分已实现）
 
-这是对客户合同和后续实现的设计补充，不代表整份合同已经实现或发布。工作区已实现的单路子集为 source_all、三种普通 I 策略及显式过载抽帧，具体可发送字段以 [OpenAPI](openapi.json) 和[单路帧策略](frame-policy.md)为准；本地验证见[第二批记录](validation-frame-policy.md)，当前等待独立源码复审。本页完整配置示例还包含未支持的字段，不可整体发送到 `/v1/job`。source_i_anchors、时间戳修复、SEI 及 SCTE-35 仍未实现，整体请求结构见 [处理链草案](pipeline-design.md)。
+这是对客户合同和后续实现的设计补充，不代表整份合同已经实现或发布。工作区已实现的单路子集为 source_all、三种普通 I 策略及显式过载抽帧，具体可发送字段以 [OpenAPI](openapi.json) 和[单路帧策略](frame-policy.md)为准；本地验证见[第二批记录](validation-frame-policy.md)，当前等待独立源码复审。本页完整配置示例还包含未支持的字段，不可整体发送到 `/v1/job`。source_i_anchors、时间戳修复及 SCTE-35 仍未实现；SEI 已按本轮确认收敛为[模板显式类型选择](sei.md)，不是本页旧示例的自动全保留接口，整体请求结构见 [处理链草案](pipeline-design.md)。
 
 ## 已确认的业务语义
 
@@ -116,7 +116,7 @@ legacy 的 process_frame 仍优先使用 best_effort_timestamp，缺失时合成
 
 ## SEI：解码前提取，按画面关联，编码后重封装
 
-仅用于内网自行组合业务的编码后包处理 hook 已接入，见 [内部媒体接口](media-hooks.md)；它不等于本节的任意 SEI 提取/透传已经实现。
+2026-10-18 更新：已实现[按类型选择的 SEI 透传](sei.md)。用户已确认模板用 `types: ["uuid",100,101]` 选择，type 5 不验证 UUID payload 格式，跨 codec 保留 type/payload 并重新封装，带选中消息的画面必须保护。下文保留早期设计背景；实际字段、预算及输入结构边界以新文档和 OpenAPI 为准，自动全保留及消息迁移不属于当前接口。
 
 不能只依赖 AV_FRAME_DATA_SEI_UNREGISTERED 等已知 side data：当前 H.264/HEVC decoder 会跳过未处理的 SEI，任意 UNKNOWN 不保证成为 AVFrame side data。建议解码前在已识别的 AU 边界提取，保存到有界、引用计数 MetadataBundle，经 opaque_ref/画面 id/分支谱系与编码 PTS ledger 关联，编码完成后、mux/格式转换前插入目标 AU。容器包不一定等于一张画面；prefix/suffix 与多个 AU/多消息的归属必须正确，不能简单按返回顺序贴标签。
 

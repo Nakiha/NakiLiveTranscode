@@ -8,7 +8,7 @@ void naki_logical_output(const Config *c,int index,OutputConfig *o) {
     if(c->output_count) {*o=c->outputs[index];return;}
     if(*c->outputs[0].id) {*o=c->outputs[0];return;}
     *o=(OutputConfig){.width=c->width,.height=c->height,.bitrate=c->bitrate,.encoder_threads=c->encoder_threads,
-        .audio_copy=c->audio_copy,.mux_wait_ms=c->mux_wait_ms,.watermark=c->watermark,
+        .audio_copy=c->audio_copy,.mux_wait_ms=c->mux_wait_ms,.watermark=c->watermark,.sei=c->sei,
         .queue_items=16,.audio_packets=256,.queue_bytes=128U*1024*1024,.queue_media_ms=5000,.max_lag_ms=10000,
         .io_timeout_ms=5000,.inflight_bytes=512U*1024*1024};
     strcpy(o->id,*c->single_output_id?c->single_output_id:"main");
@@ -52,6 +52,9 @@ int naki_config_fingerprint(const Config *c,char out[65],char *error,size_t cap)
 #undef I
         yyjson_mut_obj_add_uint(d,v,"queue_bytes",o.queue_bytes);yyjson_mut_obj_add_uint(d,v,"inflight_bytes",o.inflight_bytes);
         yyjson_mut_obj_add_val(d,v,"watermark",watermark(d,&o.watermark));yyjson_mut_arr_add_val(outputs,v);
+        yyjson_mut_val *types=yyjson_mut_arr(d);
+        for(unsigned k=0;k<o.sei.count;k++)yyjson_mut_arr_add_uint(d,types,o.sei.types[k]);
+        yyjson_mut_obj_add_val(d,v,"sei_types",types);
     }
     yyjson_mut_obj_add_val(d,root,"outputs",outputs);
     size_t size=0;char *text=yyjson_mut_write(d,0,&size);yyjson_mut_doc_free(d);

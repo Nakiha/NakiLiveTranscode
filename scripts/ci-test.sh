@@ -13,6 +13,7 @@ out/bin/naki-watermark-config-test
 out/bin/naki-branch-queue-test
 out/bin/naki-identity-intent-test
 out/bin/naki-control-spec-test
+out/bin/naki-sei-test
 out/bin/naki-component-update-test
 out/bin/naki-operation-store-test
 out/bin/naki-operation-cache-test
@@ -28,6 +29,7 @@ python3 tests/multi_output_integration.py
 python3 tests/mixed_queue_integration.py
 python3 tests/audio_signature_integration.py
 python3 tests/video_rate_integration.py
+python3 tests/sei_integration.py
 python3 tests/frame_policy_integration.py
 python3 tests/probe_integration.py
 python3 tests/decoder_integration.py

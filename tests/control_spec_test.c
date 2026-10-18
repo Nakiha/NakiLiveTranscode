@@ -20,6 +20,13 @@ int main(void) {
     Config named=parse("{\"input\":\"input.ts\",\"outputs\":[{\"id\":\"preview\",\"output\":\"output.ts\"}]}");
     assert(named.output_count==0&&!strcmp(named.single_output_id,"preview"));digest(&named,b);assert(strcmp(a,b));
     explicit.bitrate++;digest(&explicit,b);assert(strcmp(a,b));
+    Config sei_alias=parse("{\"input\":\"input.ts\",\"output\":\"output.ts\",\"sei\":{\"types\":[\"uuid\",101,100]}}");
+    Config sei_numeric=parse("{\"input\":\"input.ts\",\"outputs\":[{\"output\":\"output.ts\",\"sei\":{\"types\":[100,5,101]}}]}");
+    digest(&sei_alias,a);digest(&sei_numeric,b);assert(!strcmp(a,b));
+    digest(&legacy,b);assert(strcmp(a,b));
+    Config sei_multi=parse("{\"input\":\"input.ts\",\"sei\":{\"types\":[100]},\"outputs\":[{\"id\":\"a\",\"output\":\"a.ts\"},{\"id\":\"b\",\"output\":\"b.ts\",\"sei\":{\"types\":[]}}]}");
+    Config branch;naki_output_config(&branch,&sei_multi,0);assert(branch.sei.count==1&&branch.sei.types[0]==100);
+    naki_output_config(&branch,&sei_multi,1);assert(!branch.sei.count);
     Config rejected;char error[256];const char *bad="{\"input\":\"i\",\"output\":\"o\",\"watermark\":{\"enabled\":false,\"enabled\":false}}";
     assert(config_parse(bad,strlen(bad),&rejected,error,sizeof(error))<0);
     const char *ambiguous="{\"input\":\"i\",\"outputs\":[{\"output\":\"o\",\"queue_items\":16,\"video_items\":16}]}";

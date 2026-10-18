@@ -214,6 +214,11 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_int(doc,"frames_dropped_overload",job->frames_dropped_overload); json_int(doc,"frames_protected",job->frames_protected);
     json_int(doc,"intra_requested",job->intra_requested); json_int(doc,"intra_confirmed",job->intra_confirmed);
     json_int(doc,"timestamp_wraps",job->timestamp_wraps);
+    json_int(doc,"sei_extracted",job->sei_extracted);json_int(doc,"sei_written",job->sei_written);
+    json_int(doc,"sei_protected_frames",job->sei_protected);
+    yyjson_mut_val *sei_types=yyjson_mut_arr(doc);
+    for(unsigned i=0;i<job->config.sei.count;i++)yyjson_mut_arr_add_uint(doc,sei_types,job->config.sei.types[i]);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"sei_types",sei_types);
     json_int(doc,"overload_enabled",job->config.policy.overload_levels!=0); json_int(doc,"overload_level",job->overload.level);
     json_str(doc,"overload_state",job->overload.failed ? "failed" : job->overload.recovering ? "recovering" : job->overload.level ? "degraded" : "normal");
     json_num(doc,"overload_oldest_ingress_age_ms",job->oldest_ingress_age_us/1000.0);
@@ -293,7 +298,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     }
     if(job->network)yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"network",network_stats_json(doc,job->network,report));
     if(job->config.output_count) {
-        yyjson_mut_val *outputs=yyjson_mut_arr(doc);unsigned failed=0,completed=0;uint64_t packets=0,bytes=0,filtered=0;
+        yyjson_mut_val *outputs=yyjson_mut_arr(doc);unsigned failed=0,completed=0;uint64_t packets=0,bytes=0,filtered=0,sei_written=0,sei_protected=0;
         for(int i=0;i<job->config.output_count;i++) {
             Job *b=job->outputs[i];if(!b)continue;
             yyjson_mut_doc *bd=new_event("output_status",b);pthread_mutex_lock(&b->mutex);
@@ -306,6 +311,11 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
             json_int(bd,"packets_out",b->packets_out);json_int(bd,"bytes_out",b->bytes_out);
             json_int(bd,"audio_tracks",b->audio_tracks);json_int(bd,"audio_packets_out",b->audio_packets_out);json_int(bd,"audio_dropped",b->audio_dropped);
             json_int(bd,"audio_unsupported",b->audio_unsupported);
+            json_int(bd,"sei_extracted",b->sei_extracted);json_int(bd,"sei_written",b->sei_written);json_int(bd,"sei_protected_frames",b->sei_protected);
+            yyjson_mut_val *types=yyjson_mut_arr(bd);
+            for(unsigned k=0;k<b->config.sei.count;k++)yyjson_mut_arr_add_uint(bd,types,b->config.sei.types[k]);
+            yyjson_mut_obj_add_val(bd,yyjson_mut_doc_get_root(bd),"sei_types",types);
+            sei_written+=b->sei_written;sei_protected+=b->sei_protected;
             json_int(bd,"queue_items",b->branch_queued);json_int(bd,"queue_bytes",b->branch_queue_bytes);json_int(bd,"queue_media_us",b->branch_queue_media_us);
             json_int(bd,"queued_work_us",b->branch_queue_media_us);json_int(bd,"queue_video_items",b->branch_video_queued);json_int(bd,"queue_audio_packets",b->branch_audio_queued);
             json_int(bd,"queue_video_high",b->branch_video_high);json_int(bd,"queue_audio_high",b->branch_audio_high);
@@ -332,6 +342,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
             yyjson_mut_arr_add_val(outputs,yyjson_mut_val_mut_copy(doc,yyjson_mut_doc_get_root(bd)));yyjson_mut_doc_free(bd);
         }
         yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"outputs",outputs);
+        json_int(doc,"sei_written",sei_written);json_int(doc,"sei_protected_frames",sei_protected);
         json_int(doc,"outputs_failed",failed);json_int(doc,"outputs_completed",completed);
         yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(doc),"packets_out");json_int(doc,"packets_out",packets);
         yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(doc),"bytes_out");json_int(doc,"bytes_out",bytes);
@@ -369,7 +380,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         for (size_t i=0; i<count; i++) if (!strcmp(seen[i], name)) { bad(error, cap, "Duplicate key"); goto end; }
         if (count == 32) { bad(error, cap, "Too many keys"); goto end; }
         seen[count++] = name;
-        if(!strcmp(name,"timestamps") || !strcmp(name,"intra") || !strcmp(name,"frame_selection") || !strcmp(name,"watermark") || !strcmp(name,"outputs"))continue;
+        if(!strcmp(name,"timestamps") || !strcmp(name,"intra") || !strcmp(name,"frame_selection") || !strcmp(name,"watermark") || !strcmp(name,"outputs") || !strcmp(name,"sei"))continue;
         char *dest = NULL; size_t len = 0;
         if (!strcmp(name,"input")) { dest=c.input; len=sizeof(c.input); }
         else if (!strcmp(name,"output")) { dest=c.output; len=sizeof(c.output); }
@@ -412,6 +423,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if (!*c.input || !*c.output) {bad(error,cap,"input and output are required"); goto end;}
     if(naki_policy_config_parse(root,&c.policy,error,cap))goto end;
     if(naki_watermark_config(yyjson_obj_get(root,"watermark"),&c.watermark,error,cap))goto end;
+    if(naki_sei_config(yyjson_obj_get(root,"sei"),&c.sei,error,cap))goto end;
     int vvc=!strcmp(c.encoder,"libvvenc");
     if (!vvc && strcmp(c.encoder,"libx264")) {bad(error,cap,"encoder must be libx264 or libvvenc"); goto end;}
     if(!*c.encoder_profile) strcpy(c.encoder_profile,vvc ? "live_3b_2s" : "default");
