@@ -1,5 +1,7 @@
 # 固定多输出与动态输入适配：本地验证（2026-10-17）
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 当前实现基于已确认的[固定输出合同](branching-contract.md)。本轮 15 项多输出实流场景、13 套 Python 功能回归、5 个 C 单测、12 项 SDK 身份单测及符号回归均返回 0；**23 项水印本地复审通过，1 项公共可信 HTTPS 成功路径未完成**。没有把未运行项算作本轮全绿。新的完整接入已通过独立源码复审，按授权保存本地完整提交，不推送。
 
 最新证据目录：`out/multi-output-acceptance-20261017T1430/`。精确退出码、源码快照/摘要、git 状态、完整 binary-safe 差异、匹配 Build ID/DWARF、媒体与接管证据见其中 `ACCEPTANCE.json`。基线 HEAD 为 `5052d203bc438dd1796bfb5273c1d82a5013ea77`；FFmpeg `d8303fa436059a96bb773df8566a73c6253c8159`、VVenC `29e3dc57a91d03833ead6370f5cd03f6d61242a5` 未改。SDK 身份保持 `952134bb13b47fe2de5099abebc8e156b0f35c9c67d395fdce05989517f084e1`；应用 21 个 ELF 的匹配 DWARF 为本轮新归档，FFmpeg/VVenC 复用相同 Build ID 的 6+1 个归档。

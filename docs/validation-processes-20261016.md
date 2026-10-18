@@ -1,5 +1,7 @@
 # 0.3.0 进程池与接管验证
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 日期：2026-10-16，Asia/Hong_Kong。环境：Windows 宿主机、WSL Ubuntu 24.04、Docker Desktop Linux engine。保持 FFmpeg/yyjson 子模块不变；构建应用和 worker 的 RelWithDebInfo 版本，另构建应用层 ASan/UBSan 版本。没有重跑冻结的解码器基准，也没有修改宿主机 core_pattern。
 
 ## 验证范围与证据

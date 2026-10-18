@@ -1,5 +1,7 @@
 # 0.8.0 直播链路验证
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 环境：本机 WSL Ubuntu 24.04，FFmpeg n9.0.2 fork `f5113758`、VVenC v1.14.0 fork `2b90643`，Linux C 服务。新证据目录 `out/live-mux-rg_j2qy_/`，不是沿用旧版本结果。
 
 `tests/live_mux_integration.py` 已通过：使用真实本地 RTMP/SRT 连接发送 H.264 256×144/25fps/B3，VVenC `live_3b_2s` 输出 VVC；首视频时没有音轨，第一、第二 AAC 48kHz 双声道分别在源时间 2s/4s 出现，再分别停顿并恢复。TS 在 6s 加入未知私有 PES，验证后续 raw probe 的墙钟释放。

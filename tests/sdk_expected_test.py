@@ -82,6 +82,8 @@ class ConsumerExpectationTest(unittest.TestCase):
         env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ['PATH'],
                    NAKI_SKIP_FFMPEG='1', NAKI_BUILD_ROOT=str(self.prefix.parent),
                    NAKI_EXPECTED_SDK_MANIFEST=str(self.expected_path), GATE_SENTINEL=str(sentinel))
+        for name in ('NAKI_SERVICE_BIN', 'NAKI_SERVICE_BUILD_DIR', 'NAKI_SANITIZERS', 'NAKI_BUILD_TYPE'):
+            env.pop(name, None)
         command = ['bash', str(self.consumer / 'scripts/build-service.sh')]
         accepted = subprocess.run(command, env=env, capture_output=True, text=True, timeout=15)
         self.assertEqual(accepted.returncode, 0, accepted.stderr)

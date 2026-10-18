@@ -1,5 +1,7 @@
 # VVenC 接入验证（2026-10-17）
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 环境：本机 WSL Ubuntu 24.04、GCC 13、FFmpeg n9.0.2 fork `8eabad8e5820b58ec303772f777c034eb7bdb14c`、VVenC v1.14.0 `9428ea8636ae7f443ecde89999d16b2dfc421524`。VVenC 使用共享库 RelWithDebInfo、faster、2 个编码线程，服务沿用异步解码自动调度。
 
 本地 `tests/vvenc_integration.py` 全部通过，证据目录 `out/vvenc-test-9whvfwze/`：

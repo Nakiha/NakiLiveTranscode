@@ -8,11 +8,11 @@
 
 0.8.0 开放 MPEG-TS（含 UDP/SRT）、Enhanced FLV（含 RTMP）和本地 MP4。FLV/TS 支持 AAC/MP3 透传与晚音轨追加，见 [直播封装](live-mux.md)。普通 MP4 要在 EOF/trailer 后完成索引，不适合直接作为持续直播交付格式，当前仍只输出视频。输入视频限 H.264/HEVC，不接受 VVC 回灌；在线视频规格重建与音频转码尚未实现。
 
-## 显式普通 I（工作区扩展，待独立复审）
+## 显式普通 I（已实现）
 
 可选 app `intra` 策略在现有 live profile 上启用 FFmpeg wrapper 的 `live-frame-intra=1`。匹配 VVenC fork 通过 `VVENC_LIVE_FRAME_INTRA_VERSION=1`、`m_liveFrameIntra` 和每张输入的 `forceIntra` 接收请求，在 PreProcess 的 PTS-group 决策之前关闭隐含周期 CRA、截断前一短组，并把后续请求编码为普通 TRAIL I；启动仍保留 IDR。GOP4 / 3B、PTS/DTS FIFO、one-pass JSON lookahead RC 的既有边界保持，reference profile 不接受该选项。
 
-FFmpeg `libvvenc.c` 将实际 access unit 的 sliceType 提供为 I/P/B 统计，媒体 hook 和追踪不再把全部 VVC 类型记为未知。实际码流 NAL、显示顺序 I 位置和逐帧类型均由独立解码核对，见 [单路帧策略](frame-policy.md) 及[验证记录](validation-frame-policy.md)。不提供新策略的请求仍使用下面原有的周期 profile。新 ABI 字段要求匹配本地 SDK；库修改尚未提交，父 gitlink 尚未更新。
+FFmpeg `libvvenc.c` 将实际 access unit 的 sliceType 提供为 I/P/B 统计，hook 和追踪不再把全部 VVC 类型记为未知。实际 NAL、显示顺序 I 位置和逐帧类型由独立解码核对，见[帧策略](frame-policy.md)。不提供新策略仍使用下面的周期 profile。ABI 必须匹配固定 gitlink/SDK；早期复审见[历史记录](validation-frame-policy.md)，当前身份与回归见[核心整理验证](validation-core-refactor.md)。
 
 ## 时间与帧关联
 
@@ -24,7 +24,7 @@ VVenC opt-in `LivePtsGop=1` 在参考关系对下游可见之前计划最多 4 �
 
 另有 `live_3b_2s_no_mctf`，只进一步关闭 MCTF，保留 QPA；本轮没有显示出稳定的额外时延收益，默认保留滤波。`reference` 复现上一版默认 VVenC GOP32、2 秒自动取整配置，仅供对照，**不满足客户的 3B/2s 约束**。x264 只接受 profile `default`。非法组合在 HTTP 层拒绝；解析器不会开放任意 vvenc-params。preset 改变速度/质量，不保证任何机器上实时，也不保证首帧时延上限。
 
-首轮测量从约 3.29 秒降到 0.45 秒，详见 [低时延验证](validation-vvenc-lowlatency-20261017.md)。这仍有重排与码控前瞻，不能套用 x264 的 zerolatency 假设；目前没有采用纯 P 或 low-delay B 伪装连续 3B 输出。
+历史首轮测量从约 3.29 秒降到 0.45 秒，源码/输入/环境见[低时延记录](validation-vvenc-lowlatency-20261017.md)，不作为当前候选的性能或首帧保证。这里仍有重排和码控前瞻，不能套用 x264 zerolatency；没有采用纯 P 或 low-delay B 伪装连续 3B。
 
 live profiles 显式启用 FFmpeg `live-pts-gop=1`，使用 1/90000 时间基保留 PTS，精度为约 11.1 微秒，不再量化到名义帧周期。不丢帧、不补帧，允许单调的变帧率、间隔抖动和向前缺口；回退、重复、无效或溢出的编码时间戳显式失败。VVenC 此模式不再返回由名义帧间隔猜测的有效 DTS，匹配的 wrapper 维护 256 项有界 PTS FIFO，在编码顺序输出时使用向后错开两帧的输入显示时间轴作为 DTS；前两个 DTS 按名义周期向首 PTS 之前外推。校验 DTS 严格递增且不大于对应 PTS，FIFO 只存时间戳，不存画面。`reference` 保留原版一帧一 tick 路径。`fps` 请求字段仍只用于输入缺失名义帧率时回退，不强制帧率转换。
 

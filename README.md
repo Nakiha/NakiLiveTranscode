@@ -1,12 +1,29 @@
 # NakiLiveTranscode
 
-实验性的 CPU 直播转码项目，起点为 FFmpeg 7.0.3 的异步提前出帧和自动并行度调度实验。
+实验性的 Linux/WSL C 直播转码服务，版本 **0.9.0**。一个活动输入任务可创建 **1–4 个固定逻辑输出**，不宣称生产就绪、硬实时或容量/SLO 保证。
 
 当前底座为 **FFmpeg n9.0.2 + 异步解码 API 2 / 网络观测 API 1**；保留原 7.0.3 分支与历史验证结果。历史子模块目录名 `ffmpeg-7.0.3` 暂不改名。源码修改与本地构建见 [FFmpeg 开发](docs/ffmpeg-development.md)。
 
-**当前状态：Linux 单输入、最多 4 路固定输出 C 实验服务，版本 0.9.0。** H.264/HEVC 输入 → 异步自动调度解码 → 8/10-bit filter → H.264 或 VVC 输出。支持 RTMP/Enhanced FLV 和 SRT/MPEG-TS；AAC/MP3 音轨可以晚加入、原连接继续输出。音频为透传，不做转码；MP4 保持纯视频。见 [直播封装与动态音轨](docs/live-mux.md)、[服务说明](docs/service.md)、[OpenAPI](docs/openapi.json)。后续处理链的结构化请求草案见 [管线设计](docs/pipeline-design.md)，尚未实现。
+[文档索引与能力状态](docs/README.md) · [服务/API](docs/service.md) · [OpenAPI](docs/openapi.json) · [测试入口](docs/testing.md) · [当前本地验证](docs/validation-core-refactor.md)
 
-可选的[单路帧策略](docs/frame-policy.md)包括严格 `source_all`、随源/周期/最大间隔 I、保护帧及显式过载抽帧，已通过第二批独立复审并保存本地检查点；见[第二批记录](docs/validation-frame-policy.md)。已实现[单水印 v1](docs/watermark.md)：JPEG/PNG/GIF、required 起播等待、资源和布局 revision 热更；[第三批本地验证](docs/validation-watermark.md)及源码复审通过；本轮 23 项本地复审通过，1 项外部 HTTPS 成功路径未完成。工作区已接入[固定多输出与动态输入适配](docs/branching-contract.md)，[第四批本地验证](docs/validation-multi-output.md)的 15 项新实流场景及相关完整功能回归已通过，独立源码复审已通过；已接入[按类型选择的 SEI 透传](docs/sei.md)：UUID 别名/数字类型、opaque payload、跨 codec 重封装及带消息画面保护；SCTE-35 和时间戳修复仍未实现。
+## 支持范围
+
+| 范围 | 当前实现与边界 |
+| --- | --- |
+| 视频 | 第一条可用 H.264/HEVC 原生软件解码流，共享 reader/async decoder；每个输出独立 filter、libx264 H.264 或 libvvenc VVC 编码及 mux owner |
+| 输出 | FLV/Enhanced FLV（含 RTMP）、MPEG-TS（含 UDP/SRT）、本地 MP4；MP4 在 EOF/trailer 完成索引，保持纯视频 |
+| 音频 | FLV/TS 有界 AAC/MP3 透传、最多 16 条音轨状态，允许晚加入；参数签名改变会拒绝该轨，落后输出时间水位的包显式丢弃并计数；不转码、不删除或替换已注册输出流 |
+| 输出规格 | 创建后输出集合、URL、编码器和画布固定；已支持的输入分辨率/位深变化可通过重建输入 filter 适配；primaries/transfer 变化及不支持格式失败 |
+| 帧与元数据 | 可选严格 `source_all`、普通 I 策略与显式过载抽帧；按显式类型选择有界 SEI opaque type/payload 透传，选中画面受保护 |
+| 水印 | 每输出单水印 v1，SDR 8/10-bit，JPEG/PNG/GIF、本地或 HTTP/HTTPS 资源；运行中只开放 watermark 更新，支持 desired/effective、CAS、有限 operation 重试/查询 |
+
+没有音频转码、任意音频 codec、运行中增删输出、删除/替换已注册音轨、任意视频规格切换、HDR tone mapping、通用滤镜 API、ROI、SCTE-35、脏时间戳修复或 `/v2/jobs`。详细合同见[固定输出](docs/branching-contract.md)、[直播封装](docs/live-mux.md)、[帧策略](docs/frame-policy.md)、[SEI](docs/sei.md)及[水印](docs/watermark.md)。[管线设计](docs/pipeline-design.md)仍包含未实现的草案字段，不可整体发送。
+
+## 当前验证状态（2026-10-18）
+
+第四批模块拆分候选的 full **34 步通过**（含 15 个原生测试），应用/yyjson/helper ASan/UBSan **6 步通过**；两套均含 86 个媒体生命周期场景。逐职责 quick/受影响套件、源码/ELF/SDK 绑定及拆分前后对照见[验证记录](docs/validation-core-refactor.md)。第五批只更新文档，不将本次静态检查冒充新的媒体回归；证据绑定具体源码窗口，不以未提交工作树的 HEAD 代替。
+
+本机证据未覆盖外部可信 HTTPS 水印成功样例（未配置 `NAKI_TEST_HTTPS_URL`）、实际 Docker 镜像/smoke、远程 Actions、真实 Filebeat 采集、目标机器 CPU/RSS/PID/FD 容量与 24/72 小时 soak、迁移回滚和生产验收。镜像和远程流程以对应 PR/提交的检查结果单独确认；最新源码复查见[合并前复查](docs/validation-final-review.md)。核心 native SDK/系统库未重新插桩，没有 TSan；旧版本的镜像/HTTPS 或 n7 性能报告不补齐这些门槛。
 
 ## 运行服务（Linux / WSL）
 
@@ -21,32 +38,36 @@ bash scripts/build-service.sh
 ./out/bin/naki-live-ctl stop
 ```
 
-JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 libcurl。服务默认监听 `127.0.0.1:8090`。当前无音频转码、无在线视频规格切换；“端到端”指标指服务收到解封装包到转码包写出，不含采集端和播放器。交织默认最多排队 50ms，媒体线程每 10ms 检查；网络写入另有 10 秒中断期限。
+JSON 使用 yyjson，HTTP 服务端使用 libevent evhttp，C 客户端使用 libcurl。服务默认监听 `127.0.0.1:8090`，无身份认证，属于本机实验控制接口。`start/stop` 为兼容命令；需要调用者稳定 operation ID 时使用 canonical 创建/更新/停止接口。202 的确认边界按接口区分，不表示任务完成或媒体送达。交织默认等待 50ms、周期轮询；阻塞 I/O、调度及库内调用另受各自边界限制，并非硬实时 50ms 上限，见[服务说明](docs/service.md)。
 
 内网自定义业务可以通过 [内部 C 媒体 hook](docs/media-hooks.md) 观察音频包、处理编码后的视频包并管理任务上下文。默认空实现；响度计算、客户 SEI 格式和时间戳修复仍只是后续接入点，不是当前功能。
 
 默认每 10 秒输出状态 JSONL，逐帧明细按需开启。累计/窗口时延覆盖全部成功输出帧，包含分位数上界和 I 帧独立统计；独立日志线程使用有界队列，并轮转追踪文件。TCP/UDP socket 收发另有原子计数观测，不等同逐帧网络端到端时延。详见 [运维与观测](docs/operations.md)。
 
-VVC 默认低时延配置为 `live_3b_2s`，PTS 顺序 I BBB P…，以首帧 PTS 为起点，每到 2 秒时间目标的第一帧输出关键帧，不再靠固定帧数决定；边界及 EOF 允许 IP / IBP / IBBP 短组。保留码率控制与重排，支持单调的变帧率时间轴。实时文件回放首输出约 0.45 秒（旧配置约 3.3 秒），见 [低时延测量](docs/validation-vvenc-lowlatency-20261017.md) 和 [PTS 调度验证](docs/validation-vvenc-pts-20261017.md)。
+VVC 默认配置为 `live_3b_2s`，PTS 顺序 I BBB P…，以首帧 PTS 为起点，每到 2 秒时间目标的第一帧输出关键帧；边界及 EOF 允许 IP / IBP / IBBP 短组。保留码率控制与重排，支持单调的变帧率时间轴。历史[低时延测量](docs/validation-vvenc-lowlatency-20261017.md)和[PTS 调度验证](docs/validation-vvenc-pts-20261017.md)只描述各自源码/输入/环境窗口，不作为当前候选的首帧或容量保证。
+
+时延按每个成功写出视频帧统计，覆盖排队和实际 mux/AVIO flush；首帧启动边界为完整 HTTP 请求进入 handler → 首次 mux/flush。它们不含客户端上传、源端采集或播放器显示，不是 source-to-screen；socket 调用时间也不是 wire time 或逐帧网络关联。
 
 容器运行：`docker compose up -d --build transcode`，见 [Docker 部署](docs/docker.md)。
 
-0.3.0 使用独立转码进程，默认保留 1 个待命 worker；控制进程异常退出时转码继续，新控制进程可接管原任务。每个任务额外输出首帧链路日志。容器内轻量监管入口负责重启控制进程，详情见 [进程池与接管](docs/processes.md)。仍只允许一路任务，尚未实现多路容量和运行中动态改配置。
+使用独立转码进程，默认保留 1 个待命 worker；控制进程异常退出时转码继续，新控制进程可接管原任务。每个任务额外输出首帧链路日志。容器内轻量监管入口负责重启控制进程，详情见 [进程池与接管](docs/processes.md)。当前只允许一个活动输入任务，可配置最多 4 路固定输出；支持每路单水印更新，其他运行中动态配置仍受各专题合同限制。
 
-0.4.0 默认启用独立 C 崩溃收集器：信号处理函数只传固定现场，外部进程限时抓栈、记录模块 Build ID 并生成限额 JSON 报告，不依赖完整 core。见 [崩溃诊断](docs/crashes.md)。
+默认启用独立 C 崩溃收集器：信号处理函数只传固定现场，外部进程限时抓栈、记录模块 Build ID 并生成限额 JSON 报告，不依赖完整 core。见 [崩溃诊断](docs/crashes.md)。
 
-Linux amd64 CI 将 FFmpeg SDK 构建与应用构建分开复用；main 每次构建分别保存镜像包和按 Build ID 索引的独立符号，并验证真实崩溃报告到源码行的离线解析。见 [CI 与构建产物](docs/ci.md)。
+Linux amd64 CI 配置将 FFmpeg SDK 构建与应用构建分开复用；通过门槛的 main 构建分别保存镜像包和按 Build ID 索引的独立符号。源码本机通过不代表远程 CI 或发布通过，须核对相应提交的检查和产物，见 [CI 与构建产物](docs/ci.md)。
+
+构建后运行 `bash scripts/test-service.sh quick` 做快速检查，`bash scripts/test-service.sh full` 做完整功能回归，`bash scripts/test-sanitizers.sh` 做独立的应用 ASan/UBSan 检查。完整回归需要匹配的 FFmpeg/VVenC 符号目录；覆盖范围、参数与结果口径见 [测试入口与基线](docs/testing.md)。
 
 ## 目录
 
 | 路径 | 用途 |
 | --- | --- |
-| `app/` | Linux C 服务与 HTTP 客户端 |
+| [app/](app/README.md) | Linux C 服务、模块/所有权导航与 HTTP 客户端 |
 | `scripts/` | 服务及解码专项的构建与回归入口 |
 | `third_party/yyjson/` | 固定版本 JSON 库子模块 |
 | `third_party/vvenc/` | Nakiha/vvenc fork，固定 v1.14.0，可独立修改 |
 | `examples/`、`tests/` | 请求示例与完整链路集成测试 |
-| `docs/` | 项目现状和整理说明 |
+| [docs/](docs/README.md) | 当前合同、设计草案和按窗口归档的验证记录 |
 | `experiments/decoder-20261016/ffmpeg-7.0.3/` | 固定版本的 FFmpeg 子模块；底层代码保留独立历史 |
 | `experiments/decoder-20261016/` | 本地历史媒体、基线、报告、安装目录和交付包，均不上传 |
 | `out/` | 新构建与测试结果，不上传 |

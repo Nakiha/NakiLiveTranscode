@@ -44,36 +44,36 @@ static int start_job(Job *job, yyjson_doc *doc) {
         expected&&!naki_config_fingerprint(&job->config,fingerprint,error,sizeof(error))&&!strcmp(expected,fingerprint);
     free(config);
     if(!valid)return -1;
-    strcpy(job->id,id); strcpy(job->request_id,request_id); strcpy(job->log_path,path); strcpy(job->state,"starting");
+    strcpy(job->id,id); strcpy(job->request_id,request_id); strcpy(job->log_path,path); job->lifecycle.state=NAKI_JOB_STATE_STARTING;
     if(!job->config.output_count)strcpy(job->output_id,job->config.single_output_id);
     crash_set_job(job->id);
-    job->started_us=yyjson_get_sint(yyjson_obj_get(root,"request_us"));
-    naki_overload_init(&job->overload);
-    job->assigned_us=yyjson_get_sint(yyjson_obj_get(root,"assigned_us"));
-    job->worker_received_us=now_us(); job->window_start_us=job->started_us;
-    job->prewarmed=yyjson_get_bool(yyjson_obj_get(root,"prewarmed"));
+    job->lifecycle.started_us=yyjson_get_sint(yyjson_obj_get(root,"request_us"));
+    naki_overload_init(&job->flow.overload);
+    job->progress.assigned_us=yyjson_get_sint(yyjson_obj_get(root,"assigned_us"));
+    job->progress.worker_received_us=now_us(); job->progress.window_start_us=job->lifecycle.started_us;
+    job->lifecycle.prewarmed=yyjson_get_bool(yyjson_obj_get(root,"prewarmed"));
     job->operations=naki_operations_open(256,2*1024*1024,1800000000);if(!job->operations)return -1;
     NakiOperationIntent create={.kind=NAKI_OP_CREATE,.job_id=job->id,
         .operation_id=yyjson_get_str(yyjson_obj_get(root,"creation_operation_id")),.fingerprint=fingerprint,.origin_request_id=request_id};
     NakiOperationHandle created;
     if(naki_operations_reserve(job->operations,&create,now_us(),&created)!=1||naki_operations_pin(job->operations,created,NAKI_OP_PIN_OWNERSHIP,0))return -1;
     if(job->config.frame_log && !(job->trace=logger_trace_open(job->logger,job->log_path)))return -1;
-    job->watermark=naki_watermark_open(&job->config.watermark,job->started_us,&job->cancel);
+    job->watermark=naki_watermark_open(&job->config.watermark,job->lifecycle.started_us,&job->lifecycle.cancel);
     if(!job->watermark)return -1;
     if(!job->config.output_count&&naki_watermark_bind(job->watermark,job->operations,job->id,job->output_id,job->request_id,job->logger))return -1;
     for(int i=0;i<job->config.output_count;i++) {
         Job *b=calloc(1,sizeof(*b));if(!b)return -1;
         naki_output_config(&b->config,&job->config,i);b->parent=job;
         strcpy(b->output_id,job->config.outputs[i].id);strcpy(b->id,job->id);strcpy(b->request_id,job->request_id);
-        strcpy(b->state,"waiting_assets");strcpy(b->log_path,job->log_path);
-        b->logger=job->logger;b->trace=job->trace;b->started_us=job->started_us;b->window_start_us=job->started_us;
-        b->assigned_us=job->assigned_us;b->worker_received_us=job->worker_received_us;b->worker_spawned_us=job->worker_spawned_us;
-        b->worker_ready_us=job->worker_ready_us;b->prewarmed=job->prewarmed;
+        b->lifecycle.state=NAKI_JOB_STATE_WAITING_ASSETS;strcpy(b->log_path,job->log_path);
+        b->logger=job->logger;b->trace=job->trace;b->lifecycle.started_us=job->lifecycle.started_us;b->progress.window_start_us=job->lifecycle.started_us;
+        b->progress.assigned_us=job->progress.assigned_us;b->progress.worker_received_us=job->progress.worker_received_us;b->progress.worker_spawned_us=job->progress.worker_spawned_us;
+        b->progress.worker_ready_us=job->progress.worker_ready_us;b->lifecycle.prewarmed=job->lifecycle.prewarmed;
         b->wake_fd=eventfd(0,EFD_NONBLOCK|EFD_CLOEXEC);
         if(b->wake_fd<0||pthread_mutex_init(&b->mutex,NULL)) {if(b->wake_fd>=0)close(b->wake_fd);free(b);return -1;}
-        atomic_init(&b->cancel,0);atomic_init(&b->done,0);atomic_init(&b->branch_failed,0);naki_overload_init(&b->overload);
+        atomic_init(&b->lifecycle.cancel,0);atomic_init(&b->lifecycle.done,0);atomic_init(&b->lifecycle.branch_failed,0);naki_overload_init(&b->flow.overload);
         job->outputs[i]=b;b->watermark_snapshot=naki_watermark_status;
-        b->watermark=naki_watermark_open(&b->config.watermark,b->started_us,&b->cancel);if(!b->watermark)return -1;
+        b->watermark=naki_watermark_open(&b->config.watermark,b->lifecycle.started_us,&b->lifecycle.cancel);if(!b->watermark)return -1;
         if(naki_watermark_bind(b->watermark,job->operations,job->id,b->output_id,job->request_id,job->logger))return -1;
     }
     return pthread_create(&job->thread,NULL,pipeline_main,job) ? -1 : 0;
@@ -130,14 +130,14 @@ int main(int argc,char **argv) {
     job->logger=logger_start(&options); job->network=&network;
     if(!job->logger) {fprintf(stderr,"Cannot initialize worker process event sink\n");return 1;}
     logger_submit(job->logger,NULL,new_event("worker_prewarmed",NULL));
-    job->worker_spawned_us=strtoll(argv[2],NULL,10);
+    job->progress.worker_spawned_us=strtoll(argv[2],NULL,10);
     job->wake_fd=eventfd(0,EFD_NONBLOCK|EFD_CLOEXEC);
     if(!job->logger || job->wake_fd<0 || pthread_mutex_init(&job->mutex,NULL))return 1;
-    atomic_init(&job->cancel,0); atomic_init(&job->done,0);atomic_init(&job->branch_failed,0);
+    atomic_init(&job->lifecycle.cancel,0); atomic_init(&job->lifecycle.done,0);atomic_init(&job->lifecycle.branch_failed,0);
     network_stats_reset(&network);
     avformat_set_network_observer(network_observe,&network);
     if(avformat_network_init()<0||curl_global_init(CURL_GLOBAL_DEFAULT)!=CURLE_OK)return 1;
-    job->worker_ready_us=now_us();
+    job->progress.worker_ready_us=now_us();
     int running=0,joined=0,final_ack=0,result=0;
     int64_t next_snapshot=now_us()+250000,next_report=0;
     yyjson_doc *assignment=NULL;
@@ -150,7 +150,7 @@ int main(int argc,char **argv) {
     int64_t disconnected_us=0,outage_us=0;
     uint64_t reconnects=0;
     uint64_t dropped=0;
-    yyjson_mut_doc *ready=ipc_message("ready"); json_int(ready,"ready_us",job->worker_ready_us);
+    yyjson_mut_doc *ready=ipc_message("ready"); json_int(ready,"ready_us",job->progress.worker_ready_us);
     json_int(ready,"component_updates_api",1);json_int(ready,"operation_query_api",1);
     json_int(ready,"operation_result_version_api",1);
     if(channel_send(&channel,ready))next_snapshot=0;
@@ -159,11 +159,11 @@ int main(int argc,char **argv) {
         if(stopping) {
             if(running) {
                 pthread_mutex_lock(&job->mutex);
-                if(!job->stop_requested_us) {job->stop_requested_us=now_us();job->stop_deadline_us=job->stop_requested_us+(int64_t)stop_timeout*1000000;}
+                if(!job->lifecycle.stop_requested_us) {job->lifecycle.stop_requested_us=now_us();job->lifecycle.stop_deadline_us=job->lifecycle.stop_requested_us+(int64_t)stop_timeout*1000000;}
                 pthread_mutex_unlock(&job->mutex);request_stop(job);
             } else break;
         }
-        if(running&&!joined&&job->stop_deadline_us&&now_us()>=job->stop_deadline_us)_exit(124);
+        if(running&&!joined&&job->lifecycle.stop_deadline_us&&now_us()>=job->lifecycle.stop_deadline_us)_exit(124);
         struct pollfd fds[]={{.fd=channel.fd,.events=POLLIN},{.fd=listener,.events=POLLIN}};
         int polled=poll(fds,2,50);
         if(polled<0 && errno!=EINTR) {result=1; break;}
@@ -191,7 +191,7 @@ int main(int argc,char **argv) {
                     assignment=doc; doc=NULL;
                     running=1; next_snapshot=0; next_report=now_us()+(int64_t)status_interval*1000000;
                     accepted_reply=ipc_message("accepted");json_str(accepted_reply,"job_id",job->id);
-                    json_int(accepted_reply,"worker_received_us",job->worker_received_us);
+                    json_int(accepted_reply,"worker_received_us",job->progress.worker_received_us);
                     owner_info_needed=1;export_pending=1;export_cursor=0;export_id++;
                 } else if(ipc_kind(doc,"stop")||ipc_kind(doc,"standby_stop")||ipc_kind(doc,"drain")) {
                     yyjson_val *root=yyjson_doc_get_root(doc);
@@ -202,7 +202,7 @@ int main(int argc,char **argv) {
                     int valid=instance&&!strcmp(instance,naki_process_id())&&
                         (ipc_kind(doc,"drain")||(ipc_kind(doc,"standby_stop")&&!running)||
                          (ipc_kind(doc,"stop")&&running&&!joined&&id&&!strcmp(id,job->id)&&naki_json_id(yyjson_obj_get(root,"operation_id"),128)&&
-                          naki_json_id(yyjson_obj_get(root,"origin_request_id"),128)&&(!*job->stop_operation_id||!strcmp(operation,job->stop_operation_id))));
+                          naki_json_id(yyjson_obj_get(root,"origin_request_id"),128)&&(!*job->lifecycle.stop_operation_id||!strcmp(operation,job->lifecycle.stop_operation_id))));
                     if(valid&&ipc_kind(doc,"stop")&&stop_intent(job,operation,origin,&stop_operation)<0)valid=0;
                     if(valid) {
                         if(ipc_kind(doc,"drain")||ipc_kind(doc,"standby_stop"))stopping=1;
@@ -214,13 +214,13 @@ int main(int argc,char **argv) {
                                 requested=now;deadline=now+(int64_t)stop_timeout*1000000;
                             }
                             pthread_mutex_lock(&job->mutex);
-                            if(!job->stop_requested_us) {job->stop_requested_us=requested;job->stop_deadline_us=deadline;}
-                            if(ipc_kind(doc,"stop")&&!*job->stop_operation_id) {strcpy(job->stop_operation_id,operation);strcpy(job->stop_origin_request_id,origin);}
+                            if(!job->lifecycle.stop_requested_us) {job->lifecycle.stop_requested_us=requested;job->lifecycle.stop_deadline_us=deadline;}
+                            if(ipc_kind(doc,"stop")&&!*job->lifecycle.stop_operation_id) {strcpy(job->lifecycle.stop_operation_id,operation);strcpy(job->lifecycle.stop_origin_request_id,origin);}
                             pthread_mutex_unlock(&job->mutex);request_stop(job);
                             naki_watermark_stop(job->watermark);
                             for(int i=0;i<job->config.output_count;i++)naki_watermark_stop(job->outputs[i]->watermark);
                             if(ipc_kind(doc,"stop")&&!stop_reply) {
-                                stop_reply=ipc_message("stop_ack");json_str(stop_reply,"job_id",job->id);json_str(stop_reply,"operation_id",job->stop_operation_id);
+                                stop_reply=ipc_message("stop_ack");json_str(stop_reply,"job_id",job->id);json_str(stop_reply,"operation_id",job->lifecycle.stop_operation_id);
                             }
                             next_snapshot=0;
                         }
@@ -302,10 +302,10 @@ int main(int argc,char **argv) {
         }
         if(running && !joined) {
             naki_policy_tick(job,current);
-            for(int i=0;i<job->config.output_count;i++)if(job->outputs[i]&&!atomic_load(&job->outputs[i]->done))naki_policy_tick(job->outputs[i],current);
+            for(int i=0;i<job->config.output_count;i++)if(job->outputs[i]&&!atomic_load(&job->outputs[i]->lifecycle.done))naki_policy_tick(job->outputs[i],current);
         }
         if(channel.fd<0 && !disconnected_us)disconnected_us=current;
-        if(running && !joined && atomic_load(&job->done)) {
+        if(running && !joined && atomic_load(&job->lifecycle.done)) {
             pthread_join(job->thread,NULL); joined=1; next_snapshot=0;
             if(stop_operation)naki_operations_transition(job->operations,stop_operation,NAKI_OP_STOPPED,0,0,NULL,current);
             export_pending=1;export_cursor=0;export_id++;if(export_reply)yyjson_mut_doc_free(export_reply);export_reply=NULL;
@@ -313,8 +313,8 @@ int main(int argc,char **argv) {
         if(owner_info_needed&&channel.fd>=0) {
             yyjson_mut_doc *info=ipc_message("owner_info");json_str(info,"job_id",job->id);json_int(info,"component_updates_api",1);
             json_int(info,"operation_query_api",1);json_int(info,"operation_result_version_api",1);json_int(info,"operation_page_limit",8);
-            yyjson_mut_obj_add_bool(info,yyjson_mut_doc_get_root(info),"stop_intent",job->stop_requested_us!=0);
-            json_int(info,"stop_deadline_us",job->stop_deadline_us);json_str(info,"stop_operation_id",job->stop_operation_id);json_str(info,"stop_origin_request_id",job->stop_origin_request_id);
+            yyjson_mut_obj_add_bool(info,yyjson_mut_doc_get_root(info),"stop_intent",job->lifecycle.stop_requested_us!=0);
+            json_int(info,"stop_deadline_us",job->lifecycle.stop_deadline_us);json_str(info,"stop_operation_id",job->lifecycle.stop_operation_id);json_str(info,"stop_origin_request_id",job->lifecycle.stop_origin_request_id);
             yyjson_mut_obj_add_val(info,yyjson_mut_doc_get_root(info),"job_info",yyjson_val_mut_copy(info,yyjson_doc_get_root(assignment)));
             if(!channel_send(&channel,info))owner_info_needed=0;
             else if(errno!=EAGAIN&&errno!=EWOULDBLOCK)channel_close(&channel);
@@ -349,7 +349,7 @@ int main(int argc,char **argv) {
                 json_int(doc,"control_reconnects",(int64_t)reconnects);
                 json_num(doc,"control_disconnected_ms",outage_us/1000.0);
             } else {
-                json_int(doc,"ready_us",job->worker_ready_us);
+                json_int(doc,"ready_us",job->progress.worker_ready_us);
                 json_int(doc,"component_updates_api",1);json_int(doc,"operation_query_api",1);
                 json_int(doc,"operation_result_version_api",1);
             }
@@ -366,7 +366,7 @@ int main(int argc,char **argv) {
     naki_watermark_close(&job->watermark);
     for(int i=0;i<job->config.output_count;i++)if(job->outputs[i]) {
         Job *b=job->outputs[i];naki_watermark_close(&b->watermark);
-        for(int k=0;k<2;k++)if(b->first_chain[k])yyjson_mut_doc_free(b->first_chain[k]);
+        for(int k=0;k<2;k++)if(b->progress.first_chain[k])yyjson_mut_doc_free(b->progress.first_chain[k]);
         close(b->wake_fd);pthread_mutex_destroy(&b->mutex);free(b);
     }
     if(watermark_reply)yyjson_mut_doc_free(watermark_reply);
@@ -380,7 +380,7 @@ int main(int argc,char **argv) {
     logger_trace_release(job->logger,job->trace);
     logger_stop(job->logger);
     if(assignment)yyjson_doc_free(assignment);
-    for(int i=0;i<2;i++)if(job->first_chain[i])yyjson_mut_doc_free(job->first_chain[i]);
+    for(int i=0;i<2;i++)if(job->progress.first_chain[i])yyjson_mut_doc_free(job->progress.first_chain[i]);
     close(job->wake_fd); channel_close(&channel); close(listener); unlink(endpoint);
     pthread_mutex_destroy(&channel.mutex); pthread_mutex_destroy(&job->mutex); free(job);
     return result;

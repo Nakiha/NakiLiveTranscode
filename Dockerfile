@@ -43,6 +43,8 @@ COPY tests/control_spec_test.c tests/
 COPY tests/control_connect_fault.c tests/
 COPY tests/output_finalize_barrier.c tests/
 COPY tests/event_logger_test.c tests/
+COPY tests/logger_submit_test.c tests/pipeline_lifecycle_fixture.c tests/pipeline_lifecycle_fixture.h tests/
+COPY tests/run_native_test.py tests/
 COPY tests/component_update_test.c tests/
 COPY tests/operation_store_test.c tests/
 COPY tests/operation_cache_test.c tests/
@@ -66,15 +68,21 @@ RUN python3 scripts/archive-symbols.py --output /symbols/app --label application
     && cp out/bin/naki-live out/bin/naki-live-worker out/bin/naki-live-ctl out/bin/naki-crash-collector /runtime-bin/ \
     && strip --strip-debug /runtime-bin/*
 FROM build AS test
-RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg \
+RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg git openssl \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/ scripts/
 COPY tests/ tests/
 COPY Dockerfile.ffmpeg ./
+COPY Dockerfile compose.yaml ./
+COPY .github/ .github/
+# Keep probe-only fixtures outside the native source directories. A partial
+# FFmpeg tree must not accidentally become a source-less SDK consumer input.
+ENV NAKI_DECODER_PROBE_SOURCE=/src/tests/decoder-probes \
+    NAKI_EXPECTED_SDK_MANIFEST=/src/expected-sdk.json
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/async_probe.c \
      experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_probe.c \
      experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_lifetime_test.c \
-     experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/
+     tests/decoder-probes/
 RUN mkdir -p out
 FROM scratch AS symbols
 COPY --from=build /symbols/ /

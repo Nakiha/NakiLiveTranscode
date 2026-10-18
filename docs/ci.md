@@ -2,10 +2,14 @@
 
 目前只构建、测试 **Linux amd64**。Windows 可通过 WSL 使用构建和解析脚本；尚未验证 ARM64 镜像。
 
+本页描述仓库配置的流程，远程 Actions、镜像和发布是否通过须核对相应提交的检查和产物。五批本机窗口见[核心整理验证](validation-core-refactor.md)，最新源码复查见[合并前复查](validation-final-review.md)。sanitizer 清单也包含单/多输出的 86 场景生命周期矩阵，见[测试入口](testing.md)。
+
 ## 两条构建流程
 
 - **FFmpeg dependency**：独立、可手动执行的可复用 workflow。服务 CI 先调用它查找 SDK，只有缺少匹配产物时才编译。键包含固定的 FFmpeg/VVenC gitlink、Ubuntu/架构标识、`Dockerfile.ffmpeg`、两者构建脚本和符号导出脚本的哈希。
 - **Service CI**：main push、PR、手动触发。下载确切 SDK，校验 SHA256，构建 C 服务、运行镜像、导出独立符号，并运行完整链路、观测、进程接管、轻量崩溃、离线解析和 Compose 镜像测试。应用源码变化不会重新编译 FFmpeg。
+
+功能回归通过 `scripts/ci-test.sh` 委托统一的 `scripts/test-service.sh full`；测试镜像提供 Git，原 release-key fixture 无需跳过。随后独立运行 `scripts/test-sanitizers.sh`，为应用、yyjson 和测试 helper 开启 ASan/UBSan，执行快速原生测试与单路服务、多输出、水印竞态集成；FFmpeg/VVenC 和系统库不重新插桩。故意崩溃、preload 故障与符号验收留在普通完整套件，不用全局关闭 sanitizer 来迁就它们。两项门槛失败均阻止后续打包。完整覆盖、环境要求和证据目录见 [测试入口与基线](testing.md)。
 
 FFmpeg/VVenC SDK 保存为公共仓库的 prerelease `ffmpeg-linux-amd64-<recipe-key>`。SDK 的安装前缀固定为 `/opt/naki-build/install`，包括共享库、头文件、pkg-config、FFmpeg/VVenC 独立调试符号、configure/CMake 配置和构建包版本。应用的 Docker build 使用 `FFMPEG_STAGE=ffmpeg-prebuilt`，不会执行本地依赖构建阶段。没有匹配 SDK 的 PR 会要求维护者在可信分支手动运行依赖 workflow；不从 PR 发布依赖。
 

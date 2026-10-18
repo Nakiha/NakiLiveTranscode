@@ -1,5 +1,7 @@
 # VVenC 3B / 2 秒 GOP 低时延首轮验证
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 用户约束按 **PTS 显示顺序 I BBB P BBB P…** 验收，关键帧约每 2 秒一次；GOP 尾部及 EOF 可有短 B 组。不是把所有 inter picture 标成 B 的 low-delay B 模式，也不是关闭 B 帧。
 
 ## 环境和测量边界

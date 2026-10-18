@@ -1,5 +1,7 @@
 # SEI 类型选择透传本地验证（2026-10-18）
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 本轮用户确认：模板用 `uuid`/数字选择类型；type 5 的 payload 无需符合 UUID 布局；跨 H.264/HEVC→H.264/VVC 保留 type/payload、按目标格式重封装；携带选中消息的画面不允许过载抽帧。接口及输入结构/预算边界见 [SEI 合同](sei.md)。
 
 基线父提交 `22a26999c9e97f07ff71cabf9ba7539c3e340907`。FFmpeg `4bee779b3dd59407a07baa8d6fc386cf95d8398b`、VVenC `29e3dc57a91d03833ead6370f5cd03f6d61242a5`，未修改子模块和 SDK 配方。本轮是父仓本地工作树实现，未提交、推送、发布或部署。既有未跟踪 `next-metadata-batch-and-release.md` 保持原样，它记录的是旧规划。

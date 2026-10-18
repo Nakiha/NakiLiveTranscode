@@ -1,5 +1,7 @@
 # 第一批独立审查修复：缓存来源与探流预算
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 本文件保留第一批较早一轮实测证据。随后复审的对象/配置凭据失败恢复 P1/P2 已在 [失败恢复验证记录](validation-sdk-failure-recovery.md) 实测通过；第二批现状见 [帧策略验证记录](validation-frame-policy.md)。下文“第二批暂停”等是该轮历史范围，不代表当前阶段；不得把这里的旧 SDK 当作最新源码已通过。
 
 保持第二批暂停。本轮只修第一批审查缺陷及相应测试，没有提交、推送、安装依赖、启动 Windows Python 管理器或绕过 VVenC/yyjson Git 元数据限制。使用既有 WSL `/usr/bin/python3` 和工具链，真实依赖构建最多 2 个任务；本轮日志在 `out/probe-review-fix-A7c4/`。

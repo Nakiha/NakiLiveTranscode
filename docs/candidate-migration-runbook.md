@@ -2,6 +2,8 @@
 
 This is an experimental Linux/x86_64 service. Windows is the development host; builds and media workers run in Linux/WSL. A local matrix pass does not establish production readiness or target-host capacity. Native FFmpeg is n9.0.2 at the pinned historical submodule path; frozen n7.0.3 measurements remain historical evidence.
 
+The five local windows are indexed in [validation-core-refactor.md](validation-core-refactor.md); the latest source review and candidate validation are in [validation-final-review.md](validation-final-review.md). Local evidence does not establish an actual image build/smoke, remote Actions, collector ingestion or target-host migration/rollback. Check the corresponding PR/commit's CI and deployment records separately. This runbook is a procedure, not evidence those gates passed.
+
 ## Reviewable candidate
 
 1. Keep the previous image, SDK receipt, source manifest and all application/FFmpeg/VVenC Build ID debug files. Do not overwrite archived experiments or prior evidence directories.
@@ -10,7 +12,7 @@ This is an experimental Linux/x86_64 service. Windows is the development host; b
 4. Use a unique `out/` directory for every candidate. Record each test command, exit status and evidence path. Compare source-input manifests before and after testing; changed source invalidates the combined candidate claim. Preserve failures as well as successful retries.
 5. A local dirty/no-image manifest remains `publication_eligible=false`. Actual image build, extraction, smoke test and manifest verification are CI gates. Do not promote a manifest merely because it is internally parseable or its source commit is familiar.
 
-The local candidate runner is `out/engineering-plan-20261018/run-candidate.sh`; its current directory is recorded in `candidate-current.txt`. It mirrors the existing CI suites with local native-symbol locations, adds the new component/queue/audio/rate/health/release checks, and records actual application/native ELF/DWARF binding. Its result is authoritative only with `complete.exit=0`, unchanged source inputs and the individual logs. Documentation does not declare an in-progress run passed.
+The maintained functional entry point is `bash scripts/test-service.sh full --ffmpeg-symbols <directory> --vvenc-symbols <directory>`; use `scripts/test-sanitizers.sh` for the separate application ASan/UBSan gate. See [testing.md](testing.md) for the quick/full inventory, prerequisites, identity records and explicit external gates. The earlier `out/engineering-plan-20261018/run-candidate.sh` and `candidate-current.txt` belong to the historical local engineering workflow, not the maintained test entry point. Its frozen results remain authoritative only with `complete.exit=0`, unchanged source inputs and the individual logs. Documentation does not declare an in-progress run passed.
 
 ## Acceptance boundaries
 

@@ -41,9 +41,39 @@ int main(void) {
     assert(!naki_intent_validate(yyjson_doc_get_root(read),error,sizeof(error)));
     assert(!strcmp(yyjson_get_str(yyjson_obj_get(yyjson_doc_get_root(read),"request_id")),"second"));
     free(text);yyjson_doc_free(read);yyjson_mut_doc_free(d);
-    Job *job=calloc(1,sizeof(*job));assert(job&&!pthread_mutex_init(&job->mutex,NULL));job->config=legacy;strcpy(job->state,"running");
+    Job *job=calloc(1,sizeof(*job));assert(job&&!pthread_mutex_init(&job->mutex,NULL));job->config=legacy;job->lifecycle.state=NAKI_JOB_STATE_RUNNING;
     LoggerOptions logger_options={.queue_capacity=32,.rotate_seconds=1,.rotate_bytes=1048576};job->logger=logger_start(&logger_options);assert(job->logger);
-    job->last_input_us=100;job->last_decoded_us=200;job->last_encoded_us=300;
+    Job *projection=calloc(1,sizeof(*projection));
+    assert(projection&&!pthread_mutex_init(&projection->mutex,NULL));
+    projection->logger=job->logger;projection->config=job->config;
+    /* Internal enum representation must not change the public state strings. */
+    const struct {NakiJobState state;const char *wire;} states[]={
+        {NAKI_JOB_STATE_NONE,""},{NAKI_JOB_STATE_STARTING,"starting"},
+        {NAKI_JOB_STATE_WAITING_ASSETS,"waiting_assets"},{NAKI_JOB_STATE_RUNNING,"running"},
+        {NAKI_JOB_STATE_FAILING,"failing"},{NAKI_JOB_STATE_STOPPED,"stopped"},
+        {NAKI_JOB_STATE_FAILED,"failed"},{NAKI_JOB_STATE_COMPLETED,"completed"},
+        {NAKI_JOB_STATE_COMPLETED_PARTIAL,"completed_partial"}};
+    for(size_t i=0;i<sizeof(states)/sizeof(states[0]);i++) {
+        projection->lifecycle.state=states[i].state;
+        d=job_snapshot(projection);assert(d);
+        assert(!strcmp(yyjson_mut_get_str(yyjson_mut_obj_get(yyjson_mut_doc_get_root(d),"state")),states[i].wire));
+        yyjson_mut_doc_free(d);
+    }
+    const struct {NakiMediaPhase phase;const char *wire;} phases[]={
+        {NAKI_MEDIA_PHASE_NONE,"starting"},{NAKI_MEDIA_PHASE_OPENING_INPUT,"opening_input"},
+        {NAKI_MEDIA_PHASE_WAITING_INPUT,"waiting_input"},{NAKI_MEDIA_PHASE_RUNNING,"running"},
+        {NAKI_MEDIA_PHASE_DRAINING,"draining"}};
+    projection->lifecycle.state=NAKI_JOB_STATE_RUNNING;
+    for(size_t i=0;i<sizeof(phases)/sizeof(phases[0]);i++) {
+        projection->progress.media_phase=phases[i].phase;
+        d=job_snapshot(projection);assert(d);
+        yyjson_mut_val *v=yyjson_mut_obj_get(yyjson_mut_doc_get_root(d),"progress");
+        assert(!strcmp(yyjson_mut_get_str(yyjson_mut_obj_get(v,"phase")),phases[i].wire));
+        yyjson_mut_doc_free(d);
+    }
+    projection->progress.media_phase=NAKI_MEDIA_PHASE_NONE;
+    pthread_mutex_destroy(&projection->mutex);free(projection);
+    job->progress.last_input_us=100;job->progress.last_decoded_us=200;job->progress.last_encoded_us=300;
     assert(!naki_policy_track(job,NAKI_TRACK_PACKET,1,50));assert(!naki_policy_track(job,NAKI_TRACK_FRAME,2,60));
     d=job_snapshot(job);assert(d);text=yyjson_mut_write(d,0,&size);assert(text);read=yyjson_read(text,size,0);assert(read);
     assert(!naki_intent_validate(yyjson_doc_get_root(read),error,sizeof(error)));

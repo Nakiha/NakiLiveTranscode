@@ -2,9 +2,9 @@
 
 已确认业务范围只包括 **MPEG-TS 输入 → MPEG-TS 输出**（例如 SRT→SRT），不扩展到 RTMP/Enhanced FLV。需求包含源信号保留和客户运行中安排临时插入信号。SCTE-35 是节目事件，不归属于某张视频帧，也不属于任意 SEI 透传。当前服务及 API 不支持本页功能。
 
-## 当前 pin 的实际缺口
+## 早期依赖审查的缺口（历史 pin）
 
-核对 FFmpeg fork `f5113758`：
+以下审查针对历史 FFmpeg fork `f5113758`，不把其行号/pin 当作当前依赖身份。当前服务仍未实现 SCTE-35 API 或专用输出路径；当前 pin/支持范围见[文档索引](README.md)。
 
 - mpegts.c 识别 `stream_type=0x86` 与节目 CUEI registration，使用 section filter 收到完整 section。scte_data_cb 给 AVPacket 填的 PTS/DTS 来自最近 PCR 估计，不是消息内部声明的拼接时间；初始化时没有 ts->pkt 还存在直接返回路径，需要专项验证首批信号是否丢失。
 - mpegtsenc.c 没有 SCTE-35 专用 stream type/section 写出路径，普通未知 data 会落入 private data 路径；不能只 map 数据流就宣称完成合法 SCTE-35 TS 输出。

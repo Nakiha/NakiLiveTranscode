@@ -1,5 +1,7 @@
 # VVenC 按 PTS 调度关键帧：2026-10-17
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 0.7.0 使用公开 fork 独立实现 PTS 时间网格调度：以首帧 PTS 为起点，每 2 秒目标后的第一帧为关键帧。完整组保持 3B，边界/EOF 可以 IP、IBP、IBBP；不为凑满 B 组延后关键帧。VVenC pin `2b90643`，FFmpeg pin `9d4c37c2`。名义帧率仍用于码控，但不是关键帧位置的判断依据。
 
 本机 WSL/Linux 使用真实 H.264/HEVC 8/10-bit 输入，经服务异步解码、10-bit filter、单遍 VVenC 码控和 MP4/MPEG-TS 输出，由构建的 n9 原生 VVC decoder 独立解码。`tests/vvenc_pts_integration.py` 的 12 组样本核对全部输出画面数、显示顺序、每帧 PTS 间隔、严格递增的 DTS、DTS≤PTS、时间网格关键帧、短组和日志关联。不是只检查传给编码器的配置。

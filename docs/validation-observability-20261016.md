@@ -1,5 +1,7 @@
 # 日志、时延和网络观测验证：2026-10-16
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 版本：服务 0.2.0，FFmpeg 子模块 `cbf2341520725a4f8b217052f864aa7dd3028a8d`（libavformat 61.2.100，网络观测 API 1；解码 API 2 保持不变）。验证平台为本机 WSL Ubuntu 24.04 和 Docker Desktop Linux Engine 28.3.0。
 
 | 验证 | 结果 |

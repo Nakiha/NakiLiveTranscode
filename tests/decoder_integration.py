@@ -8,7 +8,8 @@ import subprocess
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async"
+SOURCE = pathlib.Path(os.environ.get("NAKI_DECODER_PROBE_SOURCE",
+    ROOT / "experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async"))
 CACHE = pathlib.Path(os.environ.get("NAKI_BUILD_ROOT", pathlib.Path(os.environ.get(
     "XDG_CACHE_HOME", pathlib.Path.home() / ".cache")) / "naki-live-transcode-n9"))
 PREFIX = CACHE / "install"

@@ -1,5 +1,7 @@
 # Live mux CI follow-up, 2026-10-17
 
+历史验证窗口：本页的“当前/最新”、pin、SDK、提交/复审状态及未运行项只指下述那次源码与环境。当前工程整理候选及未验证项见[核心整理验证](validation-core-refactor.md)，能力/草案见[文档索引](README.md)。原始结果、数值和失败尝试不回写。
+
 [Service CI attempt 2](https://github.com/Nakiha/NakiLiveTranscode/actions/runs/39014063071/attempts/2), service head `634f83ca55ba3f28dbdf5d920f8bfd3853e8bcec`, passed the repaired SDK cache regression and all multi-output scenarios. It then failed `live_mux_integration.py` at the unchanged one-second video progress assertion: 2.259896429 seconds between observed progress from 141 to 143 output packets. This measures progress after startup, not first-frame latency.
 
 The retained `live-mux-gxzu21o0` artifact shows 151 input packets, 149 decoded/filtered frames and 141 written video packets at the status captured during the gap. The live mux queue was empty. The SRT sender had a finite 8-second source followed by a 3-second connected but silent hold. On this slower consumer, the late private PID's raw codec probe reached that silent tail. The fork's documented 100ms subsequent-probe budget applies while packets continue arriving; it does not interrupt a blocking transport read. See `libavformat/live_mux.h` and [the existing transport/probe boundary](live-mux.md).
