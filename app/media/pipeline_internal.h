@@ -7,6 +7,7 @@
 #include "watermark.h"
 #include "video_filter.h"
 #include "live_rate.h"
+#include "rate_audit.h"
 #include "codec_trace.h"
 #include "branch_queue.h"
 #include "crash/crash.h"
@@ -54,6 +55,7 @@ typedef struct Stamp {
     int64_t network_first_read_us,network_complete_us,demux_finished_us,network_tag_position;
     int encoder_future_frames,actual_slice_qp,decoder_tracked;
     NakiRateDecision rate;
+    NakiRateAuditFrame rate_audit;
     int64_t async_ready_us,decoder_owner_us;
     int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
     int64_t encoder_submit_us, encoder_accepted_us, scheduled_us, filter_started_us;
@@ -114,6 +116,7 @@ typedef struct Pipeline {
     DecodePump pump;
     Ledger ledger[LEDGER_CAPACITY];
     NakiLiveRate rate;
+    NakiRateAudit rate_audit;
     int64_t last_pts, synthetic_pts, next_stats_us;
     int have_output_display_pts;
     int64_t last_output_display_pts;
@@ -167,6 +170,11 @@ int pipeline_receive_encoded(Pipeline *p);
 int64_t pipeline_source_rate(Pipeline *p,int64_t now);
 int pipeline_encode_frame(Pipeline *p, AVFrame *frame);
 int pipeline_ledger_pending(Pipeline *p);
+void pipeline_rate_audit_init(Pipeline *p);
+uint64_t pipeline_rate_audit_boundary(Pipeline *p,int64_t now,int *status);
+void pipeline_rate_audit_json(yyjson_mut_doc *doc,const NakiRateAuditFrame *f);
+void pipeline_rate_audit_finish(Pipeline *p);
+void pipeline_rate_audit_eof(Pipeline *p);
 
 /* pipeline_mux.c */
 int pipeline_drain_mux(Pipeline *p, int force);

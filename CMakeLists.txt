@@ -40,7 +40,7 @@ add_executable(naki-live ${NAKI_SERVICE_SOURCES} app/control/operation_cache.c a
     app/platform/runtime.c app/worker/job.c app/observability/metrics.c app/worker/job_report.c app/observability/logger.c app/observability/netstats.c app/crash/crash_client.c ${NAKI_POLICY_SOURCES})
 set(NAKI_PIPELINE_SOURCES
     app/media/pipeline.c app/media/pipeline_reader.c app/media/pipeline_output.c
-    app/media/pipeline_mux.c app/media/pipeline_encode.c app/media/pipeline_decode.c)
+    app/media/pipeline_mux.c app/media/pipeline_encode.c app/media/pipeline_decode.c app/media/pipeline_rate_audit.c)
 set(NAKI_WORKER_SOURCES
     app/worker/worker.c app/media/watermark.c app/media/video_filter.c app/media/branch_queue.c app/platform/ipc.c
     app/media/input_probe.c app/media/audio_signature.c app/media/sei.c ${NAKI_PIPELINE_SOURCES}
@@ -90,6 +90,10 @@ add_executable(naki-live-rate-test tests/unit/live_rate_test.c)
 target_include_directories(naki-live-rate-test PRIVATE app)
 target_link_libraries(naki-live-rate-test PRIVATE m)
 target_compile_options(naki-live-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+add_executable(naki-rate-audit-test tests/unit/rate_audit_test.c)
+target_include_directories(naki-rate-audit-test PRIVATE app)
+target_link_libraries(naki-rate-audit-test PRIVATE m)
+target_compile_options(naki-rate-audit-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 add_executable(naki-branch-queue-test tests/unit/branch_queue_test.c app/media/branch_queue.c)
 target_include_directories(naki-branch-queue-test PRIVATE app)
 target_link_libraries(naki-branch-queue-test PRIVATE PkgConfig::FFMPEG Threads::Threads)
@@ -270,7 +274,7 @@ set_target_properties(naki-read-origin-probe PROPERTIES BUILD_RPATH "${NAKI_FFMP
     # Media/transport fixture drivers remain owned by their Python suites.
     foreach(name frame-policy frame-policy-config watermark-config branch-queue
             identity-intent control-spec sei component-update operation-store
-            operation-cache audio-signature video-rate video-filter live-rate vvenc-input8 native8)
+            operation-cache audio-signature video-rate video-filter live-rate rate-audit vvenc-input8 native8)
         add_test(NAME ${name} COMMAND naki-${name}-test)
         set_tests_properties(${name} PROPERTIES LABELS "native;quick" TIMEOUT 60)
     endforeach()

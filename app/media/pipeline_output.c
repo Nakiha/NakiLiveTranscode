@@ -236,6 +236,7 @@ int pipeline_drain_output(Pipeline *p) {
     if(!p->graph) {p->stage="empty video";return AVERROR(ENODATA);}
     p->stage="filter drain";int ret=av_buffersrc_add_frame_flags(p->source,NULL,0);
     if(ret<0||(ret=pipeline_filter_output(p))<0)return ret;
+    pipeline_rate_audit_eof(p);
     p->stage="encoder drain";ret=pipeline_encoder_send(p,NULL);
     if(ret<0||(ret=pipeline_receive_encoded(p))<0)return ret;
     if((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0)return ret;
@@ -290,6 +291,7 @@ void pipeline_complete_job(Pipeline *p,int ret,int stopped) {
         }
     }
     pthread_mutex_unlock(&j->mutex);
+    pipeline_rate_audit_finish(p);
     logger_submit(j->logger,NULL,job_report(j,1));
     if(!j->parent)logger_trace_finish(j->logger,j->trace);
     atomic_store(&j->lifecycle.done,1);

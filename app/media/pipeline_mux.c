@@ -74,7 +74,9 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     if(ret<0)return ret;
     if(p->job->config.constrained_crf) {
         int64_t bits=8*((int64_t)bytes+(pts_us==av_rescale_q(p->first_encoder_pts,p->encoder->time_base,AV_TIME_BASE_Q)?p->encoder->extradata_size:0));
+        int64_t before=p->rate.pending_bits;
         if(naki_rate_written(&p->rate,av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q),written,bits)<0)return AVERROR_INVALIDDATA;
+        naki_rate_audit_written(&p->rate_audit,&stamp.rate_audit,before,p->rate.pending_bits,bits);
     }
     pthread_mutex_lock(&p->job->mutex);
     p->job->stats.sei_written+=naki_sei_count(pipeline_stamp_sei(meta->owner),&p->job->config.sei);
@@ -181,6 +183,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     }
     if(p->job->config.constrained_crf) {
         json_int(doc,"rc_qp",stamp.rate.qp);json_int(doc,"rc_actual_slice_qp",stamp.actual_slice_qp);
+        if(p->rate_audit.enabled)pipeline_rate_audit_json(doc,&stamp.rate_audit);
         json_int(doc,"rc_source_bps",stamp.rate.source_bps);json_int(doc,"rc_effective_bps",stamp.rate.effective_bps);
         json_int(doc,"rc_decision_monotonic_us",stamp.rate.decision_us);json_int(doc,"rc_predicted_bits",stamp.rate.predicted_bits);
         json_int(doc,"rc_saturated",stamp.rate.saturated);json_num(doc,"rc_complexity",stamp.rate.complexity);

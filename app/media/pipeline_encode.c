@@ -117,7 +117,12 @@ int pipeline_receive_encoded(Pipeline *p) {
              * forecast. The pending reservation survives until real flush. */
             int64_t output_dts=av_rescale_q(packet->dts,p->encoder->time_base,p->video->time_base);
             int64_t media_us=av_rescale_q(output_dts,p->video->time_base,AV_TIME_BASE_Q);
+            int model=kind==0&&mapped->rate.kind==3?3:kind;
+            int64_t before=p->rate.pending_bits;
+            double coefficient=model>=0?p->rate.coefficient[model]:0;
             if(naki_rate_feedback(&p->rate,&mapped->rate,p->encoder->width*p->encoder->height,bits,kind,media_us)<0) {ret=AVERROR_INVALIDDATA;break;}
+            if(p->rate_audit.enabled)naki_rate_audit_feedback(&p->rate_audit,&mapped->rate_audit,packet->pts,
+                before,p->rate.pending_bits,bits,kind,now_us(),coefficient,p->rate.coefficient[model]);
         }
         MuxTrace *meta=av_malloc(sizeof(*meta));
         AVBufferRef *reference=meta?av_buffer_create((uint8_t *)meta,sizeof(*meta),mux_trace_free,NULL,0):NULL;
@@ -168,6 +173,7 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     AVBufferRef *owner=av_buffer_ref(frame->opaque_ref);
     if(!owner)return AVERROR(ENOMEM);
     if(p->job->config.constrained_crf) {
+        pipeline_rate_audit_init(p);
         int64_t began=now_us();
         int byte_input=frame->format==AV_PIX_FMT_YUV420P;
         if(!byte_input&&frame->format!=AV_PIX_FMT_YUV420P10LE) {av_buffer_unref(&owner);return AVERROR_INVALIDDATA;}
@@ -175,19 +181,30 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
         int64_t source=p->job->config.source_rate_limit?pipeline_source_rate(p,began):0;
         int64_t pts_us=av_rescale_q(frame->pts,p->encoder->time_base,AV_TIME_BASE_Q);
         int64_t period=av_rescale_q(1,av_inv_q(p->encoder->framerate),AV_TIME_BASE_Q);
+        int boundary_status=0;uint64_t boundary_target=0;
+        if(stamp.intra_reason)boundary_target=pipeline_rate_audit_boundary(p,began,&boundary_status);
+        int64_t before=p->rate.pending_bits;
         if(naki_rate_select(&p->rate,p->job->config.qp,p->job->config.maxrate,p->job->config.source_rate_limit,
             source,began,pts_us,period,frame->width*frame->height,!!stamp.intra_reason,complexity,&stamp.rate)<0) {
             av_buffer_unref(&owner);return AVERROR_INVALIDDATA;
+        }
+        naki_rate_audit_select(&p->rate_audit,&stamp.rate_audit,&p->rate,&stamp.rate,frame->pts,stamp.frame_id,stamp.generation,before);
+        stamp.rate_audit.boundary_target_seq=boundary_target;stamp.rate_audit.boundary_status=boundary_status;
+        if(p->rate_audit.enabled) {
+            NakiRateAuditEntry *e=naki_rate_audit_entry(&p->rate_audit,stamp.rate_audit.seq);
+            if(e)e->snapshot=stamp.rate_audit;
         }
         if(av_dict_set_int(&frame->metadata,"naki_qp_offset",stamp.rate.qp-p->job->config.qp,0)<0) {av_buffer_unref(&owner);return AVERROR(ENOMEM);}
     }
     stamp.encoder_submit_us=now_us();
     pipeline_checkpoint(p,&p->job->progress.first_encoder_submit_us);
     while ((ret=pipeline_encoder_send(p,frame))==AVERROR(EAGAIN)) {
+        if(p->rate_audit.enabled)stamp.rate_audit.send_eagain++;
         if ((ret=pipeline_receive_encoded(p))<0) {av_buffer_unref(&owner);return ret;}
     }
     if (ret<0) {av_buffer_unref(&owner);return ret;}
     stamp.encoder_accepted_us=now_us();
+    naki_rate_audit_accept(&p->rate_audit,&stamp.rate_audit,!!stamp.intra_reason);
     if(strict) {p->last_output_display_pts=output_display_pts;p->have_output_display_pts=1;}
     naki_intra_accept(&p->job->config.policy,&p->intra,stamp.source_us,stamp.intra_reason);
     if(stamp.intra_reason) {pthread_mutex_lock(&p->job->mutex);p->job->stats.intra_requested++;pthread_mutex_unlock(&p->job->mutex);}
