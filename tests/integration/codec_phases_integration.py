@@ -5,6 +5,7 @@ import sys as _sys
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))
 import importlib.util
 import json
+import os
 import pathlib
 import signal
 import subprocess
@@ -32,7 +33,8 @@ def run():
     results = []
     with tempfile.TemporaryDirectory(prefix='codec-phases-state-') as state_dir, (directory/'controller.log').open('w') as log:
         server = subprocess.Popen([str(client.BIN/'naki-live'), '--port', str(client.PORT),
-                                   '--state-dir', state_dir, '--run-dir', str(directory/'logs')], stdout=log, stderr=log)
+                                   '--state-dir', state_dir, '--run-dir', str(directory/'logs')], stdout=log, stderr=log,
+                                  env=dict(os.environ, VVENC_LIVE_CPU_LEDGER='1'))
         try:
             until = time.monotonic()+10
             while True:
@@ -84,6 +86,15 @@ def run():
                     if native_ref:
                         assert sum(f['encoder_internal']['byte_me_blocks'] for f in events if f['event']=='frame') > 0
                     (case/'phase-audit.json').write_text(json.dumps(result, indent=2))
+                    ledger = [f['encoder_internal'] for f in events if f['event']=='frame' and f['encoder_internal']['pool_ledger_valid']]
+                    assert len(ledger)>=110 and all(e['pool_ledger_enabled']==1 for e in ledger)
+                    assert len({e['ledger_caller_tid'] for e in ledger})==1 and ledger[0]['ledger_caller_tid']>0
+                    for e in ledger:
+                        assert e['pool_tasks_cpu_us']==sum(e[k] for k in ('pool_mctf_me_cpu_us','pool_mctf_filter_cpu_us','pool_ctu_cpu_us','pool_other_cpu_us'))
+                        assert e['pool_total_cpu_us']>=sum(e[k] for k in ('pool_scan_cpu_us','pool_yield_cpu_us','pool_lock_cpu_us','pool_tasks_cpu_us'))
+                    assert ledger[-1]['pool_mctf_me_cpu_us']>0 and ledger[-1]['pool_mctf_filter_cpu_us']>0
+                    assert ledger[-1]['pool_ctu_cpu_us']>0 and ledger[-1]['pool_scan_calls']>0
+                    assert all(a['pool_total_cpu_us']<=b['pool_total_cpu_us'] for a,b in zip(ledger,ledger[1:]))
                     assert all(f['encoder_internal']['group_last_input_us'] == f['encoder_internal']['input_us']
                                for f in events if f['event'] == 'frame' and f['output_picture_type'] == 'I')
                 else:

@@ -73,7 +73,7 @@ int pipeline_receive_encoded(Pipeline *p) {
                 NAKI_ENCODER_TRACE_FIELDS(GET_TRACE)
 #undef GET_TRACE
 #undef PARSE_TRACE
-                if(t->version!=3||t->cts!=packet->pts||!t->input_us||!t->au_us)valid=0;
+                if(t->version!=4||t->cts!=packet->pts||!t->input_us||!t->au_us)valid=0;
             }
             av_dict_free(&info);
             if(!valid){ret=AVERROR_INVALIDDATA;break;}
