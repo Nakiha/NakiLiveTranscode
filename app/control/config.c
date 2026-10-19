@@ -139,9 +139,9 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if(vvc && c.policy.timestamps==NAKI_TS_SOURCE_ALL && !strcmp(c.encoder_profile,"reference")) {
         bad(error,cap,"source_all requires a live VVenC profile; reference uses a nominal frame time base"); goto end;
     }
-    if ((vvc && strcmp(c.encoder_profile,"reference") && strcmp(c.encoder_profile,"live_3b_2s") && strcmp(c.encoder_profile,"live_3b_2s_no_mctf") && strcmp(c.encoder_profile,"live_3b_2s_qt8") && strcmp(c.encoder_profile,"live_3b_2s_qt16") && strcmp(c.encoder_profile,"live_3b_2s_speed") && strcmp(c.encoder_profile,"live_3b_2s_rdoq0")) ||
+    if ((vvc && strcmp(c.encoder_profile,"reference") && strcmp(c.encoder_profile,"live_3b_2s") && strcmp(c.encoder_profile,"live_3b_2s_no_mctf") && strcmp(c.encoder_profile,"live_3b_2s_qt8") && strcmp(c.encoder_profile,"live_3b_2s_qt16") && strcmp(c.encoder_profile,"live_3b_2s_speed") && strcmp(c.encoder_profile,"live_3b_2s_rdoq0") && strcmp(c.encoder_profile,"live_3b_2s_rdoq2") && strcmp(c.encoder_profile,"live_3b_2s_rdoq2_sel2")) ||
         (!vvc && strcmp(c.encoder_profile,"default"))) {bad(error,cap,"Invalid encoder_profile for selected encoder"); goto end;}
-    if((!strcmp(c.encoder_profile,"live_3b_2s_qt8")||!strcmp(c.encoder_profile,"live_3b_2s_qt16")||!strcmp(c.encoder_profile,"live_3b_2s_speed")||!strcmp(c.encoder_profile,"live_3b_2s_rdoq0"))&&!c.cqf) {bad(error,cap,"reduced search profiles require CQF/constrained_crf");goto end;}
+    if((!strcmp(c.encoder_profile,"live_3b_2s_qt8")||!strcmp(c.encoder_profile,"live_3b_2s_qt16")||!strcmp(c.encoder_profile,"live_3b_2s_speed")||!strcmp(c.encoder_profile,"live_3b_2s_rdoq0")||!strcmp(c.encoder_profile,"live_3b_2s_rdoq2")||!strcmp(c.encoder_profile,"live_3b_2s_rdoq2_sel2"))&&!c.cqf) {bad(error,cap,"reduced search profiles require CQF/constrained_crf");goto end;}
     if (!*c.encoder_preset) strcpy(c.encoder_preset,vvc ? "faster" : "veryfast");
     const char *presets=vvc ? "|faster|fast|medium|slow|slower|" : "|ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|";
     char preset_key[20]; snprintf(preset_key,sizeof(preset_key),"|%s|",c.encoder_preset);
