@@ -8,11 +8,17 @@ void pipeline_rate_audit_init(Pipeline *p) {
     a->enabled=flag&&!strcmp(flag,"1");
     if(!a->enabled)return;
     const Config *c=&p->job->config;
+    const char *candidate=getenv("NAKI_RATE_RESERVE_THREE");
+    int requested=candidate&&!strcmp(candidate,"1");
+    a->reserve_three=requested&&c->policy.intra==NAKI_INTRA_SOURCE&&p->encoder->codec_id==AV_CODEC_ID_VVC&&
+        strcmp(c->encoder_profile,"reference")&&c->encoder_max_future_frames==4;
+    if(requested&&!a->reserve_three)a->errors++;
     /* Capture detail requires an existing complete trace sink. Do not change
      * sampling/configuration or media behavior merely to enable the observer. */
     if(!p->job->trace||(!c->network_trace&&!c->codec_trace&&(!c->frame_log||c->frame_log_every!=1)))a->errors++;
     yyjson_mut_doc *doc=new_event("rate_audit_init",p->job);
-    json_int(doc,"audit_version",1);json_int(doc,"model_epoch",1);json_int(doc,"seed_version",1);
+    json_int(doc,"audit_version",2);json_int(doc,"model_epoch",1);json_int(doc,"seed_version",1);
+    json_int(doc,"reserve_three_enabled",a->reserve_three);
     json_str(doc,"encoder_profile",c->encoder_profile);json_str(doc,"encoder_preset",c->encoder_preset);
     json_int(doc,"width",p->encoder->width);json_int(doc,"height",p->encoder->height);
     json_int(doc,"encoder_bit_depth",c->encoder_bit_depth);json_int(doc,"encoder_input_bit_depth",c->encoder_input_bit_depth);
@@ -37,6 +43,11 @@ uint64_t pipeline_rate_audit_boundary(Pipeline *p,int64_t now,int *status) {
         if(l->used&&l->pts==a->last_accepted_pts&&l->stamp.rate_audit.seq==a->last_accepted_seq) {
             *status=naki_rate_audit_boundary(a,&l->stamp.rate_audit,&l->stamp.rate,&p->rate,
                 p->encoder->width*p->encoder->height,now);
+            /* Called only for the explicit I in pipeline_encode_frame, before
+             * its rate_select, and outside the encoder EAGAIN retry loop. */
+            if(*status==NAKI_RATE_BOUNDARY_TARGET&&naki_rate_reserve_three(a,&l->stamp.rate_audit,&l->stamp.rate,&p->rate,1,4)<0) {
+                *status=NAKI_RATE_BOUNDARY_UNKNOWN;return 0;
+            }
             return *status==1?l->stamp.rate_audit.seq:0;
         }
     }
@@ -60,7 +71,7 @@ void pipeline_rate_audit_eof(Pipeline *p) {
 }
 
 void pipeline_rate_audit_json(yyjson_mut_doc *doc,const NakiRateAuditFrame *f) {
-    json_int(doc,"rc_audit_version",1);
+    json_int(doc,"rc_audit_version",2);
 #define FIELD(name) json_int(doc,"rc_audit_"#name,(int64_t)f->name)
     FIELD(seq);FIELD(encoder_pts);FIELD(reserve_event);FIELD(accept_event);FIELD(feedback_event);FIELD(write_event);
     FIELD(reserve_before);FIELD(reserve_after);FIELD(feedback_before);FIELD(feedback_after);FIELD(write_before);FIELD(write_after);
@@ -68,6 +79,8 @@ void pipeline_rate_audit_json(yyjson_mut_doc *doc,const NakiRateAuditFrame *f) {
     FIELD(boundary_status);FIELD(boundary_target_seq);FIELD(boundary_event);FIELD(boundary_i_seq);
     FIELD(boundary_group_size);FIELD(boundary_us);FIELD(boundary_old_bits);FIELD(boundary_shadow_bits);
     FIELD(send_eagain);FIELD(eof_tail_event);
+    FIELD(reserved_bits);FIELD(upgrade_event);FIELD(upgrade_i_seq);
+    FIELD(upgrade_before);FIELD(upgrade_after);FIELD(upgrade_old_bits);FIELD(upgrade_new_bits);
 #undef FIELD
     json_num(doc,"rc_audit_coefficient_before",f->feedback_coefficient_before);
     json_num(doc,"rc_audit_coefficient_after",f->feedback_coefficient_after);
@@ -90,7 +103,7 @@ void pipeline_rate_audit_finish(Pipeline *p) {
     if(bits!=p->rate.pending_bits)a->errors++;
     LoggerStats stats;logger_get_stats(p->job->logger,&stats);
     yyjson_mut_doc *doc=new_event("rate_audit_summary",p->job);
-    json_int(doc,"audit_version",1);json_int(doc,"selected",(int64_t)a->selected);
+    json_int(doc,"audit_version",2);json_int(doc,"selected",(int64_t)a->selected);
     json_int(doc,"accepted",(int64_t)a->accepted);json_int(doc,"feedback",(int64_t)a->feedback);json_int(doc,"written",(int64_t)a->written);
     json_int(doc,"last_event",(int64_t)a->event);json_int(doc,"capture_errors",a->errors);
     json_int(doc,"eof_event",(int64_t)a->eof_event);json_int(doc,"eof_group_size",a->eof_group_phase);

@@ -37,3 +37,34 @@ the existing controller uses real wall time, a capture is not a promise of
 bit-identical output across separate runs. It is not a quality fix or an
 encoder feedback protocol. Original predictions remain immutable; this
 capture does not replace reservations with its shadow estimate.
+
+## Isolated three-picture reservation candidate (review only)
+
+In this candidate worktree only, `NAKI_RATE_RESERVE_THREE=1` additionally opts
+in to one behavior change. It requires `NAKI_RATE_AUDIT=1`, constrained CRF,
+explicit source I, the fork's non-reference live-PTS GOP4 profile and future
+guard 4. Both flags default off. It has not been tested on media or released.
+Audit schema 2 records immutable `predicted_bits`, current `reserved_bits` and
+one optional upgrade event with its trigger-I sequence and pending snapshots.
+
+Before selecting the known I's budget, only an accepted three-picture partial
+group's last predicted B may have its reservation raised to the existing
+P-model shadow estimate. Its exact accepted sequence, PTS, phase2 state,
+requested QP and original prediction must match both ledger and audit entry.
+The accepted frame's QP/type prediction and model coefficients stay unchanged.
+Complete groups, lengths 1/2, already-feedback, unknown and EOF targets are not
+corrected. Missing prerequisites skip correction; numeric/invariant failures
+leave controller state untouched and invalidate the audit.
+
+Selection reserves `reserved_bits` (initially prediction); upgrade adds only
+`new-old`; AU feedback replaces `actual-reserved`; successful write subtracts
+actual. The ledger decision, frame snapshots and audit outstanding amount are
+updated together. The upgrade precedes I selection and sits outside EAGAIN
+retries. A failed send leaves that I selected/phase1, never accepted; raised
+outstanding amounts remain recorded rather than being silently rolled back.
+
+This is a review candidate, not a quality fix. More reservation can raise the
+next I's QP and harm its reference chain. Unit/syntax checks and simulated
+retry/failure tests do not establish real codec timing, bitrate or quality.
+The observer's structure growth and read/write calls also have overhead even
+when default off; no zero-overhead or performance benefit is claimed.

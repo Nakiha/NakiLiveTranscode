@@ -21,7 +21,9 @@ typedef struct NakiLiveRate {
 } NakiLiveRate;
 typedef struct NakiRateDecision {
     int qp,kind,saturated;
-    int64_t source_bps,effective_bps,predicted_bits,decision_us,media_clock_us;
+    /* predicted_bits is immutable; reserved_bits may be raised once while
+     * this accepted picture is still unencoded. Both start at the prediction. */
+    int64_t source_bps,effective_bps,predicted_bits,reserved_bits,decision_us,media_clock_us;
     double complexity,quality_qp,allowance_bits,model_coefficient,window_room_bits,followup_reserve_bits;
 } NakiRateDecision;
 static inline double naki_rate_clip(double low,double high,double v) {return v<low?low:v>high?high:v;}
@@ -94,19 +96,33 @@ static inline int naki_rate_select(NakiLiveRate *r,int crf,int maxrate,int sourc
     if(predicted>1000000000||r->pending_bits>INT64_MAX-predicted)return -1;
     r->pending_bits+=predicted;
     *d=(NakiRateDecision){.qp=qp,.kind=kind,.saturated=needed>63,.source_bps=source_bps,
-        .effective_bps=rate,.predicted_bits=predicted,.decision_us=now,.media_clock_us=media,.complexity=complexity,
+        .effective_bps=rate,.predicted_bits=predicted,.reserved_bits=predicted,.decision_us=now,.media_clock_us=media,.complexity=complexity,
         .quality_qp=quality,.allowance_bits=allowance,.model_coefficient=r->coefficient[kind],.window_room_bits=room,
         .followup_reserve_bits=followup};
     return 0;
 }
+/* Caller proves the accepted/unencoded identity. No new credit, QP or model
+ * change: only replace one reservation by a nondecreasing bounded estimate. */
+static inline int naki_rate_upgrade_reserved(NakiLiveRate *r,NakiRateDecision *d,int64_t next) {
+    if(d->predicted_bits<=0||d->predicted_bits>1000000000||d->reserved_bits<d->predicted_bits||
+       d->reserved_bits>1000000000||r->pending_bits<d->reserved_bits||next<=0||next>1000000000)return -1;
+    if(next<=d->reserved_bits)return 0;
+    int64_t delta=next-d->reserved_bits;
+    if(r->pending_bits>INT64_MAX-delta)return -1;
+    r->pending_bits+=delta;d->reserved_bits=next;
+    return 1;
+}
 static inline int naki_rate_feedback(NakiLiveRate *r,const NakiRateDecision *d,int pixels,int64_t bits,int actual_kind,int64_t dts) {
-    if(bits<=0||bits>1000000000||pixels<=0||r->pending_bits<d->predicted_bits||actual_kind<0||actual_kind>2)return -1;
+    if(bits<=0||bits>1000000000||pixels<=0||d->predicted_bits<=0||d->reserved_bits<d->predicted_bits||
+       d->reserved_bits>1000000000||r->pending_bits<d->reserved_bits||actual_kind<0||actual_kind>2)return -1;
     if(r->have_coded&&dts<=r->last_coded_dts)return -1;
+    int64_t delta=bits-d->reserved_bits;
+    if(delta>0&&r->pending_bits>INT64_MAX-delta)return -1;
     int kind=actual_kind==0&&d->kind==3?3:actual_kind;
     double observed=bits*exp2((d->qp-32)/6.0)/(pixels*d->complexity);
     double old=r->coefficient[kind],alpha=kind==0?.5:.2;
     r->coefficient[kind]=old*(1-alpha)+naki_rate_clip(old*.25,old*4,observed)*alpha;
-    r->pending_bits+=bits-d->predicted_bits;
+    r->pending_bits+=delta;
     r->have_coded=1;r->last_coded_dts=dts;
     return 0;
 }

@@ -94,6 +94,10 @@ add_executable(naki-rate-audit-test tests/unit/rate_audit_test.c)
 target_include_directories(naki-rate-audit-test PRIVATE app)
 target_link_libraries(naki-rate-audit-test PRIVATE m)
 target_compile_options(naki-rate-audit-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+add_executable(naki-rate-reservation-test tests/unit/rate_reservation_test.c)
+target_include_directories(naki-rate-reservation-test PRIVATE app)
+target_link_libraries(naki-rate-reservation-test PRIVATE m)
+target_compile_options(naki-rate-reservation-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 add_executable(naki-branch-queue-test tests/unit/branch_queue_test.c app/media/branch_queue.c)
 target_include_directories(naki-branch-queue-test PRIVATE app)
 target_link_libraries(naki-branch-queue-test PRIVATE PkgConfig::FFMPEG Threads::Threads)
@@ -274,7 +278,7 @@ set_target_properties(naki-read-origin-probe PROPERTIES BUILD_RPATH "${NAKI_FFMP
     # Media/transport fixture drivers remain owned by their Python suites.
     foreach(name frame-policy frame-policy-config watermark-config branch-queue
             identity-intent control-spec sei component-update operation-store
-            operation-cache audio-signature video-rate video-filter live-rate rate-audit vvenc-input8 native8)
+            operation-cache audio-signature video-rate video-filter live-rate rate-audit rate-reservation vvenc-input8 native8)
         add_test(NAME ${name} COMMAND naki-${name}-test)
         set_tests_properties(${name} PROPERTIES LABELS "native;quick" TIMEOUT 60)
     endforeach()

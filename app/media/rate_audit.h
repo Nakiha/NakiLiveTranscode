@@ -2,16 +2,18 @@
 #define NAKI_RATE_AUDIT_H
 #include "live_rate.h"
 
-/* Optional observer owned by the output thread. No controller mutation, I/O,
- * allocation or pointer transport. Exhaustion invalidates the audit only. */
+/* Output-owner observer, with a separately opted-in three-picture reservation
+ * candidate. No I/O, allocation or pointer transport. Both default off. */
 #define NAKI_RATE_AUDIT_CAPACITY 256
 enum {NAKI_RATE_BOUNDARY_UNKNOWN=-1,NAKI_RATE_BOUNDARY_EMPTY=0,NAKI_RATE_BOUNDARY_TARGET=1,
       NAKI_RATE_BOUNDARY_FULL=2,NAKI_RATE_BOUNDARY_FEEDBACK=3};
 typedef struct NakiRateAuditFrame {
     uint64_t seq,reserve_event,accept_event,feedback_event,write_event;
     uint64_t boundary_event,boundary_i_seq,boundary_target_seq;
+    uint64_t upgrade_event,upgrade_i_seq;
     int64_t encoder_pts,reserve_before,reserve_after,feedback_before,feedback_after,write_before,write_after;
     int64_t feedback_us,actual_bits,boundary_us,boundary_old_bits,boundary_shadow_bits;
+    int64_t reserved_bits,upgrade_before,upgrade_after,upgrade_old_bits,upgrade_new_bits;
     double feedback_coefficient_before,feedback_coefficient_after;
     int frames_since_i,first_p,actual_kind,boundary_group_size,boundary_status,send_eagain;
     uint64_t eof_tail_event;
@@ -21,12 +23,12 @@ typedef struct NakiRateAuditEntry {
     int64_t pts,frame_id,bits;
     unsigned generation;
     int phase,requested_qp,predicted_kind;
-    int64_t predicted_bits;
+    int64_t predicted_bits,reserved_bits;
     NakiRateAuditFrame snapshot;
     /* phase: 1 reserved, 2 accepted, 3 AU received; freed after write */
 } NakiRateAuditEntry;
 typedef struct NakiRateAudit {
-    int initialized,enabled,errors,group_phase,last_accepted_intra,last_accepted_phase,eof_group_phase;
+    int initialized,enabled,reserve_three,errors,group_phase,last_accepted_intra,last_accepted_phase,eof_group_phase;
     uint64_t event,next_seq,selected,accepted,feedback,written,last_accepted_seq;
     int64_t last_accepted_pts;
     uint64_t eof_event,eof_target_seq;
@@ -42,13 +44,13 @@ static inline void naki_rate_audit_select(NakiRateAudit *a,NakiRateAuditFrame *f
     if(!a->enabled)return;
     *f=(NakiRateAuditFrame){.seq=++a->next_seq,.reserve_event=++a->event,.encoder_pts=pts,
         .reserve_before=before,.reserve_after=r->pending_bits,.frames_since_i=r->frames_since_i,
-        .first_p=d->kind==1&&r->frames_since_i==4,.actual_kind=-1};
+        .first_p=d->kind==1&&r->frames_since_i==4,.actual_kind=-1,.reserved_bits=d->reserved_bits};
     a->selected++;
     NakiRateAuditEntry *e=&a->entries[(f->seq-1)%NAKI_RATE_AUDIT_CAPACITY];
     if(e->seq){a->errors++;return;}
-    *e=(NakiRateAuditEntry){.seq=f->seq,.pts=pts,.frame_id=frame_id,.generation=generation,.bits=d->predicted_bits,.phase=1,
-        .requested_qp=d->qp,.predicted_kind=d->kind,.predicted_bits=d->predicted_bits,.snapshot=*f};
-    if(r->pending_bits-before!=d->predicted_bits)a->errors++;
+    *e=(NakiRateAuditEntry){.seq=f->seq,.pts=pts,.frame_id=frame_id,.generation=generation,.bits=d->reserved_bits,.phase=1,
+        .requested_qp=d->qp,.predicted_kind=d->kind,.predicted_bits=d->predicted_bits,.reserved_bits=d->reserved_bits,.snapshot=*f};
+    if(r->pending_bits-before!=d->reserved_bits)a->errors++;
 }
 static inline void naki_rate_audit_accept(NakiRateAudit *a,NakiRateAuditFrame *f,int intra) {
     if(!a->enabled)return;
@@ -64,8 +66,8 @@ static inline void naki_rate_audit_feedback(NakiRateAudit *a,NakiRateAuditFrame 
     int64_t before,int64_t after,int64_t bits,int kind,int64_t now,double coefficient_before,double coefficient_after) {
     if(!a->enabled)return;
     NakiRateAuditEntry *e=naki_rate_audit_entry(a,f->seq);
-    if(!e||e->phase!=2||e->pts!=pts){a->errors++;return;}
-    if(after-before!=bits-e->bits)a->errors++;
+    if(!e||e->phase!=2||e->pts!=pts||e->bits!=e->reserved_bits||e->reserved_bits!=f->reserved_bits){a->errors++;return;}
+    if(after-before!=bits-e->reserved_bits)a->errors++;
     e->bits=bits;e->phase=3;f->feedback_event=++a->event;a->feedback++;
     if(f->seq==a->last_accepted_seq)a->last_accepted_phase=3;
     f->feedback_before=before;f->feedback_after=after;f->actual_bits=bits;f->actual_kind=kind;f->feedback_us=now;
@@ -103,5 +105,30 @@ static inline int naki_rate_audit_boundary(NakiRateAudit *a,NakiRateAuditFrame *
     target->boundary_shadow_bits=(int64_t)fmax(e->bits,estimate);
     e->snapshot=*target;
     return NAKI_RATE_BOUNDARY_TARGET;
+}
+
+/* Only a known explicit-I boundary in the fixed GOP4 fork may opt in. The
+ * shadow must already name its exact phase2 last accepted picture. A repeated
+ * send attempt cannot upgrade again, even if coefficients later change. */
+static inline int naki_rate_reserve_three(NakiRateAudit *a,NakiRateAuditFrame *f,NakiRateDecision *d,
+    NakiLiveRate *r,int explicit_i,int fixed_group_size) {
+    if(!a->enabled||!a->reserve_three||a->errors||!explicit_i||fixed_group_size!=4||
+       a->group_phase!=3||a->last_accepted_phase!=2||r->since_i!=3||a->eof_event||!f||!d)return 0;
+    if(a->next_seq>=INT64_MAX||a->event>=INT64_MAX){a->errors++;return -1;}
+    NakiRateAuditEntry *e=naki_rate_audit_entry(a,f->seq);
+    if(!e||e->phase!=2||e->seq!=a->last_accepted_seq||e->pts!=a->last_accepted_pts||e->pts!=f->encoder_pts||
+       d->kind!=2||e->predicted_kind!=d->kind||e->requested_qp!=d->qp||e->predicted_bits!=d->predicted_bits||
+       !f->boundary_event||f->boundary_group_size!=3||f->boundary_i_seq!=a->next_seq+1||f->eof_tail_event)return 0;
+    if(f->upgrade_event)return 0;
+    if(e->bits!=d->reserved_bits||e->reserved_bits!=d->reserved_bits||f->reserved_bits!=d->reserved_bits||
+       f->boundary_old_bits!=d->reserved_bits) {a->errors++;return -1;}
+    int64_t before=r->pending_bits,old=d->reserved_bits;
+    int ret=naki_rate_upgrade_reserved(r,d,f->boundary_shadow_bits);
+    if(ret<0){a->errors++;return -1;}
+    if(!ret)return 0;
+    f->upgrade_event=++a->event;f->upgrade_i_seq=f->boundary_i_seq;
+    f->upgrade_before=before;f->upgrade_after=r->pending_bits;f->upgrade_old_bits=old;f->upgrade_new_bits=d->reserved_bits;
+    f->reserved_bits=d->reserved_bits;e->bits=d->reserved_bits;e->reserved_bits=d->reserved_bits;e->snapshot=*f;
+    return 1;
 }
 #endif

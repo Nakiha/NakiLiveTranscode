@@ -183,6 +183,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     }
     if(p->job->config.constrained_crf) {
         json_int(doc,"rc_qp",stamp.rate.qp);json_int(doc,"rc_actual_slice_qp",stamp.actual_slice_qp);
+        json_int(doc,"rc_reserved_bits",stamp.rate.reserved_bits);
         if(p->rate_audit.enabled)pipeline_rate_audit_json(doc,&stamp.rate_audit);
         json_int(doc,"rc_source_bps",stamp.rate.source_bps);json_int(doc,"rc_effective_bps",stamp.rate.effective_bps);
         json_int(doc,"rc_decision_monotonic_us",stamp.rate.decision_us);json_int(doc,"rc_predicted_bits",stamp.rate.predicted_bits);
