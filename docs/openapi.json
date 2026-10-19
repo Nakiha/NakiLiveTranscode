@@ -1308,7 +1308,9 @@
               "live_3b_2s_qt8",
               "live_3b_2s_qt16",
               "live_3b_2s_speed",
-              "live_3b_2s_rdoq0"
+              "live_3b_2s_rdoq0",
+              "live_3b_2s_rdoq2",
+              "live_3b_2s_rdoq2_sel2"
             ],
             "description": "x264 only default. VVenC defaults to live_3b_2s, also accepts reference/live_3b_2s_no_mctf. Live profiles use a PTS-anchored 2s CRA grid, full 3B groups and shorter boundary/tail groups."
           },

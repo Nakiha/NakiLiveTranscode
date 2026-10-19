@@ -35,6 +35,14 @@ int main(void) {
     Config cqf=parse("{\"input\":\"i\",\"output\":\"o\",\"encoder\":\"libvvenc\",\"rate_control\":\"cqf\",\"qp\":32,\"maxrate\":6000000,\"output_fps\":30}");
     assert(cqf.cqf&&cqf.bitrate==0&&cqf.qp==32&&cqf.maxrate==6000000&&cqf.output_fps==30);
     assert(cqf.encoder_bit_depth==10);
+    const char *quality_profiles[]={"live_3b_2s_rdoq2","live_3b_2s_rdoq2_sel2"};
+    for(unsigned i=0;i<sizeof(quality_profiles)/sizeof(*quality_profiles);i++) {
+        char request[512];snprintf(request,sizeof(request),"{\"input\":\"i\",\"output\":\"o\",\"encoder\":\"libvvenc\",\"encoder_profile\":\"%s\",\"rate_control\":\"cqf\",\"qp\":32,\"maxrate\":1100000}",quality_profiles[i]);
+        Config candidate=parse(request);assert(!strcmp(candidate.encoder_profile,quality_profiles[i]));
+        naki_logical_output(&candidate,0,&output);assert(!strcmp(output.encoder_profile,quality_profiles[i]));
+        snprintf(request,sizeof(request),"{\"input\":\"i\",\"output\":\"o\",\"encoder\":\"libvvenc\",\"encoder_profile\":\"%s\"}",quality_profiles[i]);
+        assert(config_parse(request,strlen(request),&rejected,error,sizeof(error))<0);
+    }
     Config eight=cqf;eight.encoder_bit_depth=8;digest(&cqf,a);digest(&eight,b);assert(strcmp(a,b));
     Config eight_logical=parse("{\"input\":\"i\",\"outputs\":[{\"output\":\"o\",\"encoder\":\"libvvenc\",\"encoder_bit_depth\":8,\"rate_control\":\"cqf\",\"qp\":32,\"maxrate\":6000000,\"output_fps\":30}]}");
     digest(&eight,a);digest(&eight_logical,b);assert(!strcmp(a,b));

@@ -133,7 +133,9 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
             "Frame3=B 1 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1:"
             "Frame4=B 3 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1",
             intra_frames,temporal_filter);
-        int minimum=!strcmp(cfg->encoder_profile,"live_3b_2s_qt8")?8:(!strcmp(cfg->encoder_profile,"live_3b_2s_qt16")||!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0"))?16:0;
+        int speed_rdoq=!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq2");
+        int speed_selective=!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq2_sel2");
+        int minimum=!strcmp(cfg->encoder_profile,"live_3b_2s_qt8")?8:(!strcmp(cfg->encoder_profile,"live_3b_2s_qt16")||!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0")||speed_rdoq||speed_selective)?16:0;
         if(minimum) {
             size_t used=strlen(vvenc_params);
             int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,
@@ -141,8 +143,11 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
                 minimum,minimum,minimum/2);
             if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
         }
-        if(!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0")) {
-            size_t used=strlen(vvenc_params);const char *extra=!strcmp(cfg->encoder_profile,"live_3b_2s_speed")?":RDOQ=0:SelectiveRDOQ=0:ALF=0:CCALF=0":":RDOQ=0:SelectiveRDOQ=0";
+        if(!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0")||speed_rdoq||speed_selective) {
+            size_t used=strlen(vvenc_params);
+            const char *extra=speed_rdoq?":RDOQ=2:SelectiveRDOQ=0:ALF=0:CCALF=0":
+                speed_selective?":RDOQ=2:SelectiveRDOQ=2:ALF=0:CCALF=0":
+                !strcmp(cfg->encoder_profile,"live_3b_2s_speed")?":RDOQ=0:SelectiveRDOQ=0:ALF=0:CCALF=0":":RDOQ=0:SelectiveRDOQ=0";
             if(used+strlen(extra)>=sizeof(vvenc_params))return AVERROR(ENOBUFS);
             strcat(vvenc_params,extra);
         }
