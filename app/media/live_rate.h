@@ -18,6 +18,8 @@ typedef struct NakiLiveRate {
     double coefficient[4];
     uint16_t previous[4096];
     int samples;
+    /* Isolated experiment; zero initialization preserves the old policy. */
+    int full_later_p_room;
 } NakiLiveRate;
 typedef struct NakiRateDecision {
     int qp,kind,saturated;
@@ -25,6 +27,10 @@ typedef struct NakiRateDecision {
     double complexity,quality_qp,allowance_bits,model_coefficient,window_room_bits,followup_reserve_bits;
 } NakiRateDecision;
 static inline double naki_rate_clip(double low,double high,double v) {return v<low?low:v>high?high:v;}
+static inline int naki_rate_later_p_room_mode(const char *value) {
+    if(!value||!strcmp(value,"0"))return 0;
+    return !strcmp(value,"1")?1:-1;
+}
 static inline double naki_rate_complexity_samples(NakiLiveRate *r,const void *samples,int stride,int width,int height,int byte_input) {
     const uint16_t *y=samples;const uint8_t *y8=samples;
     int step=16;
@@ -84,13 +90,24 @@ static inline int naki_rate_select(NakiLiveRate *r,int crf,int maxrate,int sourc
      * forecast, not future-picture analysis or new token credit. A constrained
      * window may still force either picture above its quality anchor. */
     double followup=intra?fmax(0,fmin(room*.6,rate*.82*period/1000000.0*(3.2+3*.2))):0;
-    double usable=intra?room-followup:room*((kind==1&&r->frames_since_i==4)?.85:.4);
+    int full_later_p=r->full_later_p_room&&kind==1&&r->frames_since_i!=4;
+    double usable=intra?room-followup:room*((kind==1&&r->frames_since_i==4)?.85:full_later_p?1:.4);
     double allowance=fmax(1,fmin(target,fmax(rate*period/10000000.0,usable)));
+    if(full_later_p) {
+        /* The old40% left implicit headroom for unsubmitted pictures. Removing
+         * it adds no credit: even the legacy floor may not exceed this room.
+         * An infeasible P fails; no wait, debt reset or hidden QP override. */
+        if(r->pending_bits<0||!isfinite(room)||room<1||!isfinite(complexity)||complexity<=0)return -1;
+        allowance=fmin(allowance,room);
+    }
     double quality=naki_rate_clip(0,63,crf+naki_rate_clip(-3,3,1.5*log2(complexity)));
     double at32=r->coefficient[kind]*pixels*complexity;
+    if(full_later_p&&(!isfinite(at32)||at32<=0))return -1;
     double needed=32+6*log2(fmax(1,at32)/allowance);
     int qp=(int)ceil(naki_rate_clip(0,63,fmax(quality,needed)));
-    int64_t predicted=(int64_t)ceil(fmax(1,at32*exp2((32-qp)/6.0)));
+    double prediction=ceil(fmax(1,at32*exp2((32-qp)/6.0)));
+    if(full_later_p&&(!isfinite(prediction)||prediction>1000000000||prediction>room))return -1;
+    int64_t predicted=(int64_t)prediction;
     if(predicted>1000000000||r->pending_bits>INT64_MAX-predicted)return -1;
     r->pending_bits+=predicted;
     *d=(NakiRateDecision){.qp=qp,.kind=kind,.saturated=needed>63,.source_bps=source_bps,

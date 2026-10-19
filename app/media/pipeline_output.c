@@ -62,6 +62,11 @@ static int64_t local_seek(void *opaque, int64_t offset, int whence) {
 
 int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     const Config *cfg=&p->job->config;
+    if(cfg->constrained_crf) {
+        int mode=naki_rate_later_p_room_mode(getenv("NAKI_OLD_LATER_P_ROOM"));
+        if(mode<0) {p->stage="invalid NAKI_OLD_LATER_P_ROOM (expected0/1)";return AVERROR(EINVAL);}
+        p->rate.full_later_p_room=mode;
+    }
     int vvc=!strcmp(cfg->encoder,"libvvenc");
     int byte_input=vvc&&cfg->encoder_input_bit_depth==8;
     enum AVPixelFormat output_pixels=vvc&&!byte_input?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_YUV420P;
@@ -213,6 +218,7 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     json_str(doc,"encoder_profile",cfg->encoder_profile);
     json_str(doc,"rate_control",cfg->constrained_crf?"constrained_crf":(cfg->cqf?"cqf":"bitrate"));json_int(doc,"target_bitrate",cfg->bitrate);
     if(cfg->constrained_crf) {json_int(doc,"crf",cfg->qp);json_int(doc,"source_rate_limit",cfg->source_rate_limit);json_int(doc,"rate_window_ms",1000);}
+    if(p->rate.full_later_p_room)json_str(doc,"rate_experiment","old_later_p_full_room");
     if(cfg->cqf) {json_int(doc,"qp",cfg->qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",cfg->maxrate);}
     json_int(doc,"output_rate_num",p->output_rate.value.num);json_int(doc,"output_rate_den",p->output_rate.value.den);
     json_int(doc,"rate_decimation_divisor",p->rate_divisor);

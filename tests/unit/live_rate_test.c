@@ -1,6 +1,138 @@
 #include "media/live_rate.h"
 #include <assert.h>
 #include <stdio.h>
+#include <float.h>
+
+static NakiLiveRate later_state(int64_t wall,int64_t pending,double coefficient,int enabled) {
+    NakiLiveRate r={0};
+    r.started=1;r.since_i=3;r.frames_since_i=7;r.have_coded=1;r.last_coded_dts=1000000;
+    r.coefficient[0]=.4;r.coefficient[1]=coefficient;r.coefficient[2]=.07;r.coefficient[3]=.8;
+    r.pending_bits=pending;r.full_later_p_room=enabled;
+    if(wall) {r.count=1;r.history[0]=(NakiRateEntry){1000000,1000000,wall};}
+    return r;
+}
+static void same_decision(const NakiRateDecision *a,const NakiRateDecision *b) {
+#define SAME(f) assert(a->f==b->f)
+    SAME(qp);SAME(kind);SAME(saturated);SAME(source_bps);SAME(effective_bps);SAME(predicted_bits);
+    SAME(decision_us);SAME(media_clock_us);SAME(complexity);SAME(quality_qp);SAME(allowance_bits);
+    SAME(model_coefficient);SAME(window_room_bits);SAME(followup_reserve_bits);
+#undef SAME
+}
+static NakiLiveRate historical_p_state(int enabled) {
+    NakiLiveRate r=later_state(0,12769,.22974058831838245,enabled);
+    r.last_coded_dts=27067000;r.count=2;
+    r.history[0]=(NakiRateEntry){26000000,318700000,18648};
+    r.history[1]=(NakiRateEntry){27000000,319500000,987808};
+    return r;
+}
+static int historical_select(NakiLiveRate *r,NakiRateDecision *d) {
+    return naki_rate_select(r,32,1100000,1,4824976,319626891,27267000,33333,518400,0,.912057674632353,d);
+}
+static void test_later_p_experiment(void) {
+    assert(naki_rate_later_p_room_mode(NULL)==0&&naki_rate_later_p_room_mode("0")==0);
+    assert(naki_rate_later_p_room_mode("1")==1&&naki_rate_later_p_room_mode("")==-1);
+    assert(naki_rate_later_p_room_mode("true")==-1&&naki_rate_later_p_room_mode("2")==-1);
+    NakiLiveRate old=historical_p_state(0),candidate=historical_p_state(1);NakiRateDecision a,b;
+    assert(!historical_select(&old,&a)&&!historical_select(&candidate,&b));
+    assert(a.qp==53&&a.predicted_bits==9602&&a.allowance_bits==10310);
+    assert(b.qp==45&&b.predicted_bits==24194&&b.allowance_bits==25775);
+    assert(b.window_room_bits==25775&&b.media_clock_us==27067000);
+    assert(candidate.pending_bits==12769+24194&&candidate.count==2);
+    double qp44=ceil(b.model_coefficient*518400*b.complexity*exp2((32-44)/6.0));
+    assert(qp44==27156&&qp44>b.window_room_bits);
+    printf("later-P historical state: request=%d prediction=%lld room=%.0f; QP44 needs %.0f (rejected by room)\n",
+        b.qp,(long long)b.predicted_bits,b.window_room_bits,qp44);
+
+    /* Every other role preserves the legacy decision, even at its old floor.
+     * This includes the first P85%, B40%, ordinary I and startup IDR. */
+    const int64_t walls[]={0,700000,1044000,1050000};
+    for(int role=0;role<4;role++)for(unsigned w=0;w<sizeof(walls)/sizeof(*walls);w++) {
+        NakiLiveRate x=later_state(walls[w],12769,.2,0),y;
+        int intra=role>=2;
+        if(role==0)x.frames_since_i=3;
+        if(role==1)x.since_i=0;
+        if(role==3) {x=(NakiLiveRate){0};}
+        y=x;y.full_later_p_room=1;
+        assert(!naki_rate_select(&x,32,1100000,0,0,1100000,2000000,33333,518400,intra,1,&a));
+        assert(!naki_rate_select(&y,32,1100000,0,0,1100000,2000000,33333,518400,intra,1,&b));
+        same_decision(&a,&b);assert(x.pending_bits==y.pending_bits&&x.count==y.count);
+    }
+
+    /* A low-room floor cannot create credit for the opt-in later P. */
+    candidate=later_state(1044000,0,.01,1);
+    assert(!naki_rate_select(&candidate,32,1100000,0,0,1100000,2000000,33333,518400,0,1,&b));
+    assert(b.window_room_bits==1000&&b.allowance_bits==1000&&b.predicted_bits<=1000);
+    const int64_t spent[]={1045000,1045001,1050000};
+    for(unsigned i=0;i<sizeof(spent)/sizeof(*spent);i++) {
+        candidate=later_state(spent[i],0,.2,1);
+        assert(naki_rate_select(&candidate,32,1100000,0,0,1100000,2000000,33333,518400,0,1,&b)<0);
+        assert(candidate.pending_bits==0);
+    }
+    candidate=later_state(0,0,.2,1);
+    assert(naki_rate_select(&candidate,32,0,1,0,1100000,2000000,33333,518400,0,1,&b)<0);
+    assert(candidate.pending_bits==0);
+    candidate=later_state(1044999,0,1,1); /* QP63 still cannot fit1bit. */
+    assert(naki_rate_select(&candidate,32,1100000,0,0,1100000,2000000,33333,518400,0,1,&b)<0);
+    assert(candidate.pending_bits==0);
+    candidate=later_state(0,0,.000001,1);
+    assert(naki_rate_select(&candidate,32,1,0,0,1100000,2000000,33333,518400,0,1,&b)<0); /* room .95 */
+    assert(candidate.pending_bits==0);
+
+    /* Bounds are tested before floating-to-integer conversion/reservation. */
+    const double invalid[]={0,-1,NAN,INFINITY,DBL_MAX,DBL_MAX/10000000};
+    for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);i++) {
+        candidate=later_state(0,1234,invalid[i],1);
+        assert(naki_rate_select(&candidate,32,1100000,0,0,1100000,2000000,33333,518400,0,1,&b)<0);
+        assert(candidate.pending_bits==1234);
+    }
+    for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);i++) {
+        candidate=later_state(0,1234,.2,1);
+        assert(naki_rate_select(&candidate,32,1100000,0,0,1100000,2000000,33333,518400,0,invalid[i],&b)<0);
+        assert(candidate.pending_bits==1234);
+    }
+    candidate=later_state(0,INT64_MAX,.2,1);
+    assert(naki_rate_select(&candidate,32,1100000,0,0,1100000,2000000,33333,518400,0,1,&b)<0);
+    assert(candidate.pending_bits==INT64_MAX);
+    candidate=later_state(0,-1,.2,1);
+    assert(naki_rate_select(&candidate,32,1100000,0,0,1100000,2000000,33333,518400,0,1,&b)<0);
+    assert(candidate.pending_bits==-1);
+
+    /* Real feedback is not frozen or capped to the forecast. The full actual
+     * cost is retained, and a following infeasible P fails without new credit. */
+    candidate=historical_p_state(1);
+    assert(!historical_select(&candidate,&b));double before=candidate.coefficient[1];
+    assert(!naki_rate_feedback(&candidate,&b,518400,30000,1,27068000));
+    assert(candidate.pending_bits==12769+30000&&candidate.coefficient[1]!=before);
+    assert(!naki_rate_written(&candidate,27068000,319627000,30000));
+    assert(candidate.pending_bits==12769&&candidate.history[2].bits==30000);
+    candidate.since_i=3;candidate.frames_since_i=7;
+    assert(naki_rate_select(&candidate,32,1100000,1,4824976,319627100,27268000,33333,518400,0,.912057674632353,&a)<0);
+    assert(candidate.pending_bits==12769&&candidate.count==3);
+
+    /* A bounded grid checks the contract, not a duplicated selection formula. */
+    const int rates[]={1,21,10000,200000,1100000};
+    const int64_t pending[]={0,1,12769,200000};
+    const double coefficients[]={.000001,.01,.22974058831838245,1};
+    const double activity[]={.25,.912057674632353,4};
+    int checks=0;
+    for(unsigned r=0;r<sizeof(rates)/sizeof(*rates);r++)
+    for(unsigned w=0;w<sizeof(walls)/sizeof(*walls);w++)
+    for(unsigned p=0;p<sizeof(pending)/sizeof(*pending);p++)
+    for(unsigned c=0;c<sizeof(coefficients)/sizeof(*coefficients);c++)
+    for(unsigned k=0;k<sizeof(activity)/sizeof(*activity);k++) {
+        candidate=later_state(walls[w],pending[p],coefficients[c],1);
+        int result=naki_rate_select(&candidate,32,1100000,1,rates[r],1100000,2000000,33333,518400,0,activity[k],&b);
+        if(!result) {
+            assert(b.effective_bps==rates[r]);
+            assert(b.window_room_bits==rates[r]*.95-walls[w]-pending[p]);
+            assert(b.allowance_bits<=b.window_room_bits&&b.predicted_bits<=b.window_room_bits);
+            assert(candidate.pending_bits==pending[p]+b.predicted_bits);
+            assert(candidate.last_coded_dts==1000000&&candidate.coefficient[1]==coefficients[c]);
+        } else assert(candidate.pending_bits==pending[p]);
+        checks++;
+    }
+    printf("later-P opt-in: default/first-P/B/I parity, pending/floor/feedback/numeric bounds and %d bounded-room cases passed\n",checks);
+}
 int main(void) {
     NakiLiveRate bytes={0},words={0};uint8_t y8[64*48];uint16_t y10[64*48];
     for(int frame=0;frame<3;frame++) {
@@ -66,5 +198,6 @@ int main(void) {
     share.frames_since_i=3;share.since_i=3;
     assert(!naki_rate_select(&share,32,1100000,0,0,1100000,2133333,33333,518400,0,1,&b));
     assert(b.kind==1&&b.allowance_bits<=b.window_room_bits&&b.allowance_bits>80000);
+    test_later_p_experiment();
     puts("live rate: independent budgets, QP response, pending reservation replacement and bounded rolling history passed");
 }
