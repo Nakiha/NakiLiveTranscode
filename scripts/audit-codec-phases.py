@@ -67,7 +67,7 @@ def decode_parts(event):
 
 def encode_parts(event):
     e = event['encoder_internal']
-    assert e['version'] in (2,3) and e['task_calls'] > 0
+    assert e['version'] in (2,3,4) and e['task_calls'] > 0
     ordered(event['encoder_submit_monotonic_us'], e['input_us'], e['group_last_input_us'],
             e['group_formed_us'], e['preprocess_begin_us'], e['group_ready_us'],
             e['mctf_begin_us'], e['mctf_end_us'], e['dispatch_us'],

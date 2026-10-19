@@ -41,7 +41,27 @@
     X(gop_encoder_blocks) \
     X(gop_rc_blocks) \
     X(byte_me_blocks) \
-    X(byte_reference_pack_us)
+    X(byte_reference_pack_us) \
+    X(pool_ledger_enabled) \
+    X(pool_ledger_valid) \
+    X(pool_total_cpu_us) \
+    X(pool_scan_cpu_us) \
+    X(pool_yield_cpu_us) \
+    X(pool_lock_cpu_us) \
+    X(pool_tasks_cpu_us) \
+    X(pool_mctf_me_cpu_us) \
+    X(pool_mctf_filter_cpu_us) \
+    X(pool_ctu_cpu_us) \
+    X(pool_other_cpu_us) \
+    X(pool_scan_calls) \
+    X(pool_ready_calls) \
+    X(pool_ready_failed) \
+    X(pool_empty_scans) \
+    X(pool_task_calls) \
+    X(ledger_process_cpu_us) \
+    X(ledger_caller_cpu_us) \
+    X(ledger_caller_tid) \
+    X(ledger_snapshot_end_us)
 typedef struct NakiEncoderTrace {
     int64_t version,cts,poc;
 #define DECLARE_TRACE(n) int64_t n;
