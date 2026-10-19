@@ -1,0 +1,64 @@
+{
+  "status": "frozen_before_any_new_candidate_run",
+  "classification": "exploratory_rate_matching_calibrated_on_the_same_two_old_inputs_not_blind_or_out_of_sample",
+  "historical_screen": "Previous unmatched screen is not retroactively passed; means improved, tails had risks, rate efficiency was undetermined.",
+  "fixed_parameter": {"name":"NAKI_UNIFIED_QP_BIAS","value":0.3631288889658304,"default":0,"same_for_both_inputs":true},
+  "maximum_new_candidate_encodes":2,
+  "one_per_input":true,
+  "no_recalibration_or_retries":true,
+  "baseline": {
+    "source_commit":"e380f3c63dce627edf048b6df4f700698c4cbe12",
+    "controller":"legacy flag-off controller in identical RDOQ2 SelectiveRDOQ2 frozen configuration",
+    "forest30":"../unified-rate-prototype-20261019/root/out/rtmp-bench-ossfdjyv",
+    "urban12":"../unified-rate-prototype-20261019/root/out/rtmp-bench-kqxpirab",
+    "must_remain_sealed":true
+  },
+  "unchanged": ["tools and preset","RDOQ2 SelectiveRDOQ2","budget solve and credit rules","model coefficient learning rules","GOP and frame types","source timestamps","maxrate1100000","source limit","four real contracts","native and cross-layer future<=4"],
+  "dynamic_state": "Actual final-QP feedback changes coefficients, history, credit and later quotas normally. Historical trajectories are never frozen in the real candidate run.",
+  "effective_strength": "The configuration anchor remains numerically32, but effective quality strength changes. Do not describe this as completely unchanged CRF/quality.",
+  "discrete_precision": "Many decimal digits identify an analytically selected threshold value, not measured tuning precision or generalization.",
+  "identity": {
+    "exact_pts_pairing":true,
+    "interior_missing_frames":0,
+    "maximum_explicit_api_stop_unmatched_tail_frames":4,
+    "report_full_and_common_pts_rates":true,
+    "require_both_full_and_common_rate_ratios_within":[0.98,1.02]
+  },
+  "bitrate_scope":"video AVPacket payload plus first codec config once, excluding audio and container/RTMP overhead; display span=lastPTS-firstPTS+1/30 second",
+  "matching_failure":"If either input falls outside +/-2%, stop further runs/recalibration, report matching insufficient and same-rate efficiency evidence insufficient. Do not reinterpret mean gains as matched-rate gains.",
+  "statistics": {
+    "frame_weights":"equal over exact common PTS",
+    "p01":"sorted ascending score at index ceil(0.01*N)-1",
+    "cvar1":"arithmetic mean of exactly k=max(1,ceil(0.01*N)) lowest scores, not every tied observation below a percentile",
+    "psnr":"pooled MSE over exactly matched frames, then 10*log10(reference MSE / candidate MSE) for delta",
+    "report_absolute_scores_below":[50,60,70],
+    "report_minimum_as_warning_not_single_frame_overall_failure":true
+  },
+  "pts_episodes": {
+    "timebase":"exact retained display PTS, rational seconds; source FLV rounding retained",
+    "adjacency":"successive common display frames with positive nextPTS-currentPTS<=1/20s; interior omissions already fail identity",
+    "frame_end":"next selected display PTS when available, otherwise lastPTS+1/30s",
+    "episode_duration":"end of final qualifying frame minus first qualifying frame PTS",
+    "relative_events":[{"delta_vmaf_at_most":-5,"minimum_frames":3,"minimum_duration_seconds":"1/10"},{"delta_vmaf_at_most":-3,"minimum_frames":6,"minimum_duration_seconds":"1/5"}],
+    "absolute_events":[{"candidate_vmaf_below":50,"minimum_frames":3,"minimum_duration_seconds":"1/10"},{"candidate_vmaf_below":60,"minimum_frames":6,"minimum_duration_seconds":"1/5"}],
+    "new_event":"No baseline absolute event of the same threshold/duration class overlaps this exact PTS interval; relative degradation events are inherently paired",
+    "new_sustained_event_screen_not_passed":true,
+    "isolated_negative_delta_is_not_automatic_overall_failure":true
+  },
+  "proposed_exploratory_screen": {
+    "mean_vmaf_delta_min":-0.1,
+    "pooled_psnr_delta_db_min":-0.05,
+    "p05_delta_min":-0.5,
+    "p01_delta_min":-1.0,
+    "cvar1_delta_min":-1.0,
+    "periodic_i":"parse actual active RPL; report every ordinary I, direct children and descendants before next I; no per-CTU reference-use or isolated causality claim",
+    "complete_i_cycle":"next ordinary I is observed; I plus actual descendants before it contains>=16 common frames; incomplete terminal cycles separately reported and retained in global quality",
+    "i_cycle_mean_delta_min":-1.0,
+    "two_adjacent_complete_i_cycle_mean_delta_min":-0.5,
+    "intra_single_frame_negative_not_automatic_chain_failure":true,
+    "meaning":"this predeclared two-clip exploratory screen, not a universal VMAF perception law"
+  },
+  "performance":"report all-frame original ingress and first-media-read to actual mux/flush, stage residence, CPU and future counts; no early quality-tool rejection merely from latency/CPU cost; no capacity claim",
+  "outcomes":["hard contract/identity failure","rate matching insufficient; efficiency undetermined","matched but exploratory tail/distribution screen not passed","matched and exploratory screen passed on these two calibrated clips only"],
+  "sdk_release":false
+}

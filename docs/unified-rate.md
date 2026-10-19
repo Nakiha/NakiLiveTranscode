@@ -1,5 +1,17 @@
 # Opt-in unified I/P/B reservation prototype
 
+The separately reviewed one-shot exploratory match uses
+`NAKI_UNIFIED_QP_BIAS=0.3631288889658304` with the unified path; zero remains the
+default and the service accepts only zero or this fixed trial value. It changes
+effective quality strength after the continuous QP requirement and before final
+integer rounding. The configured anchor is numerically32 but quality/CRF strength
+is not completely unchanged. Prediction and coefficient feedback use the final
+requested QP. Budget-solving, credit and learning rules stay the same; real
+feedback naturally changes coefficients, histories and subsequent quotas. The
+decimal value came from rounding-threshold analysis on the same two old clips,
+not precise empirical tuning, blind testing or evidence of generalization. It
+cannot retroactively pass the earlier screen. No SDK change is involved.
+
 `NAKI_UNIFIED_RATE=1` enables this experimental worker-local path only for the
 fixed single-output 960x540 VVenC selective-RDOQ2 constrained-CRF profile, source
 rate limiting, and the unchanged 1,100,000-bit/s/future-4 contracts. The default

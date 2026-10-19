@@ -3,6 +3,7 @@
 #include "live_rate.h"
 #define NAKI_UNIFIED_SLOTS 256
 #define NAKI_UNIFIED_SOURCES 1024
+#define NAKI_UNIFIED_MATCH_BIAS 0.3631288889658304
 enum { NAKI_U_FREE,NAKI_U_OPEN,NAKI_U_PLAN,NAKI_U_TRY,NAKI_U_ACCEPT,NAKI_U_ACTUAL };
 typedef struct NakiUnifiedItem {
     uint64_t seq,version,consulted;
@@ -17,6 +18,7 @@ typedef struct NakiUnifiedRate {
     struct {int64_t start,end,bits;int phase;} source[NAKI_UNIFIED_SOURCES];
     int source_count,source_limit,wrote,cap,pixels,crf;
     int64_t config_bits;
+    double qp_bias;
     int64_t period,clock,source_rate,source_credit,absolute_credit;
     uint64_t admitted,version,accepted,feedback,written,margin_uses;
     int active_peak,stage_peak,native_peak,future_peak,margin_used;
@@ -24,6 +26,7 @@ typedef struct NakiUnifiedRate {
     const char *reason;
 } NakiUnifiedRate;
 void naki_unified_init(NakiUnifiedRate *,NakiLiveRate *,int,int,int,int,int64_t,int64_t);
+int naki_unified_request_qp(double,double,int64_t,int64_t,double,int *,int64_t *);
 NakiUnifiedItem *naki_unified_find(NakiUnifiedRate *,uint64_t);
 int naki_unified_source(NakiUnifiedRate *,const NakiUnifiedSource *);
 int naki_unified_clock(NakiUnifiedRate *,int64_t);

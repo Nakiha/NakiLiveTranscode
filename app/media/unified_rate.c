@@ -2,6 +2,28 @@
 #include <errno.h>
 #include <limits.h>
 #define BAD(u,why) ((u)->reason=(why),-EINVAL)
+int naki_unified_request_qp(double quality,double at32,int64_t quota,int64_t config,double bias,int *requested,int64_t *prediction) {
+    if(!requested||!prediction||!isfinite(quality)||quality<0||quality>63||!isfinite(at32)||at32<=0||
+       config<0||config>=quota||!isfinite(bias)||bias<0||bias>1)return -EINVAL;
+    /* Preserve the original zero-bias integer search exactly. */
+    int qp=(int)ceil(quality);int64_t predicted=0;
+    for(;qp<=63;qp++) {
+        double pred=ceil(fmax(1,at32*exp2((32-qp)/6.)))+config;
+        if(!isfinite(pred)||pred>1000000000)return -EINVAL;
+        predicted=(int64_t)pred;if(predicted<=quota)break;
+    }
+    if(qp>63)return -EINVAL;
+    if(bias>0) {
+        double continuous=fmax(quality,32+6*log2(at32/(quota-config)));
+        double shifted=ceil(continuous+bias);
+        if(!isfinite(shifted))return -EINVAL;
+        int final=(int)naki_rate_clip(0,63,shifted);
+        if(final>qp)qp=final;
+        predicted=(int64_t)(ceil(fmax(1,at32*exp2((32-qp)/6.)))+config);
+        if(predicted>quota||predicted>1000000000)return -EINVAL;
+    }
+    *requested=qp;*prediction=predicted;return 0;
+}
 void naki_unified_init(NakiUnifiedRate *u,NakiLiveRate *m,int cap,int source_limit,int pixels,int crf,int64_t period,int64_t now) {
     memset(u,0,sizeof(*u));u->model=m;u->cap=cap;u->source_limit=source_limit;
     u->pixels=pixels;u->crf=crf;u->period=period;u->clock=now;
@@ -91,6 +113,7 @@ static int64_t source_room(NakiUnifiedRate *u) {
 }
 int naki_unified_plan(NakiUnifiedRate *u,const uint64_t *seq,const int *kind,int count) {
     u->reason="ok";
+    if(!isfinite(u->qp_bias)||u->qp_bias<0||u->qp_bias>1)return BAD(u,"quality_bias_domain");
     if(count<1||count>4||u->cap<=0||u->cap>100000000||u->pixels<=0||u->period<=0)return BAD(u,"plan_domain");
     NakiLiveRate *r=u->model;double minimum[4],desired[4],ideal[4],frac[4];int64_t quota[4];
     NakiUnifiedItem *item[4];int64_t previous=0,mins=0;
@@ -125,9 +148,8 @@ int naki_unified_plan(NakiUnifiedRate *u,const uint64_t *seq,const int *kind,int
         NakiUnifiedItem *f=item[i];double activity=f->decision.complexity;
         double quality=naki_rate_clip(0,63,u->crf+naki_rate_clip(-3,3,1.5*log2(activity)));
         double at32=r->coefficient[kind[i]]*u->pixels*activity;
-        int qp=(int)ceil(quality);int64_t predicted=0;
-        for(;qp<=63;qp++) {double pred=ceil(fmax(1,at32*exp2((32-qp)/6.)))+(f->seq==1?u->config_bits:0);if(!isfinite(pred)||pred>1000000000)return BAD(u,"prediction_domain");predicted=(int64_t)pred;if(predicted<=quota[i])break;}
-        if(qp>63)return BAD(u,"model_preflight_mismatch");
+        int qp=0;int64_t predicted=0;
+        if(naki_unified_request_qp(quality,at32,quota[i],f->seq==1?u->config_bits:0,u->qp_bias,&qp,&predicted)<0)return BAD(u,"model_preflight_mismatch");
         f->kind=kind[i];f->quota=quota[i];f->version=u->version;f->state=NAKI_U_PLAN;f->consulted=u->admitted;
         f->decision=(NakiRateDecision){.qp=qp,.kind=kind[i],.source_bps=u->source_rate,.effective_bps=rate,.predicted_bits=predicted,
             .decision_us=u->clock,.media_clock_us=media,.complexity=activity,.quality_qp=quality,.allowance_bits=quota[i],

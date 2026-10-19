@@ -65,6 +65,8 @@ static void open_codec(Native *n) {
     assert(ret>=0&&!av_dict_count(o));av_dict_free(&o);
     naki_unified_init(&n->budget,&n->model,1100000,0,320*180,32,33333,av_gettime_relative());
     n->budget.config_bits=8*(int64_t)c->extradata_size;
+    const char *bias=getenv("NAKI_UNIFIED_QP_BIAS");
+    if(bias) {assert(strtod(bias,NULL)==NAKI_UNIFIED_MATCH_BIAS);n->budget.qp_bias=NAKI_UNIFIED_MATCH_BIAS;}
 }
 static AVFrame *make_frame(Native *n,int seq,int intra) {
     AVFrame *f=av_frame_alloc();assert(f);f->width=320;f->height=180;f->format=AV_PIX_FMT_YUV420P10LE;

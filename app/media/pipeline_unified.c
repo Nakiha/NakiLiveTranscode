@@ -7,6 +7,8 @@ void pipeline_unified_event(Pipeline *p,const char *action,uint64_t seq,int64_t 
     json_int(d,"admission_seq",(int64_t)seq);json_int(d,"amount",amount);json_int(d,"clock_us",u->clock);
     json_int(d,"C",u->C);json_int(d,"D",u->D);json_int(d,"pending",p->rate.pending_bits);
     json_int(d,"version",(int64_t)u->version);json_int(d,"admitted",(int64_t)u->admitted);
+    json_num(d,"quality_qp_bias",u->qp_bias);
+    json_int(d,"first_config_bits",u->config_bits);
     json_int(d,"real_room",u->real_room);json_int(d,"soft_room",u->soft_room);json_int(d,"model_minimum",u->minimum);
     json_int(d,"margin_used",u->margin_used);json_int(d,"margin_uses",(int64_t)u->margin_uses);
     json_int(d,"source_credit_bit_us",u->source_credit);json_int(d,"absolute_credit_bit_us",u->absolute_credit);
@@ -44,6 +46,8 @@ void pipeline_unified_event(Pipeline *p,const char *action,uint64_t seq,int64_t 
         json_int(d,"bits",f->bits);json_int(d,"kind",f->kind);json_int(d,"qp",f->decision.qp);
         json_int(d,"encoder_pts_us",f->pts);json_int(d,"filtered_us",f->filtered_us);
         json_int(d,"consulted_high_seq",(int64_t)f->consulted);json_num(d,"coefficient",f->decision.model_coefficient);}
+    if(f) {json_num(d,"complexity",f->decision.complexity);
+        json_num(d,"current_model_coefficient",p->rate.coefficient[f->kind]);}
     logger_submit(p->job->logger,NULL,d);
 }
 static int refresh_at(Pipeline *p,int64_t at) {
@@ -117,6 +121,14 @@ int pipeline_unified_frame(Pipeline *p,AVFrame *frame) {
         int64_t period=av_rescale_q(1,av_inv_q(p->encoder->framerate),AV_TIME_BASE_Q);
         naki_unified_init(&p->unified->budget,&p->rate,c->maxrate,c->source_rate_limit,p->encoder->width*p->encoder->height,c->qp,period,now_us());
         p->unified->budget.config_bits=8*(int64_t)p->encoder->extradata_size;
+        const char *bias=getenv("NAKI_UNIFIED_QP_BIAS");
+        if(bias&&*bias) {
+            char *end=NULL;errno=0;double value=strtod(bias,&end);
+            if(errno||!end||*end||!isfinite(value)||(value!=0&&value!=NAKI_UNIFIED_MATCH_BIAS)) {
+                p->stage="unified matching bias must be zero or the single approved fixed value";return AVERROR(EINVAL);
+            }
+            p->unified->budget.qp_bias=value;
+        }
         pipeline_unified_event(p,"init",0,0);
     }
     PipelineUnified *s=p->unified;if(s->count==4)return AVERROR(ENOBUFS);

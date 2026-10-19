@@ -19,6 +19,29 @@ static void null_tests(void) {
     f=(Fake){.result={-EAGAIN},.advance=0};sent=0;assert(naki_codec_submit(&io,NULL,-EAGAIN,&sent)==-EDEADLK&&!sent);
     f=(Fake){.result={-EAGAIN,-12345},.advance=1};sent=0;assert(naki_codec_submit(&io,NULL,-EAGAIN,&sent)==-12345&&!sent);
 }
+static void bias_tests(void) {
+    int a,b;int64_t pa,pb;
+    assert(!naki_unified_request_qp(32.1,200000,180000,0,0,&a,&pa));
+    assert(!naki_unified_request_qp(32.1,200000,180000,0,NAKI_UNIFIED_MATCH_BIAS,&b,&pb));
+    assert(a==33&&b==34&&pb<pa);
+    assert(naki_unified_request_qp(32,200000,180000,0,NAN,&b,&pb)<0);
+    assert(naki_unified_request_qp(32,200000,180000,0,-.1,&b,&pb)<0);
+    assert(naki_unified_request_qp(32,200000,180000,0,1.1,&b,&pb)<0);
+    uint64_t ids[4];init();assert(u.qp_bias==0);group(ids);int64_t quotas[4];
+    for(int i=0;i<4;i++)quotas[i]=naki_unified_find(&u,ids[i])->quota;
+    init();u.qp_bias=NAKI_UNIFIED_MATCH_BIAS;group(ids);
+    for(int i=0;i<4;i++)assert(naki_unified_find(&u,ids[i])->quota==quotas[i]);
+    NakiUnifiedItem *f=naki_unified_find(&u,ids[0]);NakiRateDecision d=f->decision;
+    assert(!naki_unified_try(&u,ids[0])&&!naki_unified_accept(&u,ids[0]));
+    int64_t bits=10000;double prior=model.coefficient[2];
+    double observed=bits*exp2((d.qp-32)/6.)/(u.pixels*d.complexity);
+    double expected=.8*prior+.2*naki_rate_clip(prior*.25,prior*4,observed);
+    assert(!naki_unified_actual(&u,ids[0],bits,2,933334));
+    assert(fabs(model.coefficient[2]-expected)<1e-12); /* final requested QP normalization */
+    int kinds[3]={2,2,1};double after=model.coefficient[2];
+    assert(after!=prior&&!naki_unified_plan(&u,ids+1,kinds,3));
+    assert(naki_unified_find(&u,ids[1])->decision.model_coefficient==after);
+}
 int main(void) {
     uint64_t ids[4];int kind=3;init();uint64_t seq=admit(0,1);
     assert(!naki_unified_plan(&u,&seq,&kind,1));NakiUnifiedItem *f=naki_unified_find(&u,seq);int64_t q=f->quota;
@@ -53,5 +76,5 @@ int main(void) {
     assert(!naki_unified_clock(&u,2100000)&&u.source_credit==-60000000);
     assert(!naki_unified_source(&u,&source)&&!u.source_count); /* original expiry, no resurrection */
     init();assert(naki_unified_admit(&u,1000000,1000000,NAN,&seq)<0&&!u.admitted);
-    null_tests();puts("unified_rate_test: PASS; ledger, gate, model-only minima, margin fallback, source expiry, NULL EAGAIN/error");return 0;
+    null_tests();bias_tests();puts("unified_rate_test: PASS; ledger, gate, margin, source, NULL, zero/fixed bias, identical quotas, final-QP dynamic feedback");return 0;
 }
