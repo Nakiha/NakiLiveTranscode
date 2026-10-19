@@ -4,6 +4,8 @@
 #include "sei.h"
 #include <pthread.h>
 #include <libavformat/avformat.h>
+#include "unified_rate.h"
+typedef struct NakiUnifiedJournal {uint64_t sequence;NakiUnifiedSource entries[1024];} NakiUnifiedJournal;
 #define READER_CAPACITY 8
 typedef struct InputItem { AVPacket *packet; AVCodecParameters *params; AVRational tb; int64_t demuxed_us; uint64_t retained_bytes; } InputItem;
 /* One reader producer, one shared-pipeline consumer. All queued packet and
@@ -14,6 +16,7 @@ typedef struct PipelineReader {
     struct {int64_t us,bits;} rate[1024];
     int rate_head,rate_count;
     int64_t rate_bits;
+    NakiUnifiedJournal *unified_journal;
     uint64_t reader_bytes;
     pthread_mutex_t ring_mutex;
     pthread_cond_t ring_space;
@@ -32,4 +35,5 @@ void pipeline_reader_join(struct Pipeline *p);
 void pipeline_reader_clear(struct Pipeline *p);
 void pipeline_reader_destroy(struct Pipeline *p);
 int pipeline_reader_pending_sei(struct Pipeline *p);
+int pipeline_reader_unified_snapshot(struct Pipeline *,uint64_t *,NakiUnifiedSource *,int *);
 #endif

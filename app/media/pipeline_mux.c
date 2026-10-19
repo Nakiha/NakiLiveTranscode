@@ -70,12 +70,18 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     }
     int64_t mux_start=encoded, write_begin=now_us(), interleaved=0, written=0;
     NakiFrameIdentity identity=pipeline_frame_identity(p,&stamp,packet->pts,p->video->time_base);
+    if(p->unified) {
+        int checked=pipeline_unified_prewrite(p,&stamp,av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q));
+        if(checked<0)return checked;
+    }
     int ret=write_packet_now(p,packet,&interleaved,&written);
     if(ret<0)return ret;
     if(p->job->config.constrained_crf) {
         int64_t bits=8*((int64_t)bytes+(pts_us==av_rescale_q(p->first_encoder_pts,p->encoder->time_base,AV_TIME_BASE_Q)?p->encoder->extradata_size:0));
         int64_t before=p->rate.pending_bits;
-        if(naki_rate_written(&p->rate,av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q),written,bits)<0)return AVERROR_INVALIDDATA;
+        if(p->unified) {
+            if((ret=pipeline_unified_written(p,&stamp,bits,av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q),written))<0)return ret;
+        } else if(naki_rate_written(&p->rate,av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q),written,bits)<0)return AVERROR_INVALIDDATA;
         naki_rate_audit_written(&p->rate_audit,&stamp.rate_audit,before,p->rate.pending_bits,bits);
     }
     pthread_mutex_lock(&p->job->mutex);
@@ -182,6 +188,13 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         json_num(doc,"decoded_dispatch_queue_ms",(stamp.decoder_owner_us-stamp.async_ready_us)/1000.0);
     }
     if(p->job->config.constrained_crf) {
+        if(p->unified) {
+            json_int(doc,"unified_schema",3);json_int(doc,"unified_admission_seq",(int64_t)stamp.unified_seq);
+            json_int(doc,"unified_plan_version",(int64_t)stamp.unified_version);json_int(doc,"unified_quota_bits",stamp.unified_quota);
+            json_int(doc,"unified_consulted_high_seq",(int64_t)stamp.unified_consulted);json_int(doc,"unified_future_frames",stamp.unified_future);
+            json_num(doc,"unified_stage_wait_ms",(stamp.unified_stage_done_us-stamp.filtered_us)/1000.0);
+            json_num(doc,"unified_after_close_ms",(stamp.encoder_submit_us-stamp.unified_stage_done_us)/1000.0);
+        }
         json_int(doc,"rc_qp",stamp.rate.qp);json_int(doc,"rc_actual_slice_qp",stamp.actual_slice_qp);
         if(p->rate_audit.enabled)pipeline_rate_audit_json(doc,&stamp.rate_audit);
         json_int(doc,"rc_source_bps",stamp.rate.source_bps);json_int(doc,"rc_effective_bps",stamp.rate.effective_bps);

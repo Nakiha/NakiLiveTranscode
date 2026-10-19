@@ -8,6 +8,7 @@
 #include "video_filter.h"
 #include "live_rate.h"
 #include "rate_audit.h"
+#include "codec_progress.h"
 #include "codec_trace.h"
 #include "branch_queue.h"
 #include "crash/crash.h"
@@ -56,6 +57,9 @@ typedef struct Stamp {
     int encoder_future_frames,actual_slice_qp,decoder_tracked;
     NakiRateDecision rate;
     NakiRateAuditFrame rate_audit;
+    uint64_t unified_seq,unified_version,unified_consulted;
+    int64_t unified_quota,unified_stage_done_us;
+    int unified_future;
     int64_t async_ready_us,decoder_owner_us;
     int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
     int64_t encoder_submit_us, encoder_accepted_us, scheduled_us, filter_started_us;
@@ -86,6 +90,13 @@ typedef struct DecodePump {
     int occupied,done,error,started;
 } DecodePump;
 typedef struct Branch Branch;
+typedef struct PipelineUnified {
+    NakiUnifiedRate budget;
+    AVFrame *frames[4];Stamp stamps[4];uint64_t ids[4];
+    int count,flushing,null_sent;
+    uint64_t source_cursor,event;
+    NakiUnifiedSource snapshot[1024];
+} PipelineUnified;
 typedef struct Pipeline {
     Job *job;
     NakiMediaHooks hooks;
@@ -117,6 +128,7 @@ typedef struct Pipeline {
     Ledger ledger[LEDGER_CAPACITY];
     NakiLiveRate rate;
     NakiRateAudit rate_audit;
+    PipelineUnified *unified;
     int64_t last_pts, synthetic_pts, next_stats_us;
     int have_output_display_pts;
     int64_t last_output_display_pts;
@@ -170,6 +182,16 @@ int pipeline_receive_encoded(Pipeline *p);
 int64_t pipeline_source_rate(Pipeline *p,int64_t now);
 int pipeline_encode_frame(Pipeline *p, AVFrame *frame);
 int pipeline_ledger_pending(Pipeline *p);
+int pipeline_encode_selected(Pipeline *,AVFrame *,Stamp);
+int pipeline_unified_frame(Pipeline *,AVFrame *);
+int pipeline_unified_eof(Pipeline *);
+int pipeline_unified_refresh(Pipeline *);
+int pipeline_unified_feedback(Pipeline *,Stamp *,int64_t,int,int64_t);
+int pipeline_unified_prewrite(Pipeline *,const Stamp *,int64_t);
+int pipeline_unified_written(Pipeline *,const Stamp *,int64_t,int64_t,int64_t);
+void pipeline_unified_release(Pipeline *);
+void pipeline_unified_event(Pipeline *,const char *,uint64_t,int64_t);
+void pipeline_unified_finish(Pipeline *);
 void pipeline_rate_audit_init(Pipeline *p);
 uint64_t pipeline_rate_audit_boundary(Pipeline *p,int64_t now,int *status);
 void pipeline_rate_audit_json(yyjson_mut_doc *doc,const NakiRateAuditFrame *f);

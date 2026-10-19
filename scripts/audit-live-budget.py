@@ -74,7 +74,7 @@ def buckets(source, output, maximum, burst, initial_absolute=0, observed_source_
                 max_absolute_debt_bits=max([0]+[-r['absolute_credit_bits'] for r in rows]), rows=rows)
 
 
-def audit(directory, maximum=1100000, burst=55000, deadline_ms=300, future=4):
+def audit(directory, maximum=1100000, burst=55000, deadline_ms=300, future=4, latency_observe_only=False):
     state = json.loads((directory/'final-state.json').read_text())
     prefix = pathlib.Path(state['log_path'])
     if not state.get('network_read',{}).get('enabled') or not str(prefix) or str(prefix)=='.':
@@ -158,9 +158,17 @@ def audit(directory, maximum=1100000, burst=55000, deadline_ms=300, future=4):
             raise ValueError('Invalid async ready / dispatch provenance')
         pump=dict(async_ready_ms=summary([f['async_ready_ms'] for f in frames]),
                   dispatch_queue_ms=summary([f['decoded_dispatch_queue_ms'] for f in frames]))
-    failed=violated or (fixed_enabled and (wall['violation_events'] or dts['violation_events'] or budget['absolute_violation_events'])) or (source_enabled and budget['source_violation_events'])
+    unified=None
+    if any('unified_schema' in f for f in frames):
+        if any(f.get('unified_schema')!=3 or not 0<=f['unified_future_frames']<=future or
+               not 0<=f['unified_consulted_high_seq']-f['unified_admission_seq']<=future for f in frames):
+            raise ValueError('Invalid shared application/encoder future provenance')
+        unified=dict(shared_future_max=max(f['unified_future_frames'] for f in frames),
+            stage_wait_ms=summary([f['unified_stage_wait_ms'] for f in frames]),
+            after_close_ms=summary([f['unified_after_close_ms'] for f in frames]))
+    failed=(violated and not latency_observe_only) or (fixed_enabled and (wall['violation_events'] or dts['violation_events'] or budget['absolute_violation_events'])) or (source_enabled and budget['source_violation_events'])
     result=dict(measurement_status='complete', conformance_status='failed' if failed else 'passed',
-                decoder_pump=pump,absolute_budget_enabled=fixed_enabled,source_budget_enabled=source_enabled,
+                decoder_pump=pump,unified=unified,deadline_enforced=not latency_observe_only,absolute_budget_enabled=fixed_enabled,source_budget_enabled=source_enabled,
                 enforcement=active, controller=controller, maximum_video_bps=maximum, video_byte_scope='AVPacket payload plus codec configuration once; audio and FLV/RTMP overhead excluded',
                 source_rate_scope='past 1s of completed RTMP video messages, monotonic clock; unread message bytes never credited',
                 deadline_ms=deadline_ms, frames=len(frames), input_packets=len(source),
@@ -180,9 +188,10 @@ def main():
     p.add_argument('--maxrate',type=int,default=1100000)
     p.add_argument('--burst-bits',type=int,default=55000)
     p.add_argument('--require-conformance',action='store_true')
+    p.add_argument('--latency-observe-only',action='store_true',help='Experiment only: record latency violations without rejecting quality candidates; all bitrate/future gates remain required')
     a=p.parse_args()
     if a.maxrate<=0 or a.burst_bits<0:p.error('Invalid audit budget')
-    result=audit(a.directory.resolve(),a.maxrate,a.burst_bits)
+    result=audit(a.directory.resolve(),a.maxrate,a.burst_bits,latency_observe_only=a.latency_observe_only)
     output=a.directory/'budget-audit.json'
     with output.open('x') as stream: json.dump(result,stream,indent=2,allow_nan=False);stream.write('\n')
     print(json.dumps({k:v for k,v in result.items() if k not in ('output_wall_rolling_1s','output_dts_rolling_1s','dual_buckets','stage_ms','groups')},indent=2))

@@ -237,7 +237,7 @@ int pipeline_drain_output(Pipeline *p) {
     p->stage="filter drain";int ret=av_buffersrc_add_frame_flags(p->source,NULL,0);
     if(ret<0||(ret=pipeline_filter_output(p))<0)return ret;
     pipeline_rate_audit_eof(p);
-    p->stage="encoder drain";ret=pipeline_encoder_send(p,NULL);
+    p->stage="encoder drain";ret=p->unified?pipeline_unified_eof(p):pipeline_encoder_send(p,NULL);
     if(ret<0||(ret=pipeline_receive_encoded(p))<0)return ret;
     if((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0)return ret;
     return (pipeline_ledger_pending(p)||(p->job->config.constrained_crf&&p->rate.pending_bits))?AVERROR_INVALIDDATA:0;
@@ -248,6 +248,7 @@ int pipeline_drain_output(Pipeline *p) {
  * decoder or receive frame. Keep their releases in this order: frame/codec/
  * filter references may still own watermark delivery leases and ledger stamps. */
 void pipeline_release_media_resources(Pipeline *p,AVFrame **receive_frame) {
+    pipeline_unified_release(p);
     for(int i=0;i<p->deferred_count;i++)pipeline_input_free(&p->deferred_audio[i]);
     p->deferred_count=0;p->deferred_bytes=0;
     for(int i=0;i<p->audio_count;i++) {
@@ -292,6 +293,7 @@ void pipeline_complete_job(Pipeline *p,int ret,int stopped) {
     }
     pthread_mutex_unlock(&j->mutex);
     pipeline_rate_audit_finish(p);
+    pipeline_unified_finish(p);
     logger_submit(j->logger,NULL,job_report(j,1));
     if(!j->parent)logger_trace_finish(j->logger,j->trace);
     atomic_store(&j->lifecycle.done,1);

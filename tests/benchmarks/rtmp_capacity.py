@@ -211,6 +211,7 @@ def main():
     parser.add_argument('--input-gop', type=int)
     parser.add_argument('--save-output-dir', type=_pathlib.Path)
     parser.add_argument('--audit-burst-bits', type=int, default=55000)
+    parser.add_argument('--latency-observe-only',action='store_true')
     args = parser.parse_args()
     if not 1 <= args.seconds <= 259200 or digest(args.config) != args.config_sha256:
         parser.error('Invalid duration or changed configuration')
@@ -346,6 +347,7 @@ def main():
             if config.get('network_trace'):
                 audit_command=[_sys.executable,str(_pathlib.Path(__file__).resolve().parents[2]/'scripts/audit-live-budget.py'),
                                str(directory),'--maxrate',str(config['maxrate']),'--burst-bits',str(args.audit_burst_bits)]
+                if args.latency_observe_only:audit_command += ['--latency-observe-only']
                 (directory/'audit-command.json').write_text(json.dumps(audit_command,indent=2)+'\n')
                 with (directory/'audit.log').open('w') as log:
                     subprocess.run(audit_command,stdout=log,stderr=log,check=True,timeout=120)

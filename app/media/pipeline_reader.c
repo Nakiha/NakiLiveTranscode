@@ -98,6 +98,11 @@ static void *reader_main(void *opaque) {
                     int pos=(p->reader.rate_head+p->reader.rate_count++)%1024;
                     int64_t bits=8*((int64_t)packet->size+(seq==0?p->input->streams[p->stream_index]->codecpar->extradata_size:0));
                     p->reader.rate[pos].us=source_origin.complete_us;p->reader.rate[pos].bits=bits;p->reader.rate_bits+=bits;
+                    if(p->reader.unified_journal) {
+                        NakiUnifiedJournal *j=p->reader.unified_journal;
+                        if(j->sequence==UINT64_MAX)full=1;
+                        else {j->entries[j->sequence%1024]=(NakiUnifiedSource){now_us(),source_origin.complete_us,bits};j->sequence++;}
+                    }
                 }
                 pthread_mutex_unlock(&p->reader.ring_mutex);
                 if(full){pipeline_input_free(&item);ret=AVERROR(ENOBUFS);break;}
@@ -185,6 +190,11 @@ void pipeline_reader_init(Pipeline *p) {
     pthread_cond_init(&p->reader.ring_space,NULL);
 }
 int pipeline_reader_start(Pipeline *p) {
+    const char *unified=getenv("NAKI_UNIFIED_RATE");
+    if(unified&&!strcmp(unified,"1")) {
+        p->reader.unified_journal=calloc(1,sizeof(*p->reader.unified_journal));
+        if(!p->reader.unified_journal)return ENOMEM;
+    }
     int ret=pthread_create(&p->reader.thread,NULL,reader_main,p);
     if(!ret)p->reader.started=1;
     return ret;
@@ -204,6 +214,7 @@ void pipeline_reader_clear(Pipeline *p) {
     for(int i=0;i<READER_CAPACITY;i++)pipeline_input_free(&p->reader.ring[i]);
 }
 void pipeline_reader_destroy(Pipeline *p) {
+    free(p->reader.unified_journal);p->reader.unified_journal=NULL;
     pthread_cond_destroy(&p->reader.ring_space);
     pthread_mutex_destroy(&p->reader.ring_mutex);
 }
@@ -227,4 +238,12 @@ int64_t pipeline_source_rate(Pipeline *p,int64_t now) {
         if(p->reader.rate[pos].us<=now)bits+=p->reader.rate[pos].bits;
     }
     pthread_mutex_unlock(&p->reader.ring_mutex);return bits;
+}
+
+int pipeline_reader_unified_snapshot(Pipeline *p,uint64_t *cursor,NakiUnifiedSource *out,int *count) {
+    int ret=0;*count=0;pthread_mutex_lock(&p->reader.ring_mutex);
+    NakiUnifiedJournal *j=p->reader.unified_journal;
+    if(!j||*cursor>j->sequence||j->sequence-*cursor>1024)ret=AVERROR(ENOBUFS);
+    else {while(*cursor<j->sequence) {out[(*count)++]=j->entries[*cursor%1024];(*cursor)++;}}
+    pthread_mutex_unlock(&p->reader.ring_mutex);return ret;
 }

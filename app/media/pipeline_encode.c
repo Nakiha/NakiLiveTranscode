@@ -120,7 +120,9 @@ int pipeline_receive_encoded(Pipeline *p) {
             int model=kind==0&&mapped->rate.kind==3?3:kind;
             int64_t before=p->rate.pending_bits;
             double coefficient=model>=0?p->rate.coefficient[model]:0;
-            if(naki_rate_feedback(&p->rate,&mapped->rate,p->encoder->width*p->encoder->height,bits,kind,media_us)<0) {ret=AVERROR_INVALIDDATA;break;}
+            if(p->unified) {
+                if((ret=pipeline_unified_feedback(p,mapped,bits,kind,media_us))<0)break;
+            } else if(naki_rate_feedback(&p->rate,&mapped->rate,p->encoder->width*p->encoder->height,bits,kind,media_us)<0) {ret=AVERROR_INVALIDDATA;break;}
             if(p->rate_audit.enabled)naki_rate_audit_feedback(&p->rate_audit,&mapped->rate_audit,packet->pts,
                 before,p->rate.pending_bits,bits,kind,now_us(),coefficient,p->rate.coefficient[model]);
         }
@@ -140,10 +142,12 @@ int pipeline_receive_encoded(Pipeline *p) {
     return ret==AVERROR(EAGAIN) || ret==AVERROR_EOF ? 0 : ret;
 }
 
-int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
+static int unified_send(void *opaque,const void *frame) {return pipeline_encoder_send(opaque,frame);}
+static int unified_receive(void *opaque) {return pipeline_receive_encoded(opaque);}
+static uint64_t unified_progress(void *opaque) {return ((Pipeline *)opaque)->unified->budget.feedback;}
+
+int pipeline_encode_selected(Pipeline *p, AVFrame *frame,Stamp stamp) {
     if (!pipeline_stamp_valid(frame->opaque_ref)) return AVERROR_INVALIDDATA;
-    Stamp stamp=*(Stamp *)frame->opaque_ref->data;
-    stamp.filtered_us=now_us();
     AVRational filter_tb=av_buffersink_get_time_base(p->sink);
     frame->pts=av_rescale_q(frame->pts,filter_tb,p->encoder->time_base);
     frame->duration=av_rescale_q(frame->duration,filter_tb,p->encoder->time_base);
@@ -173,6 +177,7 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     AVBufferRef *owner=av_buffer_ref(frame->opaque_ref);
     if(!owner)return AVERROR(ENOMEM);
     if(p->job->config.constrained_crf) {
+      if(!p->unified) {
         pipeline_rate_audit_init(p);
         int64_t began=now_us();
         int byte_input=frame->format==AV_PIX_FMT_YUV420P;
@@ -194,16 +199,24 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
             NakiRateAuditEntry *e=naki_rate_audit_entry(&p->rate_audit,stamp.rate_audit.seq);
             if(e)e->snapshot=stamp.rate_audit;
         }
+      }
         if(av_dict_set_int(&frame->metadata,"naki_qp_offset",stamp.rate.qp-p->job->config.qp,0)<0) {av_buffer_unref(&owner);return AVERROR(ENOMEM);}
     }
     stamp.encoder_submit_us=now_us();
     pipeline_checkpoint(p,&p->job->progress.first_encoder_submit_us);
-    while ((ret=pipeline_encoder_send(p,frame))==AVERROR(EAGAIN)) {
+    if(p->unified) {
+        NakiCodecProgress io={p,unified_send,unified_receive,unified_progress};
+        ret=naki_codec_submit(&io,frame,AVERROR(EAGAIN),&p->unified->null_sent);
+    } else while ((ret=pipeline_encoder_send(p,frame))==AVERROR(EAGAIN)) {
         if(p->rate_audit.enabled)stamp.rate_audit.send_eagain++;
         if ((ret=pipeline_receive_encoded(p))<0) {av_buffer_unref(&owner);return ret;}
     }
     if (ret<0) {av_buffer_unref(&owner);return ret;}
     stamp.encoder_accepted_us=now_us();
+    if(p->unified) {
+        if(naki_unified_accept(&p->unified->budget,stamp.unified_seq)<0) {av_buffer_unref(&owner);return AVERROR_INVALIDDATA;}
+        pipeline_unified_event(p,"accept",stamp.unified_seq,stamp.unified_quota);
+    }
     naki_rate_audit_accept(&p->rate_audit,&stamp.rate_audit,!!stamp.intra_reason);
     if(strict) {p->last_output_display_pts=output_display_pts;p->have_output_display_pts=1;}
     naki_intra_accept(&p->job->config.policy,&p->intra,stamp.source_us,stamp.intra_reason);
@@ -211,6 +224,14 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     p->ledger[slot]=(Ledger){.used=1,.pts=frame->pts,.stamp=stamp,.owner=owner}; p->last_pts=frame->pts;
     pthread_mutex_lock(&p->job->mutex); p->job->stats.frames_filtered++; pthread_mutex_unlock(&p->job->mutex);
     return pipeline_receive_encoded(p);
+}
+
+int pipeline_encode_frame(Pipeline *p,AVFrame *frame) {
+    const char *enabled=getenv("NAKI_UNIFIED_RATE");
+    if(p->unified||(enabled&&!strcmp(enabled,"1")))return pipeline_unified_frame(p,frame);
+    if(!pipeline_stamp_valid(frame->opaque_ref))return AVERROR_INVALIDDATA;
+    Stamp stamp=*(Stamp *)frame->opaque_ref->data;stamp.filtered_us=now_us();
+    return pipeline_encode_selected(p,frame,stamp);
 }
 
 int pipeline_ledger_pending(Pipeline *p) {

@@ -23,6 +23,7 @@ def main(argv=None):
     parser.add_argument('--input-gop', type=int, help='rtmp: independently require this input I interval in frames')
     parser.add_argument('--save-output-dir', type=pathlib.Path, help='rtmp: also export verified compressed outputs to a new directory under out/ (outside timing)')
     parser.add_argument('--audit-burst-bits', type=int, help='rtmp network_trace: each audit bucket burst in bits (default 55000, zero initial credit)')
+    parser.add_argument('--latency-observe-only',action='store_true',help='Experiment: retain latency measurements but do not reject candidates on latency cost')
     parser.add_argument('--build-dir', type=pathlib.Path)
     parser.add_argument('--bin-dir', type=pathlib.Path)
     parser.add_argument('--result-dir', type=pathlib.Path)
@@ -76,6 +77,7 @@ def main(argv=None):
                         mode=opts.mode, maximum_seconds=opts.seconds,
                         resources='Sampled /proc totals for controller and descendants; not cgroup/wire/display measurements.')
         if opts.profile == 'rtmp':
+            if opts.latency_observe_only:command += ['--latency-observe-only']
             for key in ('input_fps', 'input_gop', 'audit_burst_bits'):
                 if getattr(opts,key) is not None:
                     command += ['--' + key.replace('_','-'), str(getattr(opts,key))]

@@ -40,7 +40,8 @@ add_executable(naki-live ${NAKI_SERVICE_SOURCES} app/control/operation_cache.c a
     app/platform/runtime.c app/worker/job.c app/observability/metrics.c app/worker/job_report.c app/observability/logger.c app/observability/netstats.c app/crash/crash_client.c ${NAKI_POLICY_SOURCES})
 set(NAKI_PIPELINE_SOURCES
     app/media/pipeline.c app/media/pipeline_reader.c app/media/pipeline_output.c
-    app/media/pipeline_mux.c app/media/pipeline_encode.c app/media/pipeline_decode.c app/media/pipeline_rate_audit.c)
+    app/media/pipeline_mux.c app/media/pipeline_encode.c app/media/pipeline_decode.c app/media/pipeline_rate_audit.c
+    app/media/unified_rate.c app/media/pipeline_unified.c)
 set(NAKI_WORKER_SOURCES
     app/worker/worker.c app/media/watermark.c app/media/video_filter.c app/media/branch_queue.c app/platform/ipc.c
     app/media/input_probe.c app/media/audio_signature.c app/media/sei.c ${NAKI_PIPELINE_SOURCES}
@@ -87,6 +88,16 @@ target_link_libraries(naki-vvenc-input8-test PRIVATE "${NAKI_FFMPEG_PREFIX}/lib/
 target_compile_options(naki-vvenc-input8-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 set_target_properties(naki-vvenc-input8-test PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
 add_executable(naki-live-rate-test tests/unit/live_rate_test.c)
+add_executable(naki-unified-rate-test tests/unit/unified_rate_test.c app/media/unified_rate.c)
+target_include_directories(naki-unified-rate-test PRIVATE app)
+target_link_libraries(naki-unified-rate-test PRIVATE m)
+target_compile_options(naki-unified-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+add_test(NAME unified-rate COMMAND naki-unified-rate-test)
+add_executable(naki-unified-native-test tests/fixtures/unified_native_test.c app/media/unified_rate.c)
+target_include_directories(naki-unified-native-test PRIVATE app)
+target_link_libraries(naki-unified-native-test PRIVATE PkgConfig::FFMPEG m)
+target_compile_options(naki-unified-native-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+set_target_properties(naki-unified-native-test PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
 target_include_directories(naki-live-rate-test PRIVATE app)
 target_link_libraries(naki-live-rate-test PRIVATE m)
 target_compile_options(naki-live-rate-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
