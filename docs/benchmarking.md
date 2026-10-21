@@ -85,7 +85,7 @@ baseline-dir 中应有匹配的 logger.c/logger.h；该工具使用内存 stdout
 
 ## 保存出流与离线画质检查
 
-`rtmp` 每轮的 `captured.flv` 由 `naki-live-transport-fixture capture-flv` 直接读取 AVIO 协议层的 FLV 字节并保存，不经过 AVFormat 解封装、AVPacket 或重新封装。RTMP 握手、分块和消息处理仍由固定 SDK 完成，FLV 文件头和 tag 外壳由协议层还原，因此这些是 FLV 字节而非 TCP 原始抓包。接收端独占创建输出、限制总字节和时限，检查读、写、flush 和关闭错误。当前 fork 将 RTMP 对端断开报告为 EIO；工具对此返回非零 12、标记 unconfirmed，驱动只在受控 API 停止、完整 FLV tag/PreviousTagSize 校验、字节和音视频包数与服务一致后标记 verified_controlled_close。提前退出、超时、截断、写盘错误均失败。最终仍由固定 SDK 独立解码核验。`--save-output-dir` 可在计时、结构核验结束后额外复制为 `output-1.flv` 等；目标必须是 `out/` 下的新目录，`manifest.json` 记录原测量目录、成功/失败状态和输出 SHA-256。默认 capture、显式保存的副本、输入与日志均不入库。
+`rtmp` 每轮的 `captured.flv` 由 `naki-live-transport-fixture capture-flv` 直接读取 AVIO 协议层的 FLV 字节并保存，不经过 AVFormat 解封装、AVPacket 或重新封装。RTMP 握手、分块和消息处理仍由固定 SDK 完成，FLV 文件头和 tag 外壳由协议层还原，因此这些是 FLV 字节而非 TCP 原始抓包。接收端独占创建输出、限制总字节和时限，检查读、写、flush 和关闭错误。当前 fork 将 RTMP 对端断开报告为读端 EIO，关闭清理可能再报 EIO/Broken pipe；工具对此返回非零 12、标记 unconfirmed，驱动只在受控 API 停止、完整 FLV tag/PreviousTagSize 校验、字节和音视频包数与服务一致后标记 verified_controlled_close。提前退出、超时、截断、写盘错误均失败。最终仍由固定 SDK 独立解码核验。`--save-output-dir` 可在计时、结构核验结束后额外复制为 `output-1.flv` 等；目标必须是 `out/` 下的新目录，`manifest.json` 记录原测量目录、成功/失败状态和输出 SHA-256。默认 capture、显式保存的副本、输入与日志均不入库。
 
 对已经通过的 RTMP 测量，可单独做一轮画质检查，不需要重跑性能矩阵：
 

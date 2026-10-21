@@ -58,7 +58,8 @@ static int capture_flv(int argc,char **argv) {
         close_result=avio_closep(&io);
         /* avio_closep can return the saved read error again. Keep the first
          * failure; a new close failure still invalidates a clean EOF. */
-        if(close_result<0&&(code==0||close_result!=ret)){reason="protocol_close_error";code=1;}
+        int peer_close=code==12&&(close_result==AVERROR(EPIPE)||close_result==ret);
+        if(close_result<0&&!peer_close&&(code==0||close_result!=ret)){reason="protocol_close_error";code=1;}
     }
     if(fflush(file)!=0){reason="flush_error";code=1;}
     if(fclose(file)!=0){reason="file_close_error";code=1;}

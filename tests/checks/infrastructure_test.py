@@ -107,6 +107,11 @@ class Infrastructure(unittest.TestCase):
                 receipt(json.dumps(row), code)
         row.update(status='unconfirmed', reason='rtmp_peer_close_unconfirmed')
         self.assertEqual(receipt(json.dumps(row), 12)['status'], 'unconfirmed')
+        row['close_result'] = -32
+        self.assertEqual(receipt(json.dumps(row), 12)['status'], 'unconfirmed')
+        row['close_result'] = -12
+        with self.assertRaises(ValueError):
+            receipt(json.dumps(row), 12)
         with self.assertRaises(ValueError):
             receipt(json.dumps(row), 0)
 

@@ -237,7 +237,7 @@ def main():
             parser.error('--save-output-dir must be a new directory under out/')
         saved.mkdir(parents=True, exist_ok=False)
     run = new_run('rtmp-bench-')
-    evidence = dict(status='running', measurement_status='running', conformance_status='not_requested', require_conformance=args.require_conformance, mode=args.mode, input=str(media), input_sha256=digest(media),
+    evidence = dict(status='running', measurement_status='running', conformance_status='pending' if config.get('network_trace') else 'not_requested', require_conformance=args.require_conformance, mode=args.mode, input=str(media), input_sha256=digest(media),
                     config_sha256=args.config_sha256, results=[],
                     topology='Loopback RTMP source listener -> service pull/transcode/push -> capture listener',
                     boundary='Ingress/handler to actual service mux/flush, not source-to-screen; CPU/RSS sampled per process tree, RSS sums shared pages. Sender/receiver reported separately. Short-lived processes may be missed.',
@@ -392,6 +392,8 @@ def main():
         print(f"RTMP measurement=complete conformance={evidence['conformance_status']} status={evidence['status']}: {run}", flush=True)
     except BaseException as error:
         evidence.update(status='failed', measurement_status='failed', error=str(error))
+        if evidence['conformance_status'] in ('pending', 'passed'):
+            evidence['conformance_status'] = 'incomplete'
         raise
     finally:
         (run / 'results.json').write_text(json.dumps(evidence, indent=2) + '\n')

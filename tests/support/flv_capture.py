@@ -1,4 +1,5 @@
 """Bounded, streaming FLV structural verification, independent of demux/remux."""
+import errno
 import json
 
 
@@ -53,7 +54,7 @@ def receipt(log, returncode):
         raise ValueError('Missing/duplicate capture completion receipt')
     row = rows[0]
     expected = {0: ('complete', 'eof'), 12: ('unconfirmed', 'rtmp_peer_close_unconfirmed')}
-    allowed_close = (0, row['read_result']) if returncode == 12 else (0,)
+    allowed_close = (0, -errno.EPIPE, -errno.EIO) if returncode == 12 and row['read_result'] == -errno.EIO else (0,)
     if returncode not in expected or (row['status'], row['reason']) != expected[returncode] or row['close_result'] not in allowed_close:
         raise ValueError('Capture transport failed: ' + str(row))
     return dict(row, returncode=returncode)

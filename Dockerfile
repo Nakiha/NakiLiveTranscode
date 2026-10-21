@@ -31,6 +31,11 @@ COPY third_party/yyjson/src/ third_party/yyjson/src/
 COPY tests/unit/ tests/unit/
 COPY tests/fixtures/ tests/fixtures/
 COPY tests/support/ tests/support/
+# Header-only tests use pinned fork sources without introducing a partial
+# third_party/vvenc tree into the source-less SDK consumer identity gate.
+COPY third_party/vvenc/source/Lib/CommonLib/Native8.h tests/vvenc-native8/Native8.h
+COPY third_party/vvenc/source/Lib/CommonLib/x86/Native8X86.h tests/vvenc-native8/x86/Native8X86.h
+ENV NAKI_VVENC_NATIVE8_SOURCE=/src/tests/vvenc-native8
 ARG NAKI_MEDIA_HOOK_SOURCE=
 ARG DEPENDENCY_KEY=
 RUN NAKI_SKIP_FFMPEG=1 NAKI_EXPECTED_SDK_MANIFEST=/src/expected-sdk.json \
