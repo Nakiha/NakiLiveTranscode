@@ -81,7 +81,7 @@ typedef struct AudioTrack {
 typedef struct DecodePump {
     pthread_mutex_t mutex;pthread_cond_t changed;pthread_t thread;
     AVFrame *frame;InputItem audio;
-    int occupied,done,error,started;
+    int occupied,prefer_video,done,error,started;
 } DecodePump;
 typedef struct Branch Branch;
 typedef struct Pipeline {

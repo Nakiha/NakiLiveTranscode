@@ -2,8 +2,9 @@
 #include <time.h>
 
 /* Optional direct-output pump: this thread alone calls async send/receive and
- * stats while active. One dispatch slot, existing bounded async queues and one
- * retained input item. Audio parameters are immutable reader snapshots. */
+ * stats while active. One video slot and one immutable audio/control slot,
+ * existing bounded async queues and one retained input item. Audio must not
+ * occupy the video slot and prevent receiving already completed pictures. */
 void pipeline_decode_notify(void *opaque) {
     Pipeline *p=opaque;
     wake_job(p->job);
@@ -75,7 +76,7 @@ static void *decode_main(void *opaque) {
         if(done&&error<0){ret=error;break;}
         if(pending.params) {
             pthread_mutex_lock(&q->mutex);
-            if(!q->occupied) {q->audio=pending;pending=(InputItem){0};q->occupied=1;progress=1;}
+            if(!q->audio.packet) {q->audio=pending;pending=(InputItem){0};progress=1;}
             pthread_mutex_unlock(&q->mutex);
             if(progress)wake_job(p->job);
         } else if(pending.packet||(done&&!eof_sent)) {
@@ -107,16 +108,6 @@ int pipeline_decode_start(Pipeline *p) {
     int ret=pthread_create(&p->pump.thread,NULL,decode_main,p);
     if(ret)return AVERROR(ret);
     p->pump.started=1;return 0;
-}
-int pipeline_decode_receive(Pipeline *p,AVFrame *frame,InputItem *audio) {
-    DecodePump *q=&p->pump;int ret=AVERROR(EAGAIN);
-    pthread_mutex_lock(&q->mutex);
-    if(q->occupied) {
-        if(q->audio.packet) {*audio=q->audio;q->audio=(InputItem){0};}
-        else {av_frame_move_ref(frame,q->frame);ret=0;}
-        q->occupied=0;pthread_cond_signal(&q->changed);
-    } else if(q->done)ret=q->error<0?q->error:AVERROR_EOF;
-    pthread_mutex_unlock(&q->mutex);return ret;
 }
 void pipeline_decode_join(Pipeline *p) {
     if(p->pump.started) {pthread_cond_signal(&p->pump.changed);pthread_join(p->pump.thread,NULL);p->pump.started=0;}

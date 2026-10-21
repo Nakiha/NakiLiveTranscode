@@ -58,7 +58,7 @@ def subsequence(rows,source):
         while position<len(source) and source[position]['hash']!=row['hash']:position+=1
         assert position<len(source),'output contains payload outside accepted input prefix'
         position+=1
-def execute(name,sample,reason=None,multiple=False,stable_he=False,transition_override=None):
+def execute(name,sample,reason=None,multiple=False,stable_he=False,transition_override=None,pump=False):
     reference,input_audio=probe(sample);streams=sorted(input_audio);changing=streams[0]
     transition=None
     if reason:
@@ -75,6 +75,10 @@ def execute(name,sample,reason=None,multiple=False,stable_he=False,transition_ov
     try:
         outputs=[{'id':f'output-{i}','output':str(RUN/f'{name}-out-{i}.ts'),'output_format':'mpegts','encoder_preset':'ultrafast'} for i in range(2)]
         spec={'input':str(sample),'frame_log':True,'encoder_preset':'ultrafast'}
+        if pump:
+            assert not multiple
+            spec.update(decoder_pump=True,reader_queue_capacity=1,queue_capacity=1,
+                        min_threads=2,max_threads=2,budget_slots=2)
         if multiple:spec['outputs']=outputs
         else:spec.update(output=str(RUN/f'{name}-out.ts'),output_format='mpegts')
         accepted=server.api('/v1/jobs',{'operation_id':'create-'+name,'spec':spec},202)
@@ -129,13 +133,18 @@ def run():
         ('aac-profile','aac',(48000,2,'aac_low'),(48000,2,'aac_main'),'audio_object_type_changed',False),
         ('mp3-rate','mp3',(48000,2,None),(44100,2,None),'core_sample_rate_changed',False),
         ('mp3-layout','mp3',(48000,2,None),(48000,1,None),'channel_layout_changed',False)]
-    for name,codec,first,second,reason,multiple in cases:execute(name,source(video,healthy,name,codec,first,second),reason,multiple)
+    for name,codec,first,second,reason,multiple in cases:
+        sample=source(video,healthy,name,codec,first,second)
+        execute(name,sample,reason,multiple)
+        execute(name+'-pump',sample,reason,pump=True)
     for name,reason in (('aac-rate','core_sample_rate_changed'),('aac-profile','audio_object_type_changed')):
         path=RUN/f'{name}-asc.flv'
         metadata=json.loads(command([BIN/'naki-audio-change-fixture',video,RUN/f'{name}-0.aac',RUN/f'{name}-1.aac',path]))
         (RUN/f'{name}-asc-fixture.json').write_text(json.dumps(metadata,indent=2)+'\n')
         execute(name+'-asc',path,reason,transition_override=metadata['first_phase_packets'])
+        execute(name+'-asc-pump',path,reason,transition_override=metadata['first_phase_packets'],pump=True)
     he=he_fixture(video);execute('stable-he',he,stable_he=True);execute('stable-he-multiple',he,multiple=True,stable_he=True)
+    execute('stable-he-pump',he,stable_he=True,pump=True)
     (RUN/'COMPLETE.json').write_text(json.dumps({'status':'passed','cases':RESULTS},indent=2)+'\n')
     print('PASS real continuous-PTS same-PID AAC/MP3 changes and stable official HE-AAC:',RUN,flush=True)
 if __name__=='__main__':run()

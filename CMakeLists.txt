@@ -40,7 +40,7 @@ add_executable(naki-live ${NAKI_SERVICE_SOURCES} app/control/operation_cache.c a
     app/platform/runtime.c app/worker/job.c app/observability/metrics.c app/worker/job_report.c app/observability/logger.c app/observability/netstats.c app/crash/crash_client.c ${NAKI_POLICY_SOURCES})
 set(NAKI_PIPELINE_SOURCES
     app/media/pipeline.c app/media/pipeline_reader.c app/media/pipeline_output.c
-    app/media/pipeline_mux.c app/media/pipeline_encode.c app/media/pipeline_decode.c)
+    app/media/pipeline_mux.c app/media/pipeline_encode.c app/media/pipeline_decode.c app/media/pipeline_decode_queue.c)
 set(NAKI_WORKER_SOURCES
     app/worker/worker.c app/media/watermark.c app/media/video_filter.c app/media/branch_queue.c app/platform/ipc.c
     app/media/input_probe.c app/media/audio_signature.c app/media/sei.c ${NAKI_PIPELINE_SOURCES}
@@ -77,6 +77,13 @@ target_compile_options(naki-live-ctl PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(naki-live-ctl PRIVATE PkgConfig::CURL yyjson)
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(naki-decode-dispatch-test tests/unit/decode_dispatch_test.c app/media/pipeline_decode_queue.c)
+    target_include_directories(naki-decode-dispatch-test PRIVATE app)
+    target_link_libraries(naki-decode-dispatch-test PRIVATE yyjson PkgConfig::FFMPEG PkgConfig::CURL Threads::Threads)
+    target_compile_options(naki-decode-dispatch-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    set_target_properties(naki-decode-dispatch-test PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
+    add_test(NAME decode-dispatch COMMAND naki-decode-dispatch-test)
+    set_tests_properties(decode-dispatch PROPERTIES LABELS "native;quick")
 enable_language(CXX)
 add_executable(naki-native8-test tests/unit/native8_test.cpp)
 if(DEFINED ENV{NAKI_VVENC_NATIVE8_SOURCE})
