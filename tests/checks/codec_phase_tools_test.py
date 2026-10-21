@@ -31,6 +31,21 @@ class DecoderJoin(unittest.TestCase):
         event=self.event();event['decoder_internal']['worker_output_us']=0
         with self.assertRaises(ValueError):audit.decode_parts(event)
 class CpuWindows(unittest.TestCase):
+    def test_v2_slewed_timeline_uses_raw_cpu_enclosure(self):
+        event=DecoderJoin().event()
+        event['decoder_internal'].update(version=2,decode_cpu_us=60024,decode_cpu_wall_us=60030)
+        result=audit.decode_parts(event)
+        self.assertEqual(result['cpu_monotonic_excess'],0.024)
+        self.assertEqual(result['decode_cpu'],60.024)
+        self.assertAlmostEqual(result['decode_off_cpu'],0.006)
+    def test_v2_raw_overrun_still_fails(self):
+        event=DecoderJoin().event()
+        event['decoder_internal'].update(version=2,decode_cpu_us=60024,decode_cpu_wall_us=60000)
+        with self.assertRaises(AssertionError):audit.decode_parts(event)
+    def test_v1_historical_failure_is_not_regraded(self):
+        event=DecoderJoin().event()
+        event['decoder_internal']['decode_cpu_us']=60024
+        with self.assertRaises(AssertionError):audit.decode_parts(event)
     def test_nested_cpu_window(self):
         audit.bounded_cpu_us(9,100,111)
     def test_observed_clock_order_error_rejected(self):

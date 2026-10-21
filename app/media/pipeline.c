@@ -500,6 +500,8 @@ static int initialize_decoder(Pipeline *p) {
     p->decoder->thread_count=p->job->config.max_threads;
     p->decoder->thread_type=FF_THREAD_FRAME; p->decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;
     p->decoder->max_pixels=NAKI_INPUT_MAX_PIXELS;
+    if(stream->codecpar->codec_id==AV_CODEC_ID_HEVC &&
+       (ret=av_opt_set_int(p->decoder->priv_data,"live_idr_early_output",1,0))<0) return ret;
     if ((ret=avcodec_open2(p->decoder,codec,NULL))<0) return ret;
     if ((ret=avcodec_async_create(&p->async,&p->decoder,p->job->config.queue_capacity,pipeline_decode_notify,p))<0) return ret;
     AVCodecAsyncBudget *budget=NULL;
