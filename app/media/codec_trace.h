@@ -41,7 +41,11 @@
     X(gop_encoder_blocks) \
     X(gop_rc_blocks) \
     X(byte_me_blocks) \
-    X(byte_reference_pack_us)
+    X(byte_reference_pack_us) \
+    X(preprocess_cpu_wall_us) \
+    X(dispatch_cpu_wall_us) \
+    X(finalize_cpu_wall_us) \
+    X(gop_init_cpu_wall_us)
 typedef struct NakiEncoderTrace {
     int64_t version,cts,poc;
 #define DECLARE_TRACE(n) int64_t n;

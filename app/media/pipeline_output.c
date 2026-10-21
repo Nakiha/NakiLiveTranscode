@@ -231,7 +231,10 @@ int pipeline_drain_output(Pipeline *p) {
     if(!p->graph) {p->stage="empty video";return AVERROR(ENODATA);}
     p->stage="filter drain";int ret=av_buffersrc_add_frame_flags(p->source,NULL,0);
     if(ret<0||(ret=pipeline_filter_output(p))<0)return ret;
-    p->stage="encoder drain";ret=pipeline_encoder_send(p,NULL);
+    p->stage="encoder drain";p->encoder_draining=1;
+    while((ret=pipeline_encoder_send(p,NULL))==AVERROR(EAGAIN)) {
+        if((ret=pipeline_receive_encoded(p))<0)return ret;
+    }
     if(ret<0||(ret=pipeline_receive_encoded(p))<0)return ret;
     if((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0)return ret;
     return (pipeline_ledger_pending(p)||(p->job->config.constrained_crf&&p->rate.pending_bits))?AVERROR_INVALIDDATA:0;

@@ -118,6 +118,7 @@ typedef struct Pipeline {
     int have_output_display_pts;
     int64_t last_output_display_pts;
     int64_t encoder_api_us;
+    int encoder_draining,encoder_poll_pending,encoder_polled_packet;
     int64_t first_encoder_pts, previous_key_pts;
     int seen_output_key;
     int live_mux, video_started;

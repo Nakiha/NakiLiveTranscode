@@ -43,6 +43,8 @@ CQF实验搜索profile另提供`live_3b_2s_qt8`（最小QT8/chroma4）、`live_3
 
 诊断示例[codec-trace](../examples/rtmp-vvc-codec-trace-540p30.json)增加`codec_trace=true`，只用于原生软件HEVC→单个live VVenC输出。匹配fork在AU中返回PicShared绑定的内部阶段及CPU聚合，wrapper传入有界整数metadata，应用按原有PTS ledger取回。它强制全量日志，默认关闭；对照正式性能必须关闭诊断。事件口径、MCTF CPU未聚合等限制见[内部打点记录](validation-codec-phases-hevc-20261018.md)。
 
+trace v4 增加四个单线程 CPU 窗口的外围 `CLOCK_MONOTONIC_RAW` 时长，原有 MONOTONIC 阶段时间和 CPU 数值不变；严格审计仍保留5µs余量。公共 trace 结构扩展后必须一起重建 VVenC、FFmpeg wrapper 与应用，并保留对应依赖 key 和 Build ID DWARF，不能混用旧 SDK。
+
 后续I预算改为与启动IDR独立建模，普通I先验0.40、IDR先验0.8，普通I反馈50%更新；从95%窗口边界扣掉在途预留后，先为随后P+3B留名义目标额度（最多当前余量60%），I使用其余部分。首个预测P参考锚可使用剩余窗口85%，后续P/B仍40%，I目标权重仍6。码量模型按真实输出帧型反馈，短组预测B转P不会再更新B模型。新增trace模型类型/系数/窗口余量/后续留额。GOP诊断ABI2另拆admission、前串行图重建完成、slice初始化与dispatch，并记录真实条件拒绝次数；不把计数当时间。测量和边界见[后续I预算与GOP派发](validation-i-budget-gop-dispatch-20261018.md)。
 
 媒体预算窗口现由已完成编码AU的实际DTS推进，并按输出time base舍入；输入显示PTS不再提前释放仍在DTS窗口内的启动I。编码未写出的AU仍计入在途预留，独立审计通过`rc_media_clock_us`检查其因果来源。

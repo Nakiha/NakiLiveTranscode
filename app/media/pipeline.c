@@ -804,6 +804,12 @@ void *pipeline_main(void *opaque) {
             pipeline_refresh_auto(&p);
             p.next_stats_us=now_us()+1000000;
         }
+        if(!progress&&p.encoder_poll_pending) {
+            p.stage="encoder pending packet";
+            ret=pipeline_receive_encoded(&p);
+            if(ret<0)goto cleanup;
+            progress=p.encoder_polled_packet;
+        }
         if (!progress) {
             media_phase(&p,NAKI_MEDIA_PHASE_WAITING_INPUT);
             struct pollfd fd={.fd=job->wake_fd,.events=POLLIN};

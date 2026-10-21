@@ -148,6 +148,8 @@ BUSY_WAIT_TIME=0 bash scripts/bench-service.sh rtmp \
 
 当前受限 CRF 复测应显式使用 `examples/rtmp-vvc-constrained-crf-540p30.json`、`BUSY_WAIT_TIME=0`、`--audit-burst-bits 1100000 --require-conformance`。这些显式实验参数不改变服务默认设置；速度档、队列、抽帧和线程等待策略一起影响性能，不能把整体收益全归于 CRF。
 
-内部阶段 CPU 使用独立的线程 CPU 时钟，不能与可校时的 monotonic 墙钟作精确区间比较。HEVC decoder trace v2 追加外围 `CLOCK_MONOTONIC_RAW` 时长 `decode_cpu_wall_us`，CPU 只对该区间施加原有5µs余量；同时保留原始 CPU、`cpu_monotonic_excess` 和 `single_thread_cpu_clock_excess`（单位 ms）。所有阶段时延仍使用原来的 monotonic 时间链，RAW 不混入阶段求和。历史 decoder v1 与 encoder v2/v3 保持原来的严格规则，旧失败不得重判通过。此余量不应用于媒体时延、滚动码率或队列边界。
+内部阶段 CPU 使用独立的线程 CPU 时钟，不能与可校时的 monotonic 墙钟作精确区间比较。HEVC decoder trace v2 追加外围 `CLOCK_MONOTONIC_RAW` 时长 `decode_cpu_wall_us`；VVenC trace v4 为 preprocess、GOP init、dispatch、finalize 追加同样嵌套的 `*_cpu_wall_us`。CPU 只对 RAW 区间施加原有5µs余量；同时保留原始 CPU、`cpu_monotonic_excess` 和 `single_thread_cpu_clock_excess`（单位 ms）。所有阶段时延仍使用原来的 monotonic 时间链，RAW 不混入阶段求和。历史 decoder v1 与 encoder v2/v3 保持原来的严格规则，旧失败不得重判通过。此余量不应用于媒体时延、滚动码率或队列边界。
+
+`decoder_pump=true` 的单个直接输出使用独立的一个视频槽和一个音频参数/包槽，两者均就绪时交替领取。前台不会因尚未领取的音频槽阻止异步视频出队。正常运行中编码每领取一个 AU 即返回输入处理；暂时没有输入进展时继续推进已知待取的编码包，EOF 则完整排空并处理 NULL-send 的 EAGAIN。分支输出继续使用原有独立 owner 的领取路径。前台与应用分发队列必须同时检查，并以实际 mux/flush 时延判断改善，不能通过搬移排队位置宣称消除等待。
 
 HEVC 服务现开启单层软件 `IDR_N_LP` 提前选择输出；像素重建及整包校验成功后才发布。CRA、带前导图像的 IDR、多层和缺失 PTS 保留原路径。逐帧等价边界、`pkt_dts` 的输出触发语义、时钟复现及新测量见[IDR 提前输出验证](validation-idr-early-20261022.md)。

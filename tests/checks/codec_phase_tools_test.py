@@ -31,6 +31,15 @@ class DecoderJoin(unittest.TestCase):
         event=self.event();event['decoder_internal']['worker_output_us']=0
         with self.assertRaises(ValueError):audit.decode_parts(event)
 class CpuWindows(unittest.TestCase):
+    def test_encoder_v4_raw_and_legacy_rules(self):
+        e=dict(version=4,dispatch_cpu_us=60024,dispatch_us=10000,compress_return_us=70000,dispatch_cpu_wall_us=60030)
+        self.assertEqual(audit.encoder_cpu_window(e,'dispatch_cpu_us','dispatch_us','compress_return_us'),0)
+        e['dispatch_cpu_wall_us']=60000
+        with self.assertRaises(AssertionError):audit.encoder_cpu_window(e,'dispatch_cpu_us','dispatch_us','compress_return_us')
+        del e['dispatch_cpu_wall_us']
+        with self.assertRaises(KeyError):audit.encoder_cpu_window(e,'dispatch_cpu_us','dispatch_us','compress_return_us')
+        e['version']=3
+        with self.assertRaises(AssertionError):audit.encoder_cpu_window(e,'dispatch_cpu_us','dispatch_us','compress_return_us')
     def test_v2_slewed_timeline_uses_raw_cpu_enclosure(self):
         event=DecoderJoin().event()
         event['decoder_internal'].update(version=2,decode_cpu_us=60024,decode_cpu_wall_us=60030)

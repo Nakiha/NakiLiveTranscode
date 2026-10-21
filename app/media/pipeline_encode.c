@@ -25,6 +25,8 @@ int pipeline_receive_encoded(Pipeline *p) {
     AVPacket *packet=av_packet_alloc();
     if(!packet)return AVERROR(ENOMEM);
     int ret;
+    int cooperative=p->job->config.decoder_pump&&!p->job->parent&&!p->encoder_draining;
+    p->encoder_poll_pending=0;p->encoder_polled_packet=0;
     while((ret=encoder_receive(p,packet))>=0) {
         int64_t encoded_us=now_us(), hook_us=0;
         pthread_mutex_lock(&p->job->mutex);p->job->progress.last_encoded_us=encoded_us;pthread_mutex_unlock(&p->job->mutex);
@@ -73,7 +75,7 @@ int pipeline_receive_encoded(Pipeline *p) {
                 NAKI_ENCODER_TRACE_FIELDS(GET_TRACE)
 #undef GET_TRACE
 #undef PARSE_TRACE
-                if(t->version!=3||t->cts!=packet->pts||!t->input_us||!t->au_us)valid=0;
+                if(t->version!=4||t->cts!=packet->pts||!t->input_us||!t->au_us)valid=0;
             }
             av_dict_free(&info);
             if(!valid){ret=AVERROR_INVALIDDATA;break;}
@@ -130,6 +132,10 @@ int pipeline_receive_encoded(Pipeline *p) {
         if(!packet->duration)packet->duration=av_rescale_q(1,av_inv_q(p->encoder->framerate),p->video->time_base);
         ret=pipeline_submit_mux(p,packet);av_packet_unref(packet);
         if(ret<0)break;
+        /* Pending receive advances admitted encoding work and may spend tens
+         * of ms per AU. Give input/audio a turn between coding-order packets. */
+        p->encoder_polled_packet=1;
+        if(cooperative) {p->encoder_poll_pending=1;break;}
     }
     av_packet_free(&packet);
     return ret==AVERROR(EAGAIN) || ret==AVERROR_EOF ? 0 : ret;
