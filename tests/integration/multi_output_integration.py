@@ -267,7 +267,11 @@ def main():
         old=api();sizes=[pathlib.Path(b['output']).stat().st_size for b in branches];pid=accepted['supervisor']['worker_pid']
         server.kill();server.wait(timeout=4);time.sleep(.5)
         assert all(pathlib.Path(b['output']).stat().st_size>size for b,size in zip(branches,sizes))
-        serve();state=wait(lambda:(s if (s:=api()).get('job_id')==accepted['job_id'] and s['supervisor']['recovered'] else None))
+        # Recovery discovery precedes the first worker status snapshot. Wait
+        # for media progress as well, rather than treating the controller's
+        # initial idle/zero placeholder as the recovered worker's final state.
+        serve();state=wait(lambda:(s if (s:=api()).get('job_id')==accepted['job_id'] and s['supervisor']['recovered']
+                                  and s.get('frames_decoded',0)>old['frames_decoded'] and len(s.get('outputs',[]))==len(branches) else None))
         assert state['supervisor']['worker_pid']==pid and state['frames_decoded']>old['frames_decoded'],state
         api({'output_id':'recover-a','revision':2,'watermark':watermark(red,False)},path='/v1/job/watermark',code=202)
         wait(lambda:api()['outputs'][0]['watermark']['applied_revision']==2)
