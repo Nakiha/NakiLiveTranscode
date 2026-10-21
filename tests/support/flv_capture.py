@@ -3,6 +3,30 @@ import errno
 import json
 
 
+def audio_media(body):
+    if not body:
+        raise ValueError('Short FLV audio tag')
+    codec = body[0] >> 4
+    if codec in (2, 14):  # legacy MP3, including 8 kHz
+        return 1
+    if codec == 10:
+        if len(body) < 2:
+            raise ValueError('Short AAC tag')
+        return int(body[1] == 1)
+    if codec != 9:
+        raise ValueError('Unsupported FLV audio codec')
+    kind = body[0] & 15
+    offset = 1
+    if kind == 5:  # AudioPacketTypeMultitrack, mux emits OneTrack per tag
+        if len(body) < 7 or body[1] & 0xf0:
+            raise ValueError('Invalid/unsupported enhanced audio track header')
+        kind = body[1] & 15
+        offset = 2
+    if len(body) < offset + 4 or body[offset:offset + 4] not in (b'mp4a', b'.mp3'):
+        raise ValueError('Invalid/unsupported enhanced audio codec')
+    return int(kind == 1)  # configuration/channel metadata are not media
+
+
 def inspect_flv(path):
     counts = dict(video=0, audio=0, tags=0)
     with path.open('rb') as stream:
@@ -39,9 +63,7 @@ def inspect_flv(path):
                     media = body[1] == 1
                 counts['video'] += int(media)
             elif tag[0] == 8:
-                if not body or (body[0] >> 4 == 10 and len(body) < 2):
-                    raise ValueError('Short FLV audio tag')
-                counts['audio'] += int(body[0] >> 4 != 10 or body[1] == 1)
+                counts['audio'] += audio_media(body)
     if not counts['video']:
         raise ValueError('No coded video in FLV capture')
     return counts

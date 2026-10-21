@@ -68,6 +68,16 @@ class Infrastructure(unittest.TestCase):
             with self.assertRaises(ValueError):
                 inspect_flv(self.source)
 
+    def test_enhanced_late_aac_mp3_tracks_do_not_count_configuration_as_media(self):
+        self.source.write_bytes(FLV + tag(8, b'\x95\x00mp4a\x01config') +
+                                tag(8, b'\x95\x01mp4a\x01aac') +
+                                tag(8, b'\x95\x01.mp3\x02mp3'))
+        self.assertEqual(inspect_flv(self.source)['audio'], 3)
+        for body in (b'\x95', b'\x95\x11mp4a\x01many', b'\x91opuspacket'):
+            self.source.write_bytes(FLV + tag(8, body))
+            with self.assertRaises(ValueError):
+                inspect_flv(self.source)
+
     def test_limit_read_and_output_errors_fail(self):
         result, output = self.capture(limit=13)
         self.assertNotEqual(result.returncode, 0)
