@@ -12,6 +12,10 @@ import statistics
 
 GOP_CHECKS = ['gop_order_blocks','gop_analysis_blocks','gop_ratecap_blocks',
               'gop_reference_blocks','gop_aps_blocks','gop_encoder_blocks','gop_rc_blocks','gop_visits']
+# Independent monotonic and per-thread CPU clocks are not an exact subtraction
+# pair. Retain raw values and expose positive excess; reject beyond this small,
+# explicit allowance (WSL2 observed 3 us on a 326 us wall interval).
+CPU_CLOCK_ALLOWANCE_US = 5
 
 
 def summary(values):
@@ -31,7 +35,8 @@ def ordered(*times):
 
 def bounded_cpu_us(cpu, begin, end):
     assert isinstance(cpu,int) and cpu>=0 and end>=begin
-    assert cpu<=end-begin+2, 'Single-thread CPU interval is not enclosed by wall samples'
+    assert cpu<=end-begin+CPU_CLOCK_ALLOWANCE_US, 'Single-thread CPU interval exceeds declared cross-clock allowance'
+    return max(0, cpu-(end-begin))
 
 
 def decode_parts(event):
@@ -51,7 +56,7 @@ def decode_parts(event):
     delivered = max(ready, d['worker_output_us'])
     ordered(delivered, d['async_queued_us'], d['frontend_us'], event['decoded_monotonic_us'])
     assert d['decode_wall_us'] == d['reconstructed_us']-d['decode_begin_us']
-    assert 0 <= d['decode_cpu_us'] <= d['decode_wall_us']+2
+    excess = bounded_cpu_us(d['decode_cpu_us'], d['decode_begin_us'], d['reconstructed_us'])
     assert 0 <= d['reference_wait_us'] <= d['decode_wall_us']
     timeline = [event['decoder_submit_monotonic_us'], d['dispatch_us'], d['worker_start_us'],
                 d['decode_begin_us'], d['reconstructed_us'], ready, delivered,
@@ -60,7 +65,8 @@ def decode_parts(event):
              'display_reorder', 'worker_delivery', 'async_transfer', 'frontend_queue', 'app_handoff']
     result = {n: (b-a)/1000 for n, a, b in zip(names, timeline, timeline[1:])}
     result.update(worker_output_lead=max(0, ready-d['worker_output_us'])/1000,
-                  decode_cpu=d['decode_cpu_us']/1000, reference_wait=d['reference_wait_us']/1000,
+                  decode_cpu=d['decode_cpu_us']/1000, single_thread_cpu_clock_excess=excess/1000,
+                  reference_wait=d['reference_wait_us']/1000,
                   decode_off_cpu=max(0, d['decode_wall_us']-d['decode_cpu_us'])/1000)
     return result
 
@@ -95,11 +101,13 @@ def encode_parts(event):
     result.update({k:v/1000 for k,v in detail.items()})
     for key in GOP_CHECKS:
         assert e[key]>=0
+    excesses = []
     for cpu,begin,end in [('gop_init_cpu_us','gop_init_begin_us','gop_init_end_us'),
                           ('preprocess_cpu_us','preprocess_begin_us','group_ready_us'),
                           ('dispatch_cpu_us','dispatch_us','compress_return_us'),
                           ('finalize_cpu_us','finalize_begin_us','finalize_end_us')]:
-        bounded_cpu_us(e[cpu],e[begin],e[end])
+        excesses.append(bounded_cpu_us(e[cpu],e[begin],e[end]))
+    result['single_thread_cpu_clock_excess'] = max(excesses)/1000
     if e['version']>=3:
         assert 0<=e['byte_reference_pack_us']<=e['finalize_end_us']-e['finalize_begin_us']+2
     result['gop_init_cpu']=e['gop_init_cpu_us']/1000
@@ -153,6 +161,7 @@ def audit(directory):
                             gop_checks={k:dict(total=sum(f['encoder_internal'][k] for f in selected),
                                                **summary([f['encoder_internal'][k] for f in selected])) for k in GOP_CHECKS})
     return dict(status='passed', decoded_trace_frames=len(decoded), written_frames=len(frames), groups=groups,
+                single_thread_cpu_clock_allowance_us=CPU_CLOCK_ALLOWANCE_US,
                 cpu_scope='Decoder calling thread; VVenC successful CTU task thread CPU summed across workers. MCTF worker CPU is not included.',
                 wall_scope='Residence includes dependency waits and scheduling; CPU sums overlap elapsed intervals. Private worker output can precede picture reconstruction; async queue joins the branches. worker_output_lead is overlap, not an additive stage.',
                 cancellation_tail='A prepared unconsumed dispatch slot may add one decoder event after API stop.')

@@ -147,3 +147,5 @@ BUSY_WAIT_TIME=0 bash scripts/bench-service.sh rtmp \
 字节参考候选需在同一SDK下比较开关关闭/开启及10bit控制组，保存实际码率匹配、独立码流结构、PSNR/VMAF与逐帧实际写出时延。诊断记录`byte_me_blocks`及`byte_reference_pack_us`以确认热点命中与打包代价；字节缓存与16bit工作缓冲同时存在时不能声称参考内存减半。性能、质量与CPU采样分开运行，采样结果仅用于热点定位。
 
 当前受限 CRF 复测应显式使用 `examples/rtmp-vvc-constrained-crf-540p30.json`、`BUSY_WAIT_TIME=0`、`--audit-burst-bits 1100000 --require-conformance`。这些显式实验参数不改变服务默认设置；速度档、队列、抽帧和线程等待策略一起影响性能，不能把整体收益全归于 CRF。
+
+内部阶段 CPU 使用独立的线程 CPU 时钟，不能与 monotonic 墙钟做无误差的区间减法。阶段审计显式声明 `single_thread_cpu_clock_allowance_us=5`，并在各组保留 `single_thread_cpu_clock_excess` 的原始正超差统计（单位 ms）；超过 5µs 仍失败，不改写 CPU 样本。此容差只用于单线程 CPU/墙钟一致性检查，不应用于媒体时延、滚动码率或队列边界。

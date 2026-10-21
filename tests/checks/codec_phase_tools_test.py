@@ -37,5 +37,9 @@ class CpuWindows(unittest.TestCase):
         with self.assertRaises(AssertionError):audit.bounded_cpu_us(31,100,111)
     def test_negative_cpu_rejected(self):
         with self.assertRaises(AssertionError):audit.bounded_cpu_us(-1,100,111)
+    def test_observed_cross_clock_excess_is_reported_without_clamping_cpu(self):
+        self.assertEqual(audit.bounded_cpu_us(329,100,426),3)
+        self.assertEqual(audit.bounded_cpu_us(331,100,426),5)
+        with self.assertRaises(AssertionError):audit.bounded_cpu_us(332,100,426)
 
 if __name__=='__main__':unittest.main()
