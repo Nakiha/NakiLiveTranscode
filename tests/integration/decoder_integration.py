@@ -73,6 +73,8 @@ def run():
         print(f"PASS {codec}: generated B=0/3 pixel/metadata parity, lifecycle, capacity-one replay and three-owner budgets", flush=True)
     for codec in ("h264", "hevc"):
         command([result / "auto_lifetime_test", result / f"{codec}-b0.mp4"], timeout=90)
+    from support.input_reorder_matrix import run_matrix
+    run_matrix(result / "async_probe", result / "input-reorder", environment)
     (result / "COMPLETE.json").write_text(json.dumps({"status": "passed", "ffmpeg_prefix": str(PREFIX)}) + "\n")
     print("PASS decoder regression; artifacts:", result, flush=True)
 

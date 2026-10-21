@@ -60,6 +60,8 @@ bash scripts/test-service.sh full --suite lifecycle-media --list
 
 所选入口会先检查必要工具、测试源、二进制/helper、CTest 注册与目录是否对应，完整/消毒器入口还执行 SDK consumer gate。缺依赖是失败，不隐式跳过。测试串行运行，避免多套实流同时争抢资源。缺少冻结历史媒体不影响服务 full；它只影响独立的 `scripts/test-decoder.sh`。
 
+`bash scripts/test-service.sh full --suite decoder` 除既有生命周期/预算测试外，还构造14种入流重排结构：HEVC 3B/7B × closed/open GOP × B-pyramid关/开，另含7B的10-bit及H.264 3B/7B closed/open。实际核对连续B长度、参考B、CRA/RASL及IDR数量；2/12线程、capacity=1、1/3轮回放逐帧比较像素、PTS、显示顺序和元数据，并用系统FFmpeg提供独立像素SHA256对照。HEVC允许输出触发包的 `pkt_dts` 改变，H.264仍要求该字段也一致。这是小样本正确性回归，不是不同入流结构的性能基准。最近一次证据见[入流重排矩阵](validation-input-reorder-20261022.md)。
+
 ## 清单和间接调用
 
 机器可读清单为 [service_suites.json](../tests/service_suites.json)。入口保护测试保存旧 ci-test.sh 的 Python 清单，确保迁移后每套仍执行一次，并核对 Docker build 阶段包含所有 CMake 源文件及其本地头文件，避免后续 test 阶段的完整拷贝掩盖漏项。CTest 的 quick 标签必须与清单完全相符。
