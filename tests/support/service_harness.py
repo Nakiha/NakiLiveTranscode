@@ -146,7 +146,7 @@ class ServiceHarness:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             state = self.http()
-            if state["state"] in ("completed", "stopped", "failed"):
+            if state["state"] in ("completed", "completed_partial", "stopped", "failed"):
                 assert state["state"] == expected, state
                 return state
             time.sleep(0.04)

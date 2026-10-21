@@ -130,7 +130,9 @@ def run():
             check_vvc_intra_groups(off)
             # Fixed branches inherit CQF, but own their decimation and encoder rate.
             multi = {key:value for key,value in config.items() if key not in ('output','output_fps','width','height','encoder_max_future_frames')}
-            multi.update(input=str(source), frame_log=False, outputs=[
+            # Functional inheritance/cadence check, not an unpaced branch
+            # capacity claim. Keep the bounded queue protection active on CI.
+            multi.update(input=str(source), frame_log=False, pace=True, outputs=[
                 dict(id='half', output=str(directory/'half.flv'), output_fps=30, width=256, height=144),
                 dict(id='full', output=str(directory/'full.flv'), output_fps=60, width=160, height=96)])
             # Preserve the original QP40 inheritance workload. The added QP32

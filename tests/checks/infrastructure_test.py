@@ -13,11 +13,12 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tests'))
 from support.flv_capture import inspect_flv, receipt, verify_capture
-from support.service_harness import BIN
+from support.service_harness import BIN, ServiceHarness
 
 spec = importlib.util.spec_from_file_location('collector', ROOT / 'scripts/collect-test-evidence.py')
 collector = importlib.util.module_from_spec(spec)
@@ -170,6 +171,16 @@ class Infrastructure(unittest.TestCase):
         result = subprocess.run(command, capture_output=True, text=True, timeout=15)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('needs network_trace', result.stderr)
+
+    def test_partial_completion_is_reported_immediately_as_terminal(self):
+        client = ServiceHarness()
+        state = dict(state='completed_partial', error='branch queue protection')
+        with patch.object(client, 'http', return_value=state) as http:
+            with self.assertRaises(AssertionError) as error:
+                client.finished(timeout=1)
+            self.assertEqual(error.exception.args[0], state)
+            self.assertEqual(http.call_count, 1)
+            self.assertEqual(client.finished('completed_partial'), state)
 
 
 if __name__ == '__main__':
