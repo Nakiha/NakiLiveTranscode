@@ -74,4 +74,4 @@ docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt --target symbols \
 
 依赖缺失时，可手动运行 FFmpeg dependency 并勾选 `publish_sdk`，或手动运行 Service CI 并勾选同名参数以完成依赖发布和应用检查。两者默认 false；push 和 PR 不启用发布。SDK 发布成功后，应用变更复用同一依赖键，无需重新编译原生库。
 
-容器测试通过 `scripts/collect-test-evidence.py --destination out/results -- COMMAND` 执行。收集本次实际新增的 out 产物及 summary 中引用的产物，不再维护目录前缀白名单；包括构建失败时留下的 sanitizer 日志。每次独立目录保存 command.log 和 collection.json（原测试退出码、文件映射、大小、SHA256、缺失和收集错误）。拒绝越界或符号链接的直接引用；目录内部测试用符号链接和特殊文件只记录类型/目标元数据，不复制、不解引用。限制 100000 文件/16GiB。原测试失败退出码始终保留；测试通过而归档不完整也会失败。GitHub always 步骤上传这些证据，不能用归档成功代表测试通过。
+容器测试通过 `scripts/collect-test-evidence.py --destination out/results -- COMMAND` 执行。收集本次实际新增的 out 产物及 summary 中引用的产物，不再维护目录前缀白名单；包括构建失败时留下的 sanitizer 日志。每次独立目录保存 command.log 和 collection.json（原测试退出码、文件映射、大小、SHA256、缺失和收集错误）。拒绝越界或符号链接的直接引用；目录内部测试用符号链接和特殊文件只记录类型/目标元数据，不复制、不解引用。logger 尚未封存的 `.jsonl.active` 段只记录路径与大小，不复制到外部归档或压缩。限制 100000 文件/16GiB。原测试失败退出码始终保留；测试通过而归档不完整也会失败。GitHub always 步骤上传这些证据，不能用归档成功代表测试通过。

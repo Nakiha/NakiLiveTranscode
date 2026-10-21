@@ -51,6 +51,11 @@ def collect(root, entries, destination):
                 continue
             if path.is_dir():
                 continue
+            if path.name.endswith('.jsonl.active'):
+                # The logger has not sealed this segment. Preserve the fact
+                # that it existed, never externally retain/compress its bytes.
+                metadata.append(dict(path=str(path.relative_to(root)), type='unsealed_trace', bytes=path.stat().st_size))
+                continue
             if not path.is_file():
                 metadata.append(dict(path=str(path.relative_to(root)), type='special', mode=stat.S_IFMT(path.stat().st_mode)))
                 continue
