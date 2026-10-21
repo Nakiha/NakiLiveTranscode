@@ -271,6 +271,14 @@ def execute_run(args, catalog, selected, commands=None, metadata=None):
             result = run_step(command, run / f'{index:02d}-{name}.log', timeout, environment)
             artifacts = [str(path) for path in sorted(set(out.iterdir()) - previous)]
             result.update(id=name, artifacts=artifacts, not_run=unexecuted_cases(artifacts))
+            if metadata:
+                for artifact in artifacts:
+                    report = pathlib.Path(artifact) / 'results.json'
+                    if report.is_file():
+                        value = json.loads(report.read_text())
+                        if 'measurement_status' in value:
+                            result['measurement_status'] = summary['measurement_status'] = value['measurement_status']
+                            result['conformance_status'] = summary['conformance_status'] = value['conformance_status']
             summary['steps'].append(result)
             write_json(run / 'summary.json', summary)
             if result['exit_code']:

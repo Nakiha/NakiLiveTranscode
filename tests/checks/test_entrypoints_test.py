@@ -43,7 +43,7 @@ class Entrypoints(unittest.TestCase):
     def test_full_preserves_every_former_ci_suite_once(self):
         suites = self.catalog['suites']
         actual = [pathlib.Path(row['script']).stem for row in suites if 'full' in row['profiles']]
-        self.assertEqual(set(actual), set(LEGACY) | {'test_entrypoints_test', 'pipeline_lifecycle_integration', 'organization_test', 'cqf_rate_integration', 'quality_tools_test', 'live_budget_test', 'read_origin_integration', 'codec_phases_integration', 'codec_phase_tools_test'})
+        self.assertEqual(set(actual), set(LEGACY) | {'infrastructure_test', 'test_entrypoints_test', 'pipeline_lifecycle_integration', 'organization_test', 'cqf_rate_integration', 'quality_tools_test', 'live_budget_test', 'read_origin_integration', 'codec_phases_integration', 'codec_phase_tools_test'})
         self.assertEqual(len(actual), len(set(actual)))
         self.assertEqual(len({row['id'] for row in suites}), len(suites))
         for row in suites:
@@ -116,6 +116,28 @@ with patch.object(tempfile, 'mkdtemp', side_effect=AssertionError('import create
         spec.loader.exec_module(module)
 '''
         subprocess.run([sys.executable, '-c', program], cwd=ROOT, check=True, capture_output=True, text=True)
+
+    def test_complete_measurement_with_failed_conformance_propagates(self):
+        run = self.directory / 'strict-benchmark'
+        artifact = ROOT / 'out' / (self.directory.name + '-benchmark')
+        self.addCleanup(lambda: __import__('shutil').rmtree(artifact, ignore_errors=True))
+        def failed(command, log, timeout, environment):
+            artifact.mkdir()
+            (artifact / 'results.json').write_text(json.dumps(dict(
+                status='failed', measurement_status='complete', conformance_status='failed')))
+            log.write_text('measurement complete; target failed\n')
+            return dict(command=command, exit_code=1, timed_out=False, elapsed_s=0, log=str(log))
+        args = runner.parse_args(['quick', '--result-dir', str(run)])
+        runner.select_suites(args, self.catalog)
+        with patch.object(runner, 'preflight', return_value={'binaries': {}}), \
+             patch.object(runner, 'run_step', side_effect=failed):
+            code = runner.execute_run(args, self.catalog, [], [('rtmp-capacity', ['fixture'], 10)], {'kind': 'rtmp'})
+        summary = json.loads((run / 'summary.json').read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(summary['measurement_status'], 'complete')
+        self.assertEqual(summary['conformance_status'], 'failed')
+        self.assertEqual(summary['status'], 'failed')
+        self.assertEqual(summary['steps'][0]['measurement_status'], 'complete')
 
     def test_actual_ctest_failures_and_missing_executables_propagate(self):
         source = self.directory / 'source'

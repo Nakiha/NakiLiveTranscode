@@ -3,12 +3,70 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <inttypes.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/time.h>
 
 static int64_t deadline;
 static int interrupted(void *unused) {(void)unused;return av_gettime_relative()>deadline;}
+/* Protocol bytes only: no demuxer, AVPacket or muxer in this capture path. */
+static int capture_flv(int argc,char **argv) {
+    if(argc!=7)return 2;
+    char *end=NULL;
+    long seconds=strtol(argv[4],&end,10);
+    if(!*argv[4]||*end||seconds<1||seconds>86400)return 2;
+    if(*argv[5]=='-')return 2;
+    uint64_t limit=strtoull(argv[5],&end,10);
+    if(!*argv[5]||*end||limit<13||limit>UINT64_C(17179869184))return 2;
+    if(strcmp(argv[6],"0")&&strcmp(argv[6],"1"))return 2;
+    FILE *file=fopen(argv[3],"wbx");
+    if(!file){fprintf(stderr,"capture output open: %s\n",strerror(errno));return 3;}
+    AVIOContext *io=NULL;AVDictionary *options=NULL;
+    avformat_network_init();
+    deadline=av_gettime_relative()+seconds*INT64_C(1000000);
+    AVIOInterruptCB cb={interrupted,NULL};
+    int rtmp=!strncmp(argv[2],"rtmp://",7);
+    if(rtmp)av_dict_set(&options,"listen","1",0);
+    if(rtmp)av_dict_set(&options,"tcp_nodelay",argv[6],0);
+    av_dict_set(&options,"rw_timeout","15000000",0);
+    int ret=avio_open2(&io,argv[2],AVIO_FLAG_READ,&cb,&options),code=1,close_result=0;
+    av_dict_free(&options);
+    uint64_t total=0;const char *reason="open_error";
+    int64_t read_done=0;
+    uint8_t buffer[65536];
+    if(ret>=0) {
+        puts("CONNECTED_ONCE");fflush(stdout);
+        for(;;) {
+            ret=avio_read_partial(io,buffer,sizeof(buffer));
+            if(ret<=0) {
+                if(interrupted(NULL))reason="deadline";
+                else if(ret==AVERROR_EOF){reason="eof";code=0;}
+                /* The pinned RTMP listener maps peer disconnects to EIO.
+                 * Never call this success: the harness must independently
+                 * verify controlled stop, complete tags and all packet counts. */
+                else if(rtmp&&ret==AVERROR(EIO)){reason="rtmp_peer_close_unconfirmed";code=12;}
+                else reason="read_error";
+                break;
+            }
+            if((uint64_t)ret>limit-total){reason="output_limit";code=1;break;}
+            if(fwrite(buffer,1,(size_t)ret,file)!=(size_t)ret){reason="write_error";code=1;break;}
+            total+=(uint64_t)ret;
+        }
+        read_done=av_gettime_relative();
+        close_result=avio_closep(&io);
+        /* avio_closep can return the saved read error again. Keep the first
+         * failure; a new close failure still invalidates a clean EOF. */
+        if(close_result<0&&(code==0||close_result!=ret)){reason="protocol_close_error";code=1;}
+    }
+    if(fflush(file)!=0){reason="flush_error";code=1;}
+    if(fclose(file)!=0){reason="file_close_error";code=1;}
+    if(!total&&code==0){reason="empty_capture";code=1;}
+    printf("{\"event\":\"capture_complete\",\"status\":\"%s\",\"reason\":\"%s\",\"bytes\":%"PRIu64",\"read_result\":%d,\"close_result\":%d,\"read_done_monotonic_us\":%"PRId64"}\n",
+           code==0?"complete":code==12?"unconfirmed":"failed",reason,total,ret,close_result,read_done);
+    return code;
+}
 static int read_exact(FILE *f,uint8_t *b,size_t n) {return fread(b,1,n,f)==n;}
 static void pace(int64_t due) {
     for(;;) {int64_t left=due-av_gettime_relative();if(left<=0)return;av_usleep((unsigned)FFMIN(10000,left));}
@@ -60,6 +118,7 @@ static int inspect(const char *path) {
     return ret<0 ? 11 : 0;
 }
 int main(int argc,char **argv) {
+    if(argc>1&&!strcmp(argv[1],"capture-flv"))return capture_flv(argc,argv);
     if(argc==3 && !strcmp(argv[1],"inspect"))return inspect(argv[2]);
     if(argc!=5&&argc!=6&&argc!=7)return 2;
     long timeout_seconds=25;
@@ -71,6 +130,7 @@ int main(int argc,char **argv) {
     int pause_source=!strcmp(argv[1],"serve-pause");
     int hold_source=!strcmp(argv[1],"serve-hold");
     int serve=!strcmp(argv[1],"serve")||pause_source||hold_source;
+    if(!serve&&strcmp(argv[1],"capture"))return 2;
     FILE *file=fopen(argv[3],serve ? "rb" : "wb");
     if(!file)return 3;
     AVIOContext *io=NULL;AVDictionary *options=NULL;

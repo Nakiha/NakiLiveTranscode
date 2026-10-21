@@ -57,14 +57,15 @@ elif name=='gh' and sys.argv[1:3]==['release','view']:
 
 
 class PublicationPolicy(unittest.TestCase):
-    def test_boolean_defaults_and_service_cannot_enable_publication(self):
+    def test_boolean_defaults_and_service_requires_explicit_manual_publication(self):
         for trigger in ('workflow_dispatch:', 'workflow_call:'):
             block = section(section(SDK, trigger), 'publish_sdk:')
             self.assertRegex(block, r'(?m)^\s+type: boolean$')
             self.assertRegex(block, r'(?m)^\s+default: false$')
         dependency = section(SERVICE, 'dependency:')
         self.assertRegex(dependency, r'(?m)^\s+uses: \./\.github/workflows/ffmpeg.yml$')
-        self.assertRegex(section(dependency, 'with:'), r'(?m)^\s+publish_sdk: false$')
+        self.assertIn("publish_sdk: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_sdk == true }}", section(dependency, 'with:'))
+        self.assertIn('default: false', section(SERVICE, 'workflow_dispatch:'))
         self.assertIn('PUBLISH_SDK: ${{ inputs.publish_sdk }}', SDK)
         self.assertIn("- if: steps.key.outputs.missing == 'true'", SDK)
         self.assertLess(SDK.index('run: python3 tests/checks/workflow_publication_test.py'),

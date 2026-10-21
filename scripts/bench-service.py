@@ -22,7 +22,8 @@ def main(argv=None):
     parser.add_argument('--input-fps', type=int, choices=range(1,241), help='rtmp: independently require this source cadence')
     parser.add_argument('--input-gop', type=int, help='rtmp: independently require this input I interval in frames')
     parser.add_argument('--save-output-dir', type=pathlib.Path, help='rtmp: also export verified compressed outputs to a new directory under out/ (outside timing)')
-    parser.add_argument('--audit-burst-bits', type=int, help='rtmp network_trace: each audit bucket burst in bits (default 55000, zero initial credit)')
+    parser.add_argument('--audit-burst-bits', type=int, help='rtmp network_trace: each audit bucket burst in bits (default 55000; constrained CRF absolute startup credit is capped at one maxrate window)')
+    parser.add_argument('--require-conformance', action='store_true', help='rtmp: fail exit status when the target audit fails; preserve measurement evidence')
     parser.add_argument('--build-dir', type=pathlib.Path)
     parser.add_argument('--bin-dir', type=pathlib.Path)
     parser.add_argument('--result-dir', type=pathlib.Path)
@@ -36,6 +37,8 @@ def main(argv=None):
         parser.error('--input-gop must be between 1 and 1000000')
     if opts.audit_burst_bits is not None and (opts.profile!='rtmp' or not 0<=opts.audit_burst_bits<=100000000):
         parser.error('--audit-burst-bits requires rtmp and 0..100000000')
+    if opts.require_conformance and opts.profile != 'rtmp':
+        parser.error('--require-conformance requires rtmp')
     if opts.save_output_dir:
         opts.save_output_dir = opts.save_output_dir.resolve()
         if opts.profile != 'rtmp' or not opts.save_output_dir.is_relative_to((ROOT / 'out').resolve()) or opts.save_output_dir.exists():
@@ -69,6 +72,8 @@ def main(argv=None):
         media = (media if media.is_absolute() else config.parent / media).resolve()
         if not media.is_file():
             parser.error(opts.profile + ' benchmark requires an existing local input file')
+        if opts.require_conformance and not value.get('network_trace'):
+            parser.error('--require-conformance needs network_trace')
         config_hash = runner.digest(config)
         command += ['--config', str(config), '--config-sha256', config_hash,
                     '--seconds', str(opts.seconds), '--mode', opts.mode]
@@ -76,6 +81,8 @@ def main(argv=None):
                         mode=opts.mode, maximum_seconds=opts.seconds,
                         resources='Sampled /proc totals for controller and descendants; not cgroup/wire/display measurements.')
         if opts.profile == 'rtmp':
+            if opts.require_conformance:
+                command += ['--require-conformance']
             for key in ('input_fps', 'input_gop', 'audit_burst_bits'):
                 if getattr(opts,key) is not None:
                     command += ['--' + key.replace('_','-'), str(getattr(opts,key))]
@@ -88,7 +95,12 @@ def main(argv=None):
             if value.get('network_trace'):
                 metadata.update(network_trace=True,encoder_max_future_frames=value.get('encoder_max_future_frames',0),
                     boundary='Plain RTMP first media-message chunk TCP recv completion to actual output mux/flush; old ingress/handler metrics retained separately. Not wire/display time.',
-                    target_audit=dict(enforcement=False,maxrate=value.get('maxrate'),burst_bits=opts.audit_burst_bits if opts.audit_burst_bits is not None else 55000,initial_credit_bits=0,deadline_ms=300))
+                    target_audit=dict(auditor_controls_media=False,require_conformance=opts.require_conformance,
+                        controller_enforcement=value.get('rate_control')=='constrained_crf',
+                        maxrate=value.get('maxrate'),burst_bits=opts.audit_burst_bits if opts.audit_burst_bits is not None else 55000,
+                        initial_absolute_credit_bits=min(opts.audit_burst_bits if opts.audit_burst_bits is not None else 55000,value.get('maxrate',0)) if value.get('rate_control')=='constrained_crf' else 0,
+                        initial_source_credit_rule='completed arrived source bits capped at burst' if value.get('rate_control')=='constrained_crf' else 'zero',
+                        source_rate_limit=value.get('source_rate_limit',False),deadline_ms=300))
     if opts.list:
         print(json.dumps(dict(benchmark=metadata, suite=suite, command=command, sdk_gate=True), indent=2))
         return 0

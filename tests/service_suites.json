@@ -2,6 +2,7 @@
   "schema_version": 1,
   "native_quick": ["frame-policy", "frame-policy-config", "watermark-config", "branch-queue", "identity-intent", "control-spec", "sei", "component-update", "operation-store", "operation-cache", "audio-signature", "video-rate", "video-filter", "live-rate", "vvenc-input8", "native8", "event-logger", "logger-submit"],
   "suites": [
+    {"id":"infrastructure", "script":"tests/checks/infrastructure_test.py", "profiles":["quick","full"], "binaries":["naki-live-transport-fixture"]},
     {"id":"organization", "script":"tests/checks/organization_test.py", "profiles":["quick","full"], "tools":["cc"]},
     {"id":"quality-tools", "script":"tests/checks/quality_tools_test.py", "profiles":["quick","full"], "tools":["ffmpeg"], "binaries":["naki-quality-video-export"]},
     {"id":"codec-phase-tools", "script":"tests/checks/codec_phase_tools_test.py", "profiles":["quick","full"]},

@@ -6,7 +6,7 @@
 
 ## 两条构建流程
 
-- **FFmpeg dependency**：独立、可手动执行的可复用 workflow。服务 CI 先调用它查找 SDK，只有缺少匹配产物时才编译。键包含固定的 FFmpeg/VVenC gitlink、Ubuntu/架构标识、`Dockerfile.ffmpeg`、两者构建脚本和符号导出脚本的哈希。
+- **FFmpeg dependency**：独立、可手动执行的可复用 workflow。服务 CI 先调用它查找 SDK，缺少匹配产物时默认明确失败；只有显式允许发布的手动运行才编译并发布。键包含固定的 FFmpeg/VVenC gitlink、Ubuntu/架构标识、`Dockerfile.ffmpeg`、两者构建脚本和符号导出脚本的哈希。
 - **Service CI**：main push、PR、手动触发。下载确切 SDK，校验 SHA256，构建 C 服务、运行镜像、导出独立符号，并运行完整链路、观测、进程接管、轻量崩溃、离线解析和 Compose 镜像测试。应用源码变化不会重新编译 FFmpeg。
 
 功能回归通过 `scripts/ci-test.sh` 委托统一的 `scripts/test-service.sh full`；测试镜像提供 Git，原 release-key fixture 无需跳过。随后独立运行 `scripts/test-sanitizers.sh`，为应用、yyjson 和测试 helper 开启 ASan/UBSan，执行快速原生测试与单路服务、多输出、水印竞态集成；FFmpeg/VVenC 和系统库不重新插桩。故意崩溃、preload 故障与符号验收留在普通完整套件，不用全局关闭 sanitizer 来迁就它们。两项门槛失败均阻止后续打包。完整覆盖、环境要求和证据目录见 [测试入口与基线](testing.md)。
@@ -71,3 +71,7 @@ docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt --target symbols \
 直播测试使用本地 RTMP/SRT 监听器与真实协议连接，不依赖外部媒体服务器；验证器持续发现新流并独立解码，而不是只统计探流时已存在的轨道。两条晚 AAC 音轨、停顿恢复、MP3/EOF 和交织硬上限均在 Service CI 中运行；证据保存到 `out/live-mux-*`。
 
 参考：[GitHub workflow 产物下载](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts?tool=cli)、[Docker 镜像导出](https://docs.docker.com/build/ci/github-actions/export-docker/)。
+
+依赖缺失时，可手动运行 FFmpeg dependency 并勾选 `publish_sdk`，或手动运行 Service CI 并勾选同名参数以完成依赖发布和应用检查。两者默认 false；push 和 PR 不启用发布。SDK 发布成功后，应用变更复用同一依赖键，无需重新编译原生库。
+
+容器测试通过 `scripts/collect-test-evidence.py --destination out/results -- COMMAND` 执行。收集本次实际新增的 out 产物及 summary 中引用的产物，不再维护目录前缀白名单；包括构建失败时留下的 sanitizer 日志。每次独立目录保存 command.log 和 collection.json（原测试退出码、文件映射、大小、SHA256、缺失和收集错误）。拒绝越界或符号链接的直接引用；目录内部测试用符号链接和特殊文件只记录类型/目标元数据，不复制、不解引用。限制 100000 文件/16GiB。原测试失败退出码始终保留；测试通过而归档不完整也会失败。GitHub always 步骤上传这些证据，不能用归档成功代表测试通过。

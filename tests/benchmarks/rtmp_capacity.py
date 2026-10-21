@@ -18,12 +18,13 @@ import time
 from benchmarks.service_capacity import digest, process_sample
 from support.service_harness import ServiceHarness, PROBE, CACHE, new_run
 from support.vvc_structure import decode_frames
+from support.flv_capture import receipt, verify_capture
 from integration.frame_policy_integration import check_vvc_intra_groups, refresh_packets
 
 
 def probe(path, directory, name):
-    command = [str(PROBE), '-v', 'error', '-threads', '2', '-count_frames',
-               '-show_entries', 'stream=codec_type,codec_name,pix_fmt,width,height,nb_read_frames,r_frame_rate,duration:format=duration,size',
+    command = [str(PROBE), '-v', 'error', '-threads', '2', '-count_frames', '-count_packets',
+               '-show_entries', 'stream=codec_type,codec_name,pix_fmt,width,height,nb_read_frames,nb_read_packets,r_frame_rate,duration:format=duration,size',
                '-of', 'json', str(path)]
     result = subprocess.run(command, capture_output=True, text=True, timeout=300)
     (directory / (name + '.stderr')).write_text(result.stderr)
@@ -62,14 +63,12 @@ def measure(original, directory, seconds, mode, expected_frames):
     commands = {
         'sender': [str(client.BIN / 'naki-live-transport-fixture'), 'serve-hold', source_url,
                    original['input'], 'flv' if mode == 'paced' else 'flv-fast', str(min(86400, int(seconds) + 30))],
-        'receiver': [str(CACHE / 'install/bin/ffmpeg'), '-nostdin', '-v', 'warning',
-                     '-copyts', '-listen', '1', '-rw_timeout', '15000000', '-i', capture_url,
-                     '-map', '0', '-c', 'copy', '-f', 'flv', str(captured)],
+        'receiver': [str(client.BIN / 'naki-live-transport-fixture'), 'capture-flv',
+                     capture_url, str(captured), str(min(86400, int(seconds) + 30)),
+                     str(512 * 1024 * 1024), '1' if original.get('rtmp_tcp_nodelay') else '0'],
     }
     if original.get('rtmp_tcp_nodelay'):
         commands['sender'].append('1')
-        position=commands['receiver'].index('-i')
-        commands['receiver'][position:position]=['-tcp_nodelay','1']
     processes, returncodes = {}, {}
     metrics = ('startup', 'input_queue', 'decode', 'filter', 'encode', 'encode_submit', 'encode_wait',
                'mux', 'ingress_to_mux', 'frame_types', 'i_frame_stages', 'output_key_stages', 'logging', 'auto', 'video_rate')
@@ -133,11 +132,14 @@ def measure(original, directory, seconds, mode, expected_frames):
                         if steady_first is None:
                             steady_first = candidate
                         steady_last = candidate
+                if processes['receiver'].poll() is not None:
+                    raise RuntimeError('RTMP receiver exited before controlled stop')
                 if state.get('packets_out', 0) >= expected_frames:
                     # Stop while source remains connected, before the finite-file tail.
                     # Decoder/encoder lookahead otherwise needs EOF to release that tail.
                     if state['state'] not in ('running', 'starting'):
                         raise RuntimeError('Service ended before explicit frame-target stop')
+                    stop_requested_us = time.monotonic_ns() // 1000
                     client.http('/v1/job/stop', data={'job_id': accepted['job_id']}, code=202)
                     state = client.finished('stopped', timeout=25)
                     elapsed = time.monotonic() - began
@@ -166,15 +168,20 @@ def measure(original, directory, seconds, mode, expected_frames):
             processes['sender'].terminate()
             returncodes['sender'] = processes['sender'].wait(timeout=5)
             returncodes['receiver'] = processes['receiver'].wait(timeout=20)
-            if returncodes['receiver']:
-                raise RuntimeError('Receiver failed; see its log')
+            transport = receipt((directory / 'receiver.log').read_text(), returncodes['receiver'])
+            if transport['read_done_monotonic_us'] < stop_requested_us:
+                raise RuntimeError('Receiver disconnected before controlled stop request')
+            capture_check = verify_capture(captured, transport, state['packets_out'],
+                                           state.get('audio_packets_out', 0), state['state'] == 'stopped')
+            capture_check['stop_requested_monotonic_us'] = stop_requested_us
+            (directory / 'capture-verification.json').write_text(json.dumps(capture_check, indent=2) + '\n')
             # Includes probe/startup and explicit stop/finalization, excludes decode verification.
             progress_fps = ((steady_last['packets_out'] - steady_first['packets_out']) /
                             (steady_last['elapsed_s'] - steady_first['elapsed_s'])) if steady_first and steady_last['elapsed_s'] > steady_first['elapsed_s'] else None
             for total in totals.values():
                 total['sampled_cpu_s'] = total.pop('cpu_ticks') / os.sysconf('SC_CLK_TCK')
                 total['sampled_average_cpu_cores'] = total['sampled_cpu_s'] / elapsed
-            return dict(elapsed_s=elapsed, stop_reason='video_frame_target_then_api_stop', frame_target=expected_frames, packets_out=state['packets_out'],
+            return dict(capture_verification=capture_check, elapsed_s=elapsed, stop_reason='video_frame_target_then_api_stop', frame_target=expected_frames, packets_out=state['packets_out'],
                         decoded_frames=state['frames_decoded'], fps_including_startup_and_stop=state['packets_out'] / elapsed,
                         progress_fps_excluding_first_and_last_5s=progress_fps, resources=totals,
                         progress_window=dict(first=steady_first,last=steady_last),
@@ -211,10 +218,13 @@ def main():
     parser.add_argument('--input-gop', type=int)
     parser.add_argument('--save-output-dir', type=_pathlib.Path)
     parser.add_argument('--audit-burst-bits', type=int, default=55000)
+    parser.add_argument('--require-conformance', action='store_true')
     args = parser.parse_args()
     if not 1 <= args.seconds <= 259200 or digest(args.config) != args.config_sha256:
         parser.error('Invalid duration or changed configuration')
     config = json.loads(args.config.read_text())
+    if args.require_conformance and not config.get('network_trace'):
+        parser.error('--require-conformance needs network_trace')
     media = _pathlib.Path(config['input']).expanduser()
     media = (media if media.is_absolute() else args.config.parent / media).resolve()
     config['input'] = str(media)
@@ -227,7 +237,7 @@ def main():
             parser.error('--save-output-dir must be a new directory under out/')
         saved.mkdir(parents=True, exist_ok=False)
     run = new_run('rtmp-bench-')
-    evidence = dict(status='running', mode=args.mode, input=str(media), input_sha256=digest(media),
+    evidence = dict(status='running', measurement_status='running', conformance_status='not_requested', require_conformance=args.require_conformance, mode=args.mode, input=str(media), input_sha256=digest(media),
                     config_sha256=args.config_sha256, results=[],
                     topology='Loopback RTMP source listener -> service pull/transcode/push -> capture listener',
                     boundary='Ingress/handler to actual service mux/flush, not source-to-screen; CPU/RSS sampled per process tree, RSS sums shared pages. Sender/receiver reported separately. Short-lived processes may be missed.',
@@ -291,6 +301,10 @@ def main():
             evidence['results'].append(row)
             output = probe(_pathlib.Path(row['captured']), directory, 'capture-probe')
             row['media'] = output
+            for kind, expected in (('video', row['packets_out']), ('audio', row['audio_packets_out'])):
+                observed = sum(int(s.get('nb_read_packets', 0)) for s in output['streams'] if s['codec_type'] == kind)
+                if observed != expected:
+                    raise RuntimeError(f'Independent {kind} packet count mismatch: {observed} != {expected}')
             out_video = next(s for s in output['streams'] if s['codec_type'] == 'video')
             if int(out_video['nb_read_frames']) != row['packets_out'] or not target <= row['packets_out'] <= row['decoded_frames'] <= count:
                 raise RuntimeError('Source/service/captured decoded frame count mismatch')
@@ -352,7 +366,7 @@ def main():
                 audit=json.loads((directory/'budget-audit.json').read_text())
                 row['target_audit']={k:v for k,v in audit.items() if k not in ('output_wall_rolling_1s','output_dts_rolling_1s','dual_buckets')}
                 row['target_audit']['budget_summary']={k:v for k,v in audit['dual_buckets'].items() if k!='rows'}
-                evidence['target_conformance']='passed' if all(r.get('target_audit',{}).get('conformance_status')=='passed' for r in evidence['results']) else 'failed'
+                evidence['conformance_status']=evidence['target_conformance']='passed' if all(r.get('target_audit',{}).get('conformance_status')=='passed' for r in evidence['results']) else 'failed'
             if config.get('codec_trace'):
                 phase_command=[_sys.executable,str(_pathlib.Path(__file__).resolve().parents[2]/'scripts/audit-codec-phases.py'),
                                str(directory),'--output',str(directory/'codec-phase-audit.json')]
@@ -372,11 +386,12 @@ def main():
             print(f'{args.mode} repeat={repeat + 1} frames={row["packets_out"]} elapsed={row["elapsed_s"]:.3f}s fps={row["fps_including_startup_and_stop"]:.2f}', flush=True)
         if digest(media) != evidence['input_sha256'] or digest(args.config) != args.config_sha256:
             raise RuntimeError('Input/config changed during measurement')
-        evidence['status'] = 'passed'
+        evidence['measurement_status'] = 'complete'
+        evidence['status'] = 'failed' if args.require_conformance and evidence['conformance_status'] != 'passed' else 'passed'
         (run / 'COMPLETE.json').write_text(json.dumps(evidence, indent=2) + '\n')
-        print('PASS RTMP measurement:', run, flush=True)
+        print(f"RTMP measurement=complete conformance={evidence['conformance_status']} status={evidence['status']}: {run}", flush=True)
     except BaseException as error:
-        evidence.update(status='failed', error=str(error))
+        evidence.update(status='failed', measurement_status='failed', error=str(error))
         raise
     finally:
         (run / 'results.json').write_text(json.dumps(evidence, indent=2) + '\n')
@@ -385,6 +400,8 @@ def main():
                 status=evidence['status'], boundary='Verified compressed RTMP capture copied after timing; no re-encoding',
                 outputs=[dict(path=r['saved_output'], sha256=r['output_sha256']) for r in evidence['results'] if 'saved_output' in r]), indent=2) + '\n')
 
+    return 0 if evidence['status'] == 'passed' else 1
+
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

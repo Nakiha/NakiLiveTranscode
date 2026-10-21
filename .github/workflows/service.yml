@@ -4,6 +4,12 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_sdk:
+        description: Explicitly allow publishing an exact missing dependency SDK
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -15,7 +21,7 @@ jobs:
       contents: write
     uses: ./.github/workflows/ffmpeg.yml
     with:
-      publish_sdk: false
+      publish_sdk: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_sdk == true }}
   service:
     needs: dependency
     runs-on: ubuntu-24.04
@@ -63,11 +69,11 @@ jobs:
         run: |
           mkdir -p out/ci-results
           docker run --rm --init -e NAKI_SOURCE_REVISION="$GITHUB_SHA" -v "$PWD/out/ci-results:/src/out/results" naki-live-transcode:test \
-            bash -c 'trap "cp -a out/checks-* out/event-logger-* out/logger-submit-* out/pipeline-lifecycle-* out/service-test-* out/symbols-test-* out/decoder-test-* out/probe-test-* out/sdk-build-* out/frame-policy-* out/vvenc-test-* out/vvenc-latency-* out/vvenc-pts-* out/live-mux-* out/media-hooks-* out/watermark-* out/multi-output-* out/mixed-queue-* out/audio-signature-* out/video-rate-* out/sei-* out/update-api-* out/control-lifecycle-* out/process-* out/crash-* out/observability-* out/health-progress-* out/output-finalize-* out/input-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/ci-test.sh'
+            python3 scripts/collect-test-evidence.py --destination out/results -- bash scripts/ci-test.sh
       - name: Application and yyjson ASan UBSan checks
         run: |
           docker run --rm --init -e NAKI_SOURCE_REVISION="$GITHUB_SHA" -v "$PWD/out/ci-results:/src/out/results" naki-live-transcode:test \
-            bash -c 'trap "cp -a out/checks-* out/sanitizers-* out/event-logger-* out/logger-submit-* out/pipeline-lifecycle-* out/service-test-* out/watermark-* out/multi-output-* out/results/ 2>/dev/null || true; chmod -R a+rX out/results" EXIT; bash scripts/test-sanitizers.sh'
+            python3 scripts/collect-test-evidence.py --destination out/results -- bash scripts/test-sanitizers.sh
       - name: Runtime image recovery and source-line symbolization
         env:
           NAKI_SYMBOLS_DIR: ${{ github.workspace }}/out/symbols

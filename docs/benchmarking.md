@@ -27,7 +27,7 @@ bash scripts/bench-service.sh rtmp --config /path/to/workload.json \
   --save-output-dir out/saved-output-unique
 ~~~
 
-`rtmp` 入口读取配置中的本地 H.264/HEVC 输入，在计时前 copy-remux 成独立 FLV，不修改原文件；单个输出替换成临时 loopback RTMP 地址，封装固定为 Enhanced FLV。源端测试工具监听 RTMP，服务主动拉取并向另一接收端推送；这是两个直接协议连接，不包含中转流媒体服务器、跨主机网络或播放器。`paced` 由源端按 FLV 时间戳供包，`throughput` 不主动限速。RTMP 断开不保证表现为正常 demux EOF，因此有限源发完后保持连接；驱动在距源尾至少一个名义秒（最少32帧）的位置设置视频目标，通过 job_id 请求停止、等待封装收尾。这样为 decoder/encoder 重排留出余量，不要求直播源产生文件 EOF。连接提前断开、目标未达到或接收解码不符都判为失败，不将 Broken pipe 视作成功。记录实际输出帧数和停止原因，nominal_video_seconds 只按名义帧率换算，不声称是 VFR 的真实 PTS 时长。每轮独立启动服务、源端和接收端，三者资源分开记录。接收媒体由固定 SDK 的 VVC decoder 独立解码，核对视频帧数、尺寸、编码器类型和音频存在性；核验不在计时窗口中。
+`rtmp` 入口读取配置中的本地 H.264/HEVC 输入，在计时前 copy-remux 成独立 FLV，不修改原文件；单个输出替换成临时 loopback RTMP 地址，封装固定为 Enhanced FLV。源端测试工具监听 RTMP，服务主动拉取并向另一接收端推送；这是两个直接协议连接，不包含中转流媒体服务器、跨主机网络或播放器。`paced` 由源端按 FLV 时间戳供包，`throughput` 不主动限速。RTMP 断开不保证表现为正常 demux EOF，因此有限源发完后保持连接；驱动在距源尾至少一个名义秒（最少32帧）的位置设置视频目标，通过 job_id 请求停止、等待封装收尾。这样为 decoder/encoder 重排留出余量，不要求直播源产生文件 EOF。连接提前断开、目标未达到或接收解码不符都判为失败，不将 Broken pipe 视作成功。记录实际输出帧数和停止原因，nominal_video_seconds 只按名义帧率换算，不声称是 VFR 的真实 PTS 时长。每轮独立启动服务、源端和接收端，三者资源分开记录。接收媒体由固定 SDK 的 VVC decoder 独立解码，核对视频帧数、尺寸、编码器类型和音视频包数；核验不在计时窗口中。
 
 结果在 `out/rtmp-bench-*/`，外层仍经过 SDK consumer、源码与二进制身份检查。保存命令、输入/配置哈希、实际请求、每 250ms 的资源及完整状态、最终状态、各进程退出码和接收媒体。服务在本轮结束后 SIGTERM，源端在 API 停止后 SIGTERM，接收端自然结束；这些退出码保留。接收解码数须等于服务写出数，目标按已选画面计算；全部完整解码画面须计入 selected/rate-drop/overload-drop，停止时的未输出重排尾部不计作已交付画面。`frame_log=false` 仍由服务统计每个完成画面，明细只保留无条件启动检查点与现有状态窗口。
 
@@ -85,7 +85,7 @@ baseline-dir 中应有匹配的 logger.c/logger.h；该工具使用内存 stdout
 
 ## 保存出流与离线画质检查
 
-`rtmp` 每轮的 `captured.flv` 是接收端以 `-copyts -c copy` 保存的 Enhanced FLV，包含实际 VVC 码流与收到的音频，不重新编码。`--save-output-dir` 可在计时、结构核验结束后额外复制为 `output-1.flv` 等；目标必须是 `out/` 下的新目录，`manifest.json` 记录原测量目录、成功/失败状态和输出 SHA-256。默认 capture、显式保存的副本、输入与日志均不入库。
+`rtmp` 每轮的 `captured.flv` 由 `naki-live-transport-fixture capture-flv` 直接读取 AVIO 协议层的 FLV 字节并保存，不经过 AVFormat 解封装、AVPacket 或重新封装。RTMP 握手、分块和消息处理仍由固定 SDK 完成，FLV 文件头和 tag 外壳由协议层还原，因此这些是 FLV 字节而非 TCP 原始抓包。接收端独占创建输出、限制总字节和时限，检查读、写、flush 和关闭错误。当前 fork 将 RTMP 对端断开报告为 EIO；工具对此返回非零 12、标记 unconfirmed，驱动只在受控 API 停止、完整 FLV tag/PreviousTagSize 校验、字节和音视频包数与服务一致后标记 verified_controlled_close。提前退出、超时、截断、写盘错误均失败。最终仍由固定 SDK 独立解码核验。`--save-output-dir` 可在计时、结构核验结束后额外复制为 `output-1.flv` 等；目标必须是 `out/` 下的新目录，`manifest.json` 记录原测量目录、成功/失败状态和输出 SHA-256。默认 capture、显式保存的副本、输入与日志均不入库。
 
 对已经通过的 RTMP 测量，可单独做一轮画质检查，不需要重跑性能矩阵：
 
@@ -121,9 +121,9 @@ python3 scripts/check-video-quality.py \
 
 `network_to_mux.slow_count`沿用通用`slow_frame_ms`阈值；300ms合同使用专门的`network_read.exceeded`及窗口`network_deadline_exceeded`，network_read中的画面分组也使用300ms，不能用通用slow_count代替合同计数。
 
-RTMP入口发现network_trace后，在测量和结构验证完成之后自动执行 `scripts/audit-live-budget.py`。审计1100kbps时配置 `maxrate=1100000`，可用 `--audit-burst-bits 55000` 指定两只独立审计桶各自最多55kbit突发，初始额度为0；这是约50ms×1100kbps的声明额度，不是300ms的发送缓冲。源桶按过去1秒**已经组装完成**的RTMP视频消息统计，未读完的包不提前授信；绝对桶按固定maxrate补充额度。借款记为负余额继续结算，不在每次超支后清零。同时独立检查出流DTS和实际write墙钟的任意半开滚动1秒码量是否超过maxrate。视频AVPacket payload及首包时的codec configuration计入，音频和FLV/RTMP封装不计入码量，仍计入实际等待时延。
+RTMP入口发现network_trace后，在测量和结构验证完成之后自动执行 `scripts/audit-live-budget.py`。审计1100kbps时配置 `maxrate=1100000`，可用 `--audit-burst-bits 55000` 指定两只独立审计桶各自最多55kbit突发；原生 CQF 初始额度为0，受限 CRF 的启动额度遵循上文所述规则；这是约50ms×1100kbps的声明额度，不是300ms的发送缓冲。源桶按过去1秒**已经组装完成**的RTMP视频消息统计，未读完的包不提前授信；绝对桶按固定maxrate补充额度。借款记为负余额继续结算，不在每次超支后清零。同时独立检查出流DTS和实际write墙钟的任意半开滚动1秒码量是否超过maxrate。视频AVPacket payload及首包时的codec configuration计入，音频和FLV/RTMP封装不计入码量，仍计入实际等待时延。
 
-审计工具本身不控制编码。原生CQF的maxrate仍是近似约束；新`constrained_crf`通过编码前QP预测和实际AU反馈控制，两者均不以等待输出、额外丢帧或抹掉违规满足预算。`COMPLETE.json/status=passed`只表示测量及完整性检查完成，另外的 `target_conformance` 和每轮 `budget-audit.json/conformance_status` 才表示是否同时满足时延/前视/固定码率/源桶与突发合同。审计CLI可加 `--require-conformance`，违规则返回非零。源码及SDK变化后必须使用新目录，旧结果不能据新代码重新标记通过。
+审计工具本身不控制编码。原生CQF的maxrate仍是近似约束；新`constrained_crf`通过编码前QP预测和实际AU反馈控制，两者均不以等待输出、额外丢帧或抹掉违规满足预算。`measurement_status=complete` 表示测量及完整性检查完成，`conformance_status`（兼容字段 `target_conformance`）和每轮 `budget-audit.json/conformance_status` 表示是否同时满足时延/前视/固定码率/源桶与突发合同。外层 summary 同步这两个状态。benchmark 和独立审计 CLI 均可加 `--require-conformance`；benchmark 此时在目标违规后保留完整测量、媒体和审计证据，但整体 status=failed 并返回非零。探索模式默认仍允许完成不达标的测量，不能只依据整体 passed 判断达标。源码及SDK变化后必须使用新目录，旧结果不能据新代码重新标记通过。
 
 `rtmp_tcp_nodelay=true`显式开启服务plain RTMP输入/输出的TCP_NODELAY；RTMP benchmark同时为自有源fixture与接收端开启，实际命令保留。默认false，既有其他协议不受影响。这是可对照的传输选项，不保证降低所有网络的时延。`BUSY_WAIT_TIME=0`可用于实验VVenC已有的线程池等待策略；入口记录该环境值，服务默认不覆盖它，不能将环境不同的轮次当作同一配置。
 
@@ -145,3 +145,5 @@ BUSY_WAIT_TIME=0 bash scripts/bench-service.sh rtmp \
 解码器私有worker出队与另一worker的画面重建可能并行；审计在对外async队列处检查二者均已完成，不强制私有出队晚于重建。`worker_output_lead`只表示两分支重叠，不能加进时延分解。原始时间戳保持不变，解码CPU、参考等待及后续frontend顺序仍独立校验。VVenC trace v3的单线程CPU采样完全放在对应墙钟区间内，审计拒绝超过区间加2µs量化余量的数值；多线程CTU CPU另作累计，不施加单线程上界。
 
 字节参考候选需在同一SDK下比较开关关闭/开启及10bit控制组，保存实际码率匹配、独立码流结构、PSNR/VMAF与逐帧实际写出时延。诊断记录`byte_me_blocks`及`byte_reference_pack_us`以确认热点命中与打包代价；字节缓存与16bit工作缓冲同时存在时不能声称参考内存减半。性能、质量与CPU采样分开运行，采样结果仅用于热点定位。
+
+当前受限 CRF 复测应显式使用 `examples/rtmp-vvc-constrained-crf-540p30.json`、`BUSY_WAIT_TIME=0`、`--audit-burst-bits 1100000 --require-conformance`。这些显式实验参数不改变服务默认设置；速度档、队列、抽帧和线程等待策略一起影响性能，不能把整体收益全归于 CRF。
