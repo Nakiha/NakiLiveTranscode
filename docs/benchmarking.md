@@ -142,10 +142,12 @@ BUSY_WAIT_TIME=0 bash scripts/bench-service.sh rtmp \
 
 `codec_trace=true`另启用原生软件HEVC及live VVenC内部逐帧时间点和线程CPU聚合，要求单个直接输出与future guard，强制完整trace。RTMP入口自动运行`audit-codec-phases.py`并保存`codec-phase-audit.json`。正式性能先关诊断，另做开关A/B；CPU求和不能与并行墙钟相减。事件、限制及HEVC ABR 8Mbps新输入的独立窗口见[内部打点记录](validation-codec-phases-hevc-20261018.md)。
 
-解码器私有worker出队与另一worker的画面重建可能并行；审计在对外async队列处检查二者均已完成，不强制私有出队晚于重建。`worker_output_lead`只表示两分支重叠，不能加进时延分解。原始时间戳保持不变，解码CPU、参考等待及后续frontend顺序仍独立校验。VVenC trace v3的单线程CPU采样完全放在对应墙钟区间内，审计拒绝超过区间加2µs量化余量的数值；多线程CTU CPU另作累计，不施加单线程上界。
+解码器私有worker出队与另一worker的画面重建可能并行；审计在对外async队列处检查二者均已完成，不强制私有出队晚于重建。`worker_output_lead`只表示两分支重叠，不能加进时延分解。原始时间戳保持不变，解码CPU、参考等待及后续frontend顺序仍独立校验。VVenC trace v3的单线程CPU采样完全放在对应墙钟区间内，当前审计保留5µs余量；多线程CTU CPU另作累计，不施加单线程上界。
 
 字节参考候选需在同一SDK下比较开关关闭/开启及10bit控制组，保存实际码率匹配、独立码流结构、PSNR/VMAF与逐帧实际写出时延。诊断记录`byte_me_blocks`及`byte_reference_pack_us`以确认热点命中与打包代价；字节缓存与16bit工作缓冲同时存在时不能声称参考内存减半。性能、质量与CPU采样分开运行，采样结果仅用于热点定位。
 
 当前受限 CRF 复测应显式使用 `examples/rtmp-vvc-constrained-crf-540p30.json`、`BUSY_WAIT_TIME=0`、`--audit-burst-bits 1100000 --require-conformance`。这些显式实验参数不改变服务默认设置；速度档、队列、抽帧和线程等待策略一起影响性能，不能把整体收益全归于 CRF。
 
-内部阶段 CPU 使用独立的线程 CPU 时钟，不能与 monotonic 墙钟做无误差的区间减法。阶段审计显式声明 `single_thread_cpu_clock_allowance_us=5`，并在各组保留 `single_thread_cpu_clock_excess` 的原始正超差统计（单位 ms）；超过 5µs 仍失败，不改写 CPU 样本。此容差只用于单线程 CPU/墙钟一致性检查，不应用于媒体时延、滚动码率或队列边界。
+内部阶段 CPU 使用独立的线程 CPU 时钟，不能与可校时的 monotonic 墙钟作精确区间比较。HEVC decoder trace v2 追加外围 `CLOCK_MONOTONIC_RAW` 时长 `decode_cpu_wall_us`，CPU 只对该区间施加原有5µs余量；同时保留原始 CPU、`cpu_monotonic_excess` 和 `single_thread_cpu_clock_excess`（单位 ms）。所有阶段时延仍使用原来的 monotonic 时间链，RAW 不混入阶段求和。历史 decoder v1 与 encoder v2/v3 保持原来的严格规则，旧失败不得重判通过。此余量不应用于媒体时延、滚动码率或队列边界。
+
+HEVC 服务现开启单层软件 `IDR_N_LP` 提前选择输出；像素重建及整包校验成功后才发布。CRA、带前导图像的 IDR、多层和缺失 PTS 保留原路径。逐帧等价边界、`pkt_dts` 的输出触发语义、时钟复现及新测量见[IDR 提前输出验证](validation-idr-early-20261022.md)。
