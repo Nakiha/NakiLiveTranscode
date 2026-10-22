@@ -3,7 +3,7 @@
 import argparse
 import hashlib
 import json
-import os
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -11,7 +11,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tests'))
-from support.service_harness import ServiceHarness, port
+from support.service_harness import ServiceHarness
 
 
 def require(condition, message):
@@ -65,6 +65,12 @@ def main():
         subprocess.run(command, check=True, timeout=45)
     identity = hashlib.sha256(source.read_bytes()).hexdigest()
     harness = ControlsHarness(directory)
+    binaries = {name: hashlib.sha256((harness.BIN / name).read_bytes()).hexdigest()
+                for name in ['naki-live', 'naki-live-worker', 'naki-decoder-backend-probe']}
+    plan = {'input': str(source), 'input_sha256': identity, 'expected_frames': args.expected_frames,
+            'cases': ['async0-early0', 'async0-early1', 'async1-early0', 'async1-early1'],
+            'binary_sha256': binaries, 'performance_acceptance': False}
+    (directory / 'plan.json').write_text(json.dumps(plan, indent=2) + '\n')
     with (directory / 'backend-probe.log').open('x') as probe_log:
         subprocess.run([str(harness.BIN / 'naki-decoder-backend-probe'), str(source), str(args.expected_frames)],
                        stdout=probe_log, stderr=subprocess.STDOUT, check=True, timeout=60)
@@ -92,12 +98,13 @@ def main():
                 harness.start(config)
                 state = harness.finished(timeout=60)
                 (directory / (label + '-state.json')).write_text(json.dumps(state, indent=2) + '\n')
+                require(state['state'] == 'completed', 'service did not complete successfully')
                 require(state['decoder_async'] == int(asynchronous) and state['decoder_auto_threads'] == 0, 'wrong decoder backend status')
                 require(state['decoder_early_output_requested'] == int(early), 'wrong early-output request status')
                 require(state['frames_decoded'] == state['frames_filtered'] == state['packets_out'] == args.expected_frames, 'wrong complete service frame count')
                 frames = traces(state, args.expected_frames)
                 source_ids = [x['input_sequence'] for x in frames]
-                require(len(set(source_ids)) == args.expected_frames, 'duplicate/missing source identities')
+                require(set(source_ids) == set(range(args.expected_frames)), 'duplicate/missing/unexpected source identities')
                 ordered = [(x['pts_us'], x['input_sequence'], x['decoded_picture_type'], x['decoded_key']) for x in frames]
                 require([x[0] for x in ordered] == sorted(x[0] for x in ordered), 'presentation order changed')
                 if reference is None: reference = ordered
@@ -106,7 +113,7 @@ def main():
                     require(f['decoder_async'] == int(asynchronous), 'wrong frame backend')
                     require(f['decoder_auto_threads'] == 0, 'auto controller unexpectedly active')
                     for field in ['decoder_submit_retry_ms', 'decoder_submit_to_receive_ms', 'decoder_receive_to_prepare_ms']:
-                        require(f[field] >= 0, 'negative ' + field)
+                        require(math.isfinite(f[field]) and f[field] >= 0, 'invalid ' + field)
                 # Decode the actual output rather than trusting packet counts.
                 command = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'json', config['output']]
                 decoded = json.loads(subprocess.check_output(command, text=True))['streams']
@@ -115,6 +122,8 @@ def main():
                 (directory / 'summary.json').write_text(json.dumps(results, indent=2) + '\n')
                 print(label, 'PASS', flush=True)
         require(hashlib.sha256(source.read_bytes()).hexdigest() == identity, 'input changed during service test')
+        require(all(hashlib.sha256((harness.BIN / name).read_bytes()).hexdigest() == digest
+                    for name, digest in binaries.items()), 'service binary changed during test')
         (directory / 'COMPLETE.json').write_text(json.dumps({'status': 'functional-four-combinations-passed', 'input_sha256': identity,
             'expected_frames': args.expected_frames, 'performance_acceptance': False}) + '\n')
     finally:
