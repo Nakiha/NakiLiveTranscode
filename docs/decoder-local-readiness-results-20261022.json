@@ -1,0 +1,379 @@
+{
+  "status": "local-short-input-latency-comparison-passed",
+  "performance_acceptance": false,
+  "ffmpeg_commit": "487ae0cc1fd307037c7f81812592f3db785d747f",
+  "application_base": "16ed34c32a5d36ef55f8640f65c74f840fbbc045",
+  "sdk_identity": "9129fe5057388eb0dac759371081c1fcd661cdaaaf2093029fa415cf8d56a994",
+  "environment": "Colima Ubuntu 24.04 amd64 under Rosetta; 8 vCPU, 12 GiB",
+  "input_frames": 192,
+  "input_size": "320x180",
+  "input_fps": 60,
+  "decoder_threads": 4,
+  "encoder_threads": 1,
+  "queue_capacity": 1,
+  "auto_threads": false,
+  "pace": true,
+  "summary_sha256": "630d296abf91865bd1b238823b45761fd1ea79b8b42382bbd2867b3781008e3f",
+  "raw_results_sha256": "919e8abba70cbe09def2319bde5d7bdf163735c1d3f587d2aa5ee0e5b2303c43",
+  "plan_sha256": "128fc5ce59f674f966d0432f1c18f41f9d2861e8664b1495381f7df401cfdade",
+  "inputs": [
+    {
+      "case": "hrd-b3",
+      "sha256": "fa27b030498a35f6142f47d1cfabfe77bd0e53f4dedb5230ff18c81471f15d87"
+    },
+    {
+      "case": "hrd-b7",
+      "sha256": "6877d414b5a4e40179169329343ddb5d475e4a35ef0f3cc0d06d97d50f9fbb9d"
+    },
+    {
+      "case": "hrd-dynamic",
+      "sha256": "4bbea7d5263a456e01902a313a3ac4b370c20874c9dba41c1e0acb382a9e00d4"
+    },
+    {
+      "case": "hevc-b7",
+      "sha256": "6f0d07c3443655f2adf49d4a8a7d8a0326f980fa014e4e5b5d6b72f3e43150d4"
+    },
+    {
+      "case": "h264-fallback",
+      "sha256": "f05344598cd1ece26f334b134a77aa0eb96b2e3ecb46bffc3b77490bab652f54"
+    }
+  ],
+  "binaries_sha256": {
+    "naki-live": "9dc096b2feaf5787442085bba850c6efd67ac9c10abd6f59cacb51bee62e93cd",
+    "naki-live-worker": "6da60060d051a25173078173ead439efd35283e3c9955130a76ecd03cb911ead"
+  },
+  "cpu": "not measured",
+  "aggregation": "mean of two steady means; maximum of two per-run P95/P99, not pooled percentiles",
+  "results": [
+    {
+      "input": "hrd-b3",
+      "decoder_async": false,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 87.54415625,
+      "p95_worst_run_ms": 138.646,
+      "p99_worst_run_ms": 139.442
+    },
+    {
+      "input": "hrd-b3",
+      "decoder_async": false,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 71.53191964285713,
+      "p95_worst_run_ms": 106.432,
+      "p99_worst_run_ms": 106.891
+    },
+    {
+      "input": "hrd-b3",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.858566964285714,
+      "p95_worst_run_ms": 88.945,
+      "p99_worst_run_ms": 90.045
+    },
+    {
+      "input": "hrd-b3",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 22.060651785714285,
+      "p95_worst_run_ms": 56.963,
+      "p99_worst_run_ms": 58.015
+    },
+    {
+      "input": "hrd-b3",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.91468303571429,
+      "p95_worst_run_ms": 89.229,
+      "p99_worst_run_ms": 90.995
+    },
+    {
+      "input": "hrd-b3",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 21.915870535714284,
+      "p95_worst_run_ms": 56.641,
+      "p99_worst_run_ms": 57.982
+    },
+    {
+      "input": "hrd-b7",
+      "decoder_async": false,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 87.44556696428572,
+      "p95_worst_run_ms": 204.716,
+      "p99_worst_run_ms": 205.817
+    },
+    {
+      "input": "hrd-b7",
+      "decoder_async": false,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 75.39579910714286,
+      "p95_worst_run_ms": 173.816,
+      "p99_worst_run_ms": 174.995
+    },
+    {
+      "input": "hrd-b7",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.69104464285714,
+      "p95_worst_run_ms": 155.358,
+      "p99_worst_run_ms": 157.059
+    },
+    {
+      "input": "hrd-b7",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 25.742151785714285,
+      "p95_worst_run_ms": 123.106,
+      "p99_worst_run_ms": 125.233
+    },
+    {
+      "input": "hrd-b7",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.523415178571426,
+      "p95_worst_run_ms": 154.993,
+      "p99_worst_run_ms": 156.647
+    },
+    {
+      "input": "hrd-b7",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 25.179964285714284,
+      "p95_worst_run_ms": 123.02,
+      "p99_worst_run_ms": 125.366
+    },
+    {
+      "input": "hrd-dynamic",
+      "decoder_async": false,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 87.20478125,
+      "p95_worst_run_ms": 188.188,
+      "p99_worst_run_ms": 205.075
+    },
+    {
+      "input": "hrd-dynamic",
+      "decoder_async": false,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 71.96012946428571,
+      "p95_worst_run_ms": 157.547,
+      "p99_worst_run_ms": 174.898
+    },
+    {
+      "input": "hrd-dynamic",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.834191964285715,
+      "p95_worst_run_ms": 139.423,
+      "p99_worst_run_ms": 155.083
+    },
+    {
+      "input": "hrd-dynamic",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 22.30042410714286,
+      "p95_worst_run_ms": 107.219,
+      "p99_worst_run_ms": 126.254
+    },
+    {
+      "input": "hrd-dynamic",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.63214285714285,
+      "p95_worst_run_ms": 139.09,
+      "p99_worst_run_ms": 155.596
+    },
+    {
+      "input": "hrd-dynamic",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 22.485419642857146,
+      "p95_worst_run_ms": 106.317,
+      "p99_worst_run_ms": 125.117
+    },
+    {
+      "input": "hevc-b7",
+      "decoder_async": false,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 86.45414285714286,
+      "p95_worst_run_ms": 204.273,
+      "p99_worst_run_ms": 205.711
+    },
+    {
+      "input": "hevc-b7",
+      "decoder_async": false,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 75.5383125,
+      "p95_worst_run_ms": 174.333,
+      "p99_worst_run_ms": 176.338
+    },
+    {
+      "input": "hevc-b7",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.70450446428572,
+      "p95_worst_run_ms": 155.16,
+      "p99_worst_run_ms": 156.869
+    },
+    {
+      "input": "hevc-b7",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 25.822433035714287,
+      "p95_worst_run_ms": 124.468,
+      "p99_worst_run_ms": 126.156
+    },
+    {
+      "input": "hevc-b7",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.598883928571425,
+      "p95_worst_run_ms": 154.665,
+      "p99_worst_run_ms": 156.228
+    },
+    {
+      "input": "hevc-b7",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 25.545620535714285,
+      "p95_worst_run_ms": 124.344,
+      "p99_worst_run_ms": 125.014
+    },
+    {
+      "input": "h264-fallback",
+      "decoder_async": false,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 87.07246875,
+      "p95_worst_run_ms": 204.686,
+      "p99_worst_run_ms": 206.412
+    },
+    {
+      "input": "h264-fallback",
+      "decoder_async": false,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 86.43678125,
+      "p95_worst_run_ms": 204.044,
+      "p99_worst_run_ms": 205.671
+    },
+    {
+      "input": "h264-fallback",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 36.92708928571429,
+      "p95_worst_run_ms": 154.975,
+      "p99_worst_run_ms": 156.936
+    },
+    {
+      "input": "h264-fallback",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": false,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 36.99572767857143,
+      "p95_worst_run_ms": 155.5,
+      "p99_worst_run_ms": 156.648
+    },
+    {
+      "input": "h264-fallback",
+      "decoder_async": true,
+      "decoder_early_output": false,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 37.21412946428572,
+      "p95_worst_run_ms": 155.506,
+      "p99_worst_run_ms": 156.124
+    },
+    {
+      "input": "h264-fallback",
+      "decoder_async": true,
+      "decoder_early_output": true,
+      "decoder_pump": true,
+      "repeats": 2,
+      "steady_frames_per_repeat": 112,
+      "mean_ms": 36.44189732142857,
+      "p95_worst_run_ms": 154.15,
+      "p99_worst_run_ms": 155.32
+    }
+  ]
+}

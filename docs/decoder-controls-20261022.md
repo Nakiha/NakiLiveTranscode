@@ -26,10 +26,12 @@ Only the owning frontend calls either backend; packet EAGAIN ownership, NULL/EOF
 draining, filter/encoder/mux ownership and cleanup remain on the same paths.
 The async auto budget is created only for async + automatic operation.
 
-The experimental SDK gitlink points to the published phase3 snapshot
-`2673319b815fa6da6fccd0c3801e099b2e473066` (phase3 codec source plus the active validation tools), making its H264 option available in
-an explicitly rebuilt experiment. This is an experimental dependency change;
-no default branch, installed production SDK or global FFmpeg has been changed.
+The local readiness branch pins
+`487ae0cc1fd307037c7f81812592f3db785d747f`, based on the published validation
+snapshot `2673319b815fa6da6fccd0c3801e099b2e473066`. The follow-up avoids temporary
+staging when the AVC plan only contains the ordinary selected frame. This is a
+local dependency change; it has not replaced an installed production SDK or
+global FFmpeg. The main integration history is recorded separately.
 The fast-output algorithm still has the phase3 HRD/CFR, single-slice eligibility
 restrictions and no-HRD fallback. No offline verified-even assertion is supplied
 by the service.
@@ -72,10 +74,38 @@ python3 tests/integration/decoder_controls_integration.py \
   --input /lab/hrd-b3.mp4 --expected-frames 192 --lifecycle --results /lab/out/UNIQUE
 ```
 
-The registered full suite enables `--lifecycle`: every configuration first
+The registered full suite enables `--lifecycle --include-pump`: in addition to
+the four basic combinations it checks async + pump with early output off/on.
+Every configuration first
 decodes a paced prefix, stops while input remains, verifies its terminal state
 and ordered unique output prefix, then must restart and produce the complete
 declared output. Cancelled prefixes need not have equal length across backends.
+
+The pump uses its own nonblocking CLOEXEC eventfd. Producers notify without
+taking the pump's mutex; the pump drains the event before checking work, so a
+notification arriving before poll remains readable. Reader progress, decoder
+completion, lane release and join explicitly wake it. The one-second wait is
+for stats refresh, replacing the former 2ms missed-condition-notification poll.
+The fd stays alive until the reader has joined and async_free has quiesced all
+callbacks. Non-pump modes do not allocate this extra fd.
+
+The local paced comparison tool uses existing, hash-bound inputs with declared
+frame counts, fixed threads/queues and reversed paired order on alternate
+repeats. It checks actual decoded output and source/display identities before
+reporting exact trace percentiles. Its queue snapshots are sampled, CPU is not
+measured, and its post-accept terminal duration is not a sustained capacity test:
+
+```sh
+python3 tests/benchmarks/decoder_controls_latency.py \
+  --manifest /lab/input-manifest.json --results /lab/out/UNIQUE \
+  --threads 4 --repeats 2 --include-pump
+```
+
+Manifest shape: `{"frames_per_cycle":192,"inputs":[{"case":"hrd-b3",
+"path":"/lab/hrd-b3.mp4","sha256":"..."}]}`. This command never generates
+inputs. It validates the checkout SDK and actual loaded library paths/hashes,
+and writes a failed summary on incomplete execution. See the
+[local readiness report](decoder-local-readiness-20261022.md).
 
 Functional success does not establish sustained queue stability or latency SLOs.
 The current batch's platform-specific execution results are in the accompanying

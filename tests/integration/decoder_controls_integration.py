@@ -42,9 +42,19 @@ def traces(state, expected):
     raise AssertionError(f'expected {expected} sealed frame traces, got {len(frames)}')
 
 
+def wait_admission(harness):
+    deadline = time.monotonic() + 7
+    while time.monotonic() < deadline:
+        if harness.http('/health')['admission']['open']:
+            return
+        time.sleep(.02)
+    raise TimeoutError('service admission did not reopen: ' + json.dumps(harness.http('/health')['admission']))
+
+
 def stop_active_job(harness, config, directory, label, expected):
     request = dict(config, pace=True, output=str(directory / (label + '-stopped.ts')))
     (directory / (label + '-stop-request.json')).write_text(json.dumps(request, indent=2) + '\n')
+    wait_admission(harness)
     harness.start(request)
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -73,6 +83,7 @@ def main():
     ap.add_argument('--expected-frames', type=int, default=48)
     ap.add_argument('--results', type=Path)
     ap.add_argument('--lifecycle', action='store_true', help='Stop each active backend, then verify a complete restart')
+    ap.add_argument('--include-pump', action='store_true', help='Also check the two async pump configurations')
     args = ap.parse_args()
     if args.expected_frames <= 0:
         raise ValueError('expected-frames must be declared positive')
@@ -95,8 +106,9 @@ def main():
     harness = ControlsHarness(directory)
     binaries = {name: hashlib.sha256((harness.BIN / name).read_bytes()).hexdigest()
                 for name in ['naki-live', 'naki-live-worker', 'naki-decoder-backend-probe']}
+    cases = [(a, e, pump) for a in [False, True] for pump in ([False, True] if a and args.include_pump else [False]) for e in [False, True]]
     plan = {'input': str(source), 'input_sha256': identity, 'expected_frames': args.expected_frames,
-            'cases': ['async0-early0', 'async0-early1', 'async1-early0', 'async1-early1'],
+            'cases': [f'async{int(a)}-early{int(e)}-pump{int(p)}' for a,e,p in cases],
             'binary_sha256': binaries, 'stop_restart_per_case': args.lifecycle, 'performance_acceptance': False}
     (directory / 'plan.json').write_text(json.dumps(plan, indent=2) + '\n')
     with (directory / 'backend-probe.log').open('x') as probe_log:
@@ -115,48 +127,49 @@ def main():
             except OSError:
                 time.sleep(.03)
         else: raise TimeoutError('controller health')
-        for asynchronous in [False, True]:
-            for early in [False, True]:
-                label = f'async{int(asynchronous)}-early{int(early)}'
-                config = {'input': str(source), 'output': str(directory / (label + '.ts')), 'width': 320, 'height': 180,
-                          'encoder_threads': 1, 'max_threads': 2, 'min_threads': 2, 'queue_capacity': 1,
-                          'decoder_async': asynchronous, 'decoder_auto_threads': False, 'decoder_early_output': early,
-                          'audio_copy': False, 'frame_log': True, 'frame_log_every': 1, 'pace': False}
-                (directory / (label + '-request.json')).write_text(json.dumps(config, indent=2) + '\n')
-                if args.lifecycle:
-                    stop_active_job(harness, config, directory, label, args.expected_frames)
-                harness.start(config)
-                state = harness.finished(timeout=60)
-                (directory / (label + '-state.json')).write_text(json.dumps(state, indent=2) + '\n')
-                require(state['state'] == 'completed', 'service did not complete successfully')
-                require(state['decoder_async'] == int(asynchronous) and state['decoder_auto_threads'] == 0, 'wrong decoder backend status')
-                require(state['decoder_early_output_requested'] == int(early), 'wrong early-output request status')
-                require(state['frames_decoded'] == state['frames_filtered'] == state['packets_out'] == args.expected_frames, 'wrong complete service frame count')
-                frames = traces(state, args.expected_frames)
-                source_ids = [x['input_sequence'] for x in frames]
-                require(set(source_ids) == set(range(args.expected_frames)), 'duplicate/missing/unexpected source identities')
-                ordered = [(x['pts_us'], x['input_sequence'], x['decoded_picture_type'], x['decoded_key']) for x in frames]
-                require([x[0] for x in ordered] == sorted(x[0] for x in ordered), 'presentation order changed')
-                if reference is None: reference = ordered
-                else: require(ordered == reference, 'cross-backend source identity/PTS mismatch')
-                for f in frames:
-                    require(f['decoder_async'] == int(asynchronous), 'wrong frame backend')
-                    require(f['decoder_auto_threads'] == 0, 'auto controller unexpectedly active')
-                    for field in ['decoder_submit_retry_ms', 'decoder_submit_to_receive_ms', 'decoder_receive_to_prepare_ms']:
-                        require(math.isfinite(f[field]) and f[field] >= 0, 'invalid ' + field)
-                # Decode the actual output rather than trusting packet counts.
-                command = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'json', config['output']]
-                decoded = json.loads(subprocess.check_output(command, text=True))['streams']
-                require(len(decoded) == 1 and int(decoded[0]['nb_read_frames']) == args.expected_frames, 'output media has wrong decoded count')
-                results.append({'case': label, 'passed': True, 'frames': args.expected_frames,
-                                'stop_restart_verified': args.lifecycle})
-                (directory / 'summary.json').write_text(json.dumps(results, indent=2) + '\n')
-                print(label, 'PASS', flush=True)
+        for asynchronous, early, pump in cases:
+            label = f'async{int(asynchronous)}-early{int(early)}' + ('-pump1' if pump else '')
+            config = {'input': str(source), 'output': str(directory / (label + '.ts')), 'width': 320, 'height': 180,
+                      'encoder_threads': 1, 'max_threads': 2, 'min_threads': 2, 'queue_capacity': 1,
+                      'decoder_async': asynchronous, 'decoder_pump': pump, 'decoder_auto_threads': False, 'decoder_early_output': early,
+                      'audio_copy': False, 'frame_log': True, 'frame_log_every': 1, 'pace': False}
+            (directory / (label + '-request.json')).write_text(json.dumps(config, indent=2) + '\n')
+            if args.lifecycle:
+                stop_active_job(harness, config, directory, label, args.expected_frames)
+            wait_admission(harness)
+            harness.start(config)
+            state = harness.finished(timeout=60)
+            (directory / (label + '-state.json')).write_text(json.dumps(state, indent=2) + '\n')
+            require(state['state'] == 'completed', 'service did not complete successfully')
+            require(state['decoder_async'] == int(asynchronous) and state['decoder_auto_threads'] == 0, 'wrong decoder backend status')
+            require(state['decoder_pump'] == int(pump), 'wrong pump status')
+            require(state['decoder_early_output_requested'] == int(early), 'wrong early-output request status')
+            require(state['frames_decoded'] == state['frames_filtered'] == state['packets_out'] == args.expected_frames, 'wrong complete service frame count')
+            frames = traces(state, args.expected_frames)
+            source_ids = [x['input_sequence'] for x in frames]
+            require(set(source_ids) == set(range(args.expected_frames)), 'duplicate/missing/unexpected source identities')
+            ordered = [(x['pts_us'], x['input_sequence'], x['decoded_picture_type'], x['decoded_key']) for x in frames]
+            require([x[0] for x in ordered] == sorted(x[0] for x in ordered), 'presentation order changed')
+            if reference is None: reference = ordered
+            else: require(ordered == reference, 'cross-backend source identity/PTS mismatch')
+            for f in frames:
+                require(f['decoder_async'] == int(asynchronous), 'wrong frame backend')
+                require(f['decoder_auto_threads'] == 0, 'auto controller unexpectedly active')
+                for field in ['decoder_submit_retry_ms', 'decoder_submit_to_receive_ms', 'decoder_receive_to_prepare_ms']:
+                    require(math.isfinite(f[field]) and f[field] >= 0, 'invalid ' + field)
+            # Decode the actual output rather than trusting packet counts.
+            command = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'json', config['output']]
+            decoded = json.loads(subprocess.check_output(command, text=True))['streams']
+            require(len(decoded) == 1 and int(decoded[0]['nb_read_frames']) == args.expected_frames, 'output media has wrong decoded count')
+            results.append({'case': label, 'passed': True, 'frames': args.expected_frames,
+                            'stop_restart_verified': args.lifecycle})
+            (directory / 'summary.json').write_text(json.dumps(results, indent=2) + '\n')
+            print(label, 'PASS', flush=True)
         require(hashlib.sha256(source.read_bytes()).hexdigest() == identity, 'input changed during service test')
         require(all(hashlib.sha256((harness.BIN / name).read_bytes()).hexdigest() == digest
                     for name, digest in binaries.items()), 'service binary changed during test')
-        (directory / 'COMPLETE.json').write_text(json.dumps({'status': 'functional-four-combinations-passed', 'input_sha256': identity,
-            'expected_frames': args.expected_frames, 'stop_restart_cases': 4 if args.lifecycle else 0,
+        (directory / 'COMPLETE.json').write_text(json.dumps({'status': 'functional-six-combinations-passed' if args.include_pump else 'functional-four-combinations-passed', 'input_sha256': identity,
+            'expected_frames': args.expected_frames, 'cases': len(cases), 'stop_restart_cases': len(cases) if args.lifecycle else 0,
             'performance_acceptance': False}) + '\n')
     finally:
         server.terminate()

@@ -719,12 +719,12 @@ void *pipeline_main(void *opaque) {
     p.read_interrupt.job=job; p.write_interrupt.job=job;
     atomic_init(&p.read_interrupt.deadline,0); atomic_init(&p.write_interrupt.deadline,0);
     atomic_init(&p.read_interrupt.cleanup,0);atomic_init(&p.write_interrupt.cleanup,0);
-    pipeline_reader_init(&p);pipeline_decode_init(&p);
+    pipeline_reader_init(&p);int decode_init=pipeline_decode_init(&p);
     InputItem pending={0}; AVFrame *frame=av_frame_alloc();int branches_joined=0;
     NakiMediaJobInfo info={.job_id=job->id,.request_id=job->request_id,.config=&job->config,.request_us=job->lifecycle.started_us,
         .output_id=job->config.output_count?NULL:job->output_id};
     p.stage="media hook initialization";
-    int ret=frame ? naki_media_hooks_open(&info,&p.hooks) : AVERROR(ENOMEM);
+    int ret=decode_init<0?decode_init:frame ? naki_media_hooks_open(&info,&p.hooks) : AVERROR(ENOMEM);
     if(ret>0 || (ret>=0 && p.hooks.api_version!=NAKI_MEDIA_HOOK_API))ret=AVERROR(EINVAL);
     if(ret>=0) {
         p.stage="required watermark startup gate";

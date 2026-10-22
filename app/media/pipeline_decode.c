@@ -1,5 +1,4 @@
 #include "pipeline_internal.h"
-#include <time.h>
 
 /* Optional direct-output pump: this thread alone calls async send/receive and
  * stats while active. One video slot and one immutable audio/control slot,
@@ -8,13 +7,11 @@
 void pipeline_decode_notify(void *opaque) {
     Pipeline *p=opaque;
     wake_job(p->job);
-    pthread_cond_signal(&p->pump.changed);
+    naki_wakeup_notify(&p->pump.wake);
 }
-void pipeline_decode_init(Pipeline *p) {
+int pipeline_decode_init(Pipeline *p) {
     pthread_mutex_init(&p->pump.mutex,NULL);
-    pthread_condattr_t attr;pthread_condattr_init(&attr);
-    pthread_condattr_setclock(&attr,CLOCK_MONOTONIC);
-    pthread_cond_init(&p->pump.changed,&attr);pthread_condattr_destroy(&attr);
+    return naki_wakeup_init(&p->pump.wake,p->job->config.decoder_pump);
 }
 static void decoded_stamp_free(void *opaque,uint8_t *data) {
     AVBufferRef *origin=opaque;
@@ -25,6 +22,7 @@ static void *decode_main(void *opaque) {
     AVFrame *frame=av_frame_alloc();InputItem pending={0};
     int ret=frame?0:AVERROR(ENOMEM),eof_sent=0;int64_t next_stats=0;
     while(ret>=0&&!atomic_load(&p->job->lifecycle.cancel)) {
+        ret=naki_wakeup_clear(&q->wake);if(ret<0)break;
         int progress=0,available;
         pthread_mutex_lock(&q->mutex);available=!q->occupied;pthread_mutex_unlock(&q->mutex);
         if(available) {
@@ -93,13 +91,10 @@ static void *decode_main(void *opaque) {
         }
         if(now_us()>=next_stats){pipeline_refresh_auto(p);next_stats=now_us()+1000000;}
         if(!progress) {
-            struct timespec until;clock_gettime(CLOCK_MONOTONIC,&until);
-            until.tv_nsec+=2000000;if(until.tv_nsec>=1000000000){until.tv_nsec-=1000000000;until.tv_sec++;}
-            pthread_mutex_lock(&q->mutex);
-            /* Callback notifications can race the wait; a 2ms monotonic poll
-             * bounds a missed notification without sharing the owner's fd. */
-            if(!atomic_load(&p->job->lifecycle.cancel))pthread_cond_timedwait(&q->changed,&q->mutex,&until);
-            pthread_mutex_unlock(&q->mutex);
+            /* A private eventfd preserves notifications racing this wait.
+             * The timeout is only for the periodic stats snapshot; decoding,
+             * slot release, reader progress and join all explicitly notify. */
+            if(!atomic_load(&p->job->lifecycle.cancel))ret=naki_wakeup_wait(&q->wake,1000);
         }
     }
     pipeline_input_free(&pending);av_frame_free(&frame);pipeline_refresh_auto(p);
@@ -115,7 +110,7 @@ int pipeline_decode_start(Pipeline *p) {
     p->pump.started=1;return 0;
 }
 void pipeline_decode_join(Pipeline *p) {
-    if(p->pump.started) {pthread_cond_signal(&p->pump.changed);pthread_join(p->pump.thread,NULL);p->pump.started=0;}
+    if(p->pump.started) {naki_wakeup_notify(&p->pump.wake);pthread_join(p->pump.thread,NULL);p->pump.started=0;}
 }
 void pipeline_decode_destroy(Pipeline *p) {
     if(p->pump.frame&&p->pump.frame->opaque_ref) {
@@ -123,5 +118,5 @@ void pipeline_decode_destroy(Pipeline *p) {
         if(s->decoder_tracked)naki_policy_untrack(p->job,NAKI_TRACK_FRAME,(uint64_t)s->frame_id);
     }
     av_frame_free(&p->pump.frame);pipeline_input_free(&p->pump.audio);
-    pthread_cond_destroy(&p->pump.changed);pthread_mutex_destroy(&p->pump.mutex);
+    naki_wakeup_destroy(&p->pump.wake);pthread_mutex_destroy(&p->pump.mutex);
 }

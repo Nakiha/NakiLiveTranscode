@@ -2,6 +2,7 @@
 #define NAKI_PIPELINE_INTERNAL_H
 #include "worker/job.h"
 #include "platform/runtime.h"
+#include "platform/wakeup.h"
 #include "worker/frame_policy_runtime.h"
 #include "pipeline_reader.h"
 #include "watermark.h"
@@ -79,7 +80,7 @@ typedef struct AudioTrack {
     int64_t last_dts, next_input_dts, previous_input_dts;
 } AudioTrack;
 typedef struct DecodePump {
-    pthread_mutex_t mutex;pthread_cond_t changed;pthread_t thread;
+    pthread_mutex_t mutex;NakiWakeup wake;pthread_t thread;
     AVFrame *frame;InputItem audio;
     int occupied,prefer_video,done,error,started;
 } DecodePump;
@@ -145,7 +146,7 @@ struct Branch {
 
 /* MODULE INTERFACES */
 void pipeline_decode_notify(void *opaque);
-void pipeline_decode_init(Pipeline *p);
+int pipeline_decode_init(Pipeline *p);
 int pipeline_decode_start(Pipeline *p);
 int pipeline_decode_receive(Pipeline *p,AVFrame *frame,InputItem *audio);
 void pipeline_decode_join(Pipeline *p);
