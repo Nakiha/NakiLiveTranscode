@@ -1508,6 +1508,10 @@
             "maximum": 8,
             "default": 8
           },
+          "decoder_early_output": {
+            "type": "boolean",
+            "description": "Initialization-only codec output override, independent of async frontend/pump. Omitted preserves old codec defaults (HEVC enabled, H264 disabled). false selects original DPB policy; true enables only proven eligible paths. H264 automatic eligibility requires progressive CFR NAL-HRD and picture-timing SEI; ordinary streams without this proof fall back. The library also has a separate explicit verified-input contract assertion, never supplied by this service for arbitrary input. No hot switching."
+          },
           "decoder_pump": {
             "type": "boolean",
             "default": false,

@@ -1,0 +1,25 @@
+{
+  "status": "实验版，最终验收未完成，不建议生产启用",
+  "ffmpeg_repository": "Nakiha/FFmpeg",
+  "ffmpeg_branch": "experiment/h264-early-output-archive-20261022",
+  "ffmpeg_commit": "e5152657827821881ff7c8b3943940145e603a17",
+  "ffmpeg_baseline": "94bd940f1c4682dfce13e8ae43891df01621e16e",
+  "ffmpeg_source_patch_sha256": "8da6856d143c24252103f4d3babd7119cccbb872150b9e1405d875b8020f2034",
+  "application_baseline": "67f5e07798575e20e1f3fe1dcc6e37b40f3d64fa",
+  "application_source_patch_sha256": "38c1333654d8e93b698fb20099be62f6ab61e967e89a8e927cff49eb8d1f637e",
+  "sdk_gitlink_updated": false,
+  "new_tests_run": false,
+  "source_sha256": {
+    "app/control/config.c": "6fc218e5427f0f8e3db0c38f6eaf378b9564956ef1b3ddf297645c0af4b76584",
+    "app/control/config.h": "3e3f1c852ec3985b7fe5639579236c3d74219ce366cee9dbc9cd8a113e964c97",
+    "app/control/control_spec.c": "73c03a1f0320d523eb155a3cb27bae68503f9b9f4653197b62f0f70645e2a3e7",
+    "app/media/decode_output_policy.h": "4601de6ad434ec688342f7f4284892f50c7d838cd53b8cf7d41fd11248e3d828",
+    "app/media/pipeline.c": "6e2acd2832a4dc75ec29d7994019d8ff0d5d02b5127822829dd6c8ae5315d96f",
+    "docs/openapi.json": "4a1f0b9208ead0ff1d245a11cd775be3cc6135b92d490ff3372be0a04098b1c1"
+  },
+  "archived_test_sources": {
+    "experiments/early-output-20261022/research/phase2/build_config_test.sh": "b85b296fc61f84aae9d8deefbe9b503686161c81886a550730bb4c7f8bcad531",
+    "experiments/early-output-20261022/research/phase2/config_identity_adapter.c": "b12c6130bbd3de6d5e20e08e78f4c4ae729b4ff7e3105b866742329c25e28c04",
+    "experiments/early-output-20261022/research/phase2/config_switch_test.c": "fd86429d251829accf0c2531a2ce9fe95f014be0bd57c71c2566c7078cbd899b"
+  }
+}

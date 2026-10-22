@@ -1,0 +1,12 @@
+app/control/config.c
+app/control/config.h
+app/control/control_spec.c
+app/media/decode_output_policy.h
+app/media/pipeline.c
+docs/openapi.json
+experiments/early-output-20261022/COMPANION.json
+experiments/early-output-20261022/PUBLICATION_FILES.txt
+experiments/early-output-20261022/REPORT.md
+experiments/early-output-20261022/research/phase2/build_config_test.sh
+experiments/early-output-20261022/research/phase2/config_identity_adapter.c
+experiments/early-output-20261022/research/phase2/config_switch_test.c
