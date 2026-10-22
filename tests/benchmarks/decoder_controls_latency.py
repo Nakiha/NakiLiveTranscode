@@ -64,7 +64,9 @@ def main():
     parser.add_argument('--repeats', type=int, default=2)
     parser.add_argument('--threads', type=int, default=4)
     parser.add_argument('--include-pump', action='store_true')
+    parser.add_argument('--job-timeout', type=int, default=60, help='Declared bounded deadline; increase for long paced fixtures')
     args = parser.parse_args()
+    require(60 <= args.job_timeout <= 600, 'job-timeout must be 60..600 seconds')
     require(args.repeats > 0 and 2 <= args.threads <= 12, 'invalid repeats/threads')
     manifest = json.loads(args.manifest.read_text())
     count = manifest['frames_per_cycle']
@@ -93,7 +95,7 @@ def main():
     cases = [(a,e,p) for a in [False,True] for p in ([False,True] if a and args.include_pump else [False]) for e in [False,True]]
     require(len(cases)*args.repeats<=24,'per-input scope exceeds reserved creation-record budget')
     plan = dict(input_manifest=manifest, manifest_sha256=sha(args.manifest), repeats=args.repeats,
-                threads=args.threads, cases=cases, binaries=binaries, loaded_libraries=libraries,
+                threads=args.threads, job_timeout_s=args.job_timeout, cases=cases, binaries=binaries, loaded_libraries=libraries,
                 sdk_manifest_sha256=manifest_hash,sources=sources,platform=platform.platform(),
                 measurement='service ingress to actual mux/flush; all frames and steady frames [32:-48]',
                 controller_scope='one fresh controller per input, at most 24 creations; normal retention/admission unchanged',
@@ -128,7 +130,7 @@ def main():
                                                 oldest_ms=state.get('overload_oldest_ingress_age_ms'),
                                                 decoder_queues=state.get('auto'),snapshot_age_ms=state.get('auto_stats_age_ms')))
                             if state['state'] in ['completed','completed_partial','failed','stopped']: break
-                            require(time.monotonic()-began<60,'job timed out')
+                            require(time.monotonic()-began<args.job_timeout,'job timed out')
                             time.sleep(.05)
                         terminal_elapsed=time.monotonic()-began
                         (directory/(label+'-state.json')).write_text(json.dumps(state,indent=2)+'\n')
