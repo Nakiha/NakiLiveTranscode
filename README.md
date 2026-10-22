@@ -10,7 +10,7 @@
 
 | 范围 | 当前实现与边界 |
 | --- | --- |
-| 视频 | 第一条可用 H.264/HEVC 原生软件解码流，共享 reader/async decoder；每个输出独立 filter、libx264 H.264 或 libvvenc VVC 编码及 mux owner |
+| 视频 | 第一条可用 H.264/HEVC 原生软件解码流，共享 reader/decoder，默认 async、可显式选择 sync；每个输出独立 filter、libx264 H.264 或 libvvenc VVC 编码及 mux owner |
 | 输出 | FLV/Enhanced FLV（含 RTMP）、MPEG-TS（含 UDP/SRT）、本地 MP4；MP4 在 EOF/trailer 完成索引，保持纯视频 |
 | 音频 | FLV/TS 有界 AAC/MP3 透传、最多 16 条音轨状态，允许晚加入；参数签名改变会拒绝该轨，落后输出时间水位的包显式丢弃并计数；不转码、不删除或替换已注册输出流 |
 | 输出规格 | 创建后输出集合、URL、编码器和画布固定；已支持的输入分辨率/位深变化可通过重建输入 filter 适配；primaries/transfer 变化及不支持格式失败 |
@@ -19,7 +19,15 @@
 
 没有音频转码、任意音频 codec、运行中增删输出、删除/替换已注册音轨、任意视频规格切换、HDR tone mapping、通用滤镜 API、ROI、SCTE-35、脏时间戳修复或 `/v2/jobs`。详细合同见[固定输出](docs/branching-contract.md)、[直播封装](docs/live-mux.md)、[帧策略](docs/frame-policy.md)、[SEI](docs/sei.md)及[水印](docs/watermark.md)。[管线设计](docs/pipeline-design.md)仍包含未实现的草案字段，不可整体发送。
 
-## 当前验证状态（2026-10-18）
+## 解码开关与本机主线集成（2026-10-22）
+
+`decoder_async` 与 `decoder_early_output` 是独立的初始化开关。默认 async 开启、HEVC 快出开启、H.264 快出关闭；`decoder_pump` 是独立的前台调度选项，要求 async 开启。配置和比较方法见[解码控制](docs/decoder-controls-20261022.md)。
+
+H.264 快出只在满足 HRD/CFR 等排序依据时自动生效，无声明、多 slice 等输入回退；当前加固路径仍可能压缩帧间并行。HEVC 使用合格 IDR 起点后的连续 POC 前缀，不保证任意输入都能提前交付。请求开关为 true 不代表每帧命中。
+
+本机功能、停止/重启、重放及内存检查的精确范围见[本次 main 集成验收](docs/validation-decoder-main-20261022.md)。目标机 CPU、持续吞吐、队列稳定性和 P95/P99 仍须独立实测，不将本机合入门槛等同完整生产验收。
+
+## 历史验证状态（2026-10-18）
 
 本次目录与接口整理：full 35 步、应用 ASan/UBSan 6 步、纯服务构建与自定义目录选测通过；性能入口完成短时 smoke，见[本次验证](docs/validation-organization.md)。
 
@@ -81,7 +89,7 @@ git clone --recurse-submodules https://github.com/Nakiha/NakiLiveTranscode.git
 cd NakiLiveTranscode
 ```
 
-FFmpeg 子模块固定到 [Nakiha/FFmpeg 的 n9.0.2 live 分支](https://github.com/Nakiha/FFmpeg/tree/live/n9.0.2-async-early-output)，精确提交以本仓库 gitlink 为准，以上游 `n9.0.2`（`946fcce07b6dcd0331c8cc609192aeff5e1924f8`）为基线。不要使用 `git submodule update --remote` 无意升级已测版本。原 `cbf2341520725a4f8b217052f864aa7dd3028a8d` 仍保存在 n7.0.3 live 分支。
+FFmpeg 子模块固定到 [Nakiha/FFmpeg 的 n9.0.2 定制提交](https://github.com/Nakiha/FFmpeg/commit/2673319b815fa6da6fccd0c3801e099b2e473066)，精确提交以本仓库 gitlink 为准，以上游 `n9.0.2`（`946fcce07b6dcd0331c8cc609192aeff5e1924f8`）为基线。不要使用 `git submodule update --remote` 无意升级已测版本。原 `cbf2341520725a4f8b217052f864aa7dd3028a8d` 仍保存在 n7.0.3 live 分支。
 
 ## 原解码专项验证构建
 

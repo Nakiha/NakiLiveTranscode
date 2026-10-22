@@ -56,6 +56,8 @@ pump combinations, fingerprint compatibility and branch inheritance. The
 helpers as the service** and requires three complete replay cycles with ordered
 pixel/PTS/source-ID/metadata agreement for sync, async-fixed and async-auto x
 early off/on. Only early-on pkt_dts is excepted. It is not a performance test.
+An optional third argument sets a positive replay-cycle count (maximum 10,000)
+for longer drain/flush/replay and sanitizer runs; omitting it still selects three.
 
 The `decoder-controls` full integration suite starts a real controller/worker,
 checks all four fixed-thread configurations, frame/source ordering, actual
@@ -67,8 +69,13 @@ count, or generates a small HRD B3 functional fixture before starting the servic
 bash scripts/test-service.sh full --suite decoder-controls
 # Explicit existing-fixture entry, with a fresh result directory:
 python3 tests/integration/decoder_controls_integration.py \
-  --input /lab/hrd-b3.mp4 --expected-frames 192 --results /lab/out/UNIQUE
+  --input /lab/hrd-b3.mp4 --expected-frames 192 --lifecycle --results /lab/out/UNIQUE
 ```
+
+The registered full suite enables `--lifecycle`: every configuration first
+decodes a paced prefix, stops while input remains, verifies its terminal state
+and ordered unique output prefix, then must restart and produce the complete
+declared output. Cancelled prefixes need not have equal length across backends.
 
 Functional success does not establish sustained queue stability or latency SLOs.
 The current batch's platform-specific execution results are in the accompanying

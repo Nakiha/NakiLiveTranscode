@@ -112,6 +112,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--worker', type=pathlib.Path, default=BIN / 'naki-live-hook-worker')
     parser.add_argument('--modes', help='Comma-separated subset for focused debugging')
+    parser.add_argument('--pace', action='store_true', help='Offer input at its media rate; production queue limits are unchanged')
     args = parser.parse_args()
     run = pathlib.Path(tempfile.mkdtemp(prefix='pipeline-lifecycle-', dir=ROOT / 'out'))
     binaries = run / 'bin'
@@ -163,7 +164,7 @@ def main():
                         sinks.append(sink)
                     outputs.append(dict(id=f'out{i}', output=str(path) if mode == 'custom_io' else sink.url,
                                         output_format='mpegts', encoder_preset='ultrafast', encoder_threads=2))
-                spec = dict(input=str(empty if mode == 'empty_input' else sample), pace=stopping,
+                spec = dict(input=str(empty if mode == 'empty_input' else sample), pace=stopping or args.pace,
                             timestamps={'mode': 'source_all'}, frame_log=True, frame_log_every=1)
                 if n:
                     spec['outputs'] = outputs
@@ -251,7 +252,7 @@ def main():
                     sink.close()
             assert server.process.returncode == 0, (name, server.process.returncode)
             control.wait(lambda: control.dead(audit['pid']))
-    (run / 'COMPLETE.json').write_text(json.dumps(dict(status='passed', cases=len(results),
+    (run / 'COMPLETE.json').write_text(json.dumps(dict(status='passed', cases=len(results), paced_input=args.pace,
         input_sha256=hashlib.sha256(sample.read_bytes()).hexdigest(), results=results), indent=2) + '\n')
     print('PASS lifecycle matrix:', run, flush=True)
 

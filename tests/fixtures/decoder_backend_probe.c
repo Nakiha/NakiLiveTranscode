@@ -31,7 +31,8 @@ static Record record(AVFrame *f) {
     return r;
 }
 int main(int argc,char **argv) {
-    assert(argc==3);int expected=atoi(argv[2]);assert(expected>0&&expected<=4096);
+    assert(argc==3||argc==4);int expected=atoi(argv[2]);assert(expected>0&&expected<=4096);
+    int cycles=argc==4?atoi(argv[3]):3;assert(cycles>0&&cycles<=10000);
     AVFormatContext *input=NULL;assert(avformat_open_input(&input,argv[1],NULL,NULL)>=0);
     assert(avformat_find_stream_info(input,NULL)>=0);
     const AVCodec *codec=NULL;int stream=av_find_best_stream(input,AVMEDIA_TYPE_VIDEO,-1,-1,&codec,0);assert(stream>=0);
@@ -56,7 +57,7 @@ int main(int argc,char **argv) {
         assert(avcodec_open2(decoder,codec,NULL)>=0);
         assert(naki_decode_backend_init(&decoder,&async,backend!=0,backend==2,1,2,2,NULL,NULL)>=0);
         assert((backend!=0)==(async!=NULL));assert((backend==0)==(decoder!=NULL));
-        for(int cycle=0;cycle<3;cycle++) {
+        for(int cycle=0;cycle<cycles;cycle++) {
             int next=0,closed=0,produced=0,eof=0;int64_t deadline=av_gettime_relative()+10000000;
             while(!eof) {
                 assert(av_gettime_relative()<deadline);
@@ -89,7 +90,7 @@ int main(int argc,char **argv) {
             if(async)assert(avcodec_async_flush(async)>=0);else avcodec_flush_buffers(decoder);
         }
         avcodec_async_free(&async);avcodec_free_context(&decoder);
-        printf("PASS backend=%s early=%d cycles=3 expected=%d\n",backend==0?"sync":backend==1?"async-fixed":"async-auto",early,expected);
+        printf("PASS backend=%s early=%d cycles=%d expected=%d\n",backend==0?"sync":backend==1?"async-fixed":"async-auto",early,cycles,expected);
     }
     free(baseline);for(int i=0;i<count;i++)av_packet_free(&packets[i]);av_free(packets);
     av_packet_free(&read);av_frame_free(&frame);avformat_close_input(&input);return 0;

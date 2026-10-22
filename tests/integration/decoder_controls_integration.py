@@ -42,14 +42,42 @@ def traces(state, expected):
     raise AssertionError(f'expected {expected} sealed frame traces, got {len(frames)}')
 
 
+def stop_active_job(harness, config, directory, label, expected):
+    request = dict(config, pace=True, output=str(directory / (label + '-stopped.ts')))
+    (directory / (label + '-stop-request.json')).write_text(json.dumps(request, indent=2) + '\n')
+    harness.start(request)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        state = harness.http()
+        require(state['state'] not in ['completed', 'completed_partial', 'stopped', 'failed'],
+                'job became terminal before the in-flight stop')
+        if state['frames_decoded'] >= 2:
+            break
+        time.sleep(.02)
+    else:
+        raise TimeoutError('no decode progress before stop')
+    harness.http('/v1/job/stop', data={}, code=202)
+    state = harness.finished('stopped', timeout=15)
+    require(state['state'] == 'stopped', 'in-flight stop did not complete')
+    require(0 < state['frames_decoded'] < expected, 'stop did not interrupt the input')
+    (directory / (label + '-stopped-state.json')).write_text(json.dumps(state, indent=2) + '\n')
+    frames = traces(state, state['packets_out'])
+    ids = [f['input_sequence'] for f in frames]
+    require(len(set(ids)) == len(ids) and all(0 <= i < expected for i in ids), 'invalid stopped prefix')
+    require([f['pts_us'] for f in frames] == sorted(f['pts_us'] for f in frames), 'stopped prefix out of order')
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--input', type=Path)
     ap.add_argument('--expected-frames', type=int, default=48)
     ap.add_argument('--results', type=Path)
+    ap.add_argument('--lifecycle', action='store_true', help='Stop each active backend, then verify a complete restart')
     args = ap.parse_args()
     if args.expected_frames <= 0:
         raise ValueError('expected-frames must be declared positive')
+    if args.lifecycle and args.expected_frames < 8:
+        raise ValueError('lifecycle input must declare at least 8 frames')
     if args.results:
         directory = args.results.resolve(); directory.mkdir(parents=True, exist_ok=False)
     else:
@@ -69,7 +97,7 @@ def main():
                 for name in ['naki-live', 'naki-live-worker', 'naki-decoder-backend-probe']}
     plan = {'input': str(source), 'input_sha256': identity, 'expected_frames': args.expected_frames,
             'cases': ['async0-early0', 'async0-early1', 'async1-early0', 'async1-early1'],
-            'binary_sha256': binaries, 'performance_acceptance': False}
+            'binary_sha256': binaries, 'stop_restart_per_case': args.lifecycle, 'performance_acceptance': False}
     (directory / 'plan.json').write_text(json.dumps(plan, indent=2) + '\n')
     with (directory / 'backend-probe.log').open('x') as probe_log:
         subprocess.run([str(harness.BIN / 'naki-decoder-backend-probe'), str(source), str(args.expected_frames)],
@@ -95,6 +123,8 @@ def main():
                           'decoder_async': asynchronous, 'decoder_auto_threads': False, 'decoder_early_output': early,
                           'audio_copy': False, 'frame_log': True, 'frame_log_every': 1, 'pace': False}
                 (directory / (label + '-request.json')).write_text(json.dumps(config, indent=2) + '\n')
+                if args.lifecycle:
+                    stop_active_job(harness, config, directory, label, args.expected_frames)
                 harness.start(config)
                 state = harness.finished(timeout=60)
                 (directory / (label + '-state.json')).write_text(json.dumps(state, indent=2) + '\n')
@@ -118,14 +148,16 @@ def main():
                 command = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'json', config['output']]
                 decoded = json.loads(subprocess.check_output(command, text=True))['streams']
                 require(len(decoded) == 1 and int(decoded[0]['nb_read_frames']) == args.expected_frames, 'output media has wrong decoded count')
-                results.append({'case': label, 'passed': True, 'frames': args.expected_frames})
+                results.append({'case': label, 'passed': True, 'frames': args.expected_frames,
+                                'stop_restart_verified': args.lifecycle})
                 (directory / 'summary.json').write_text(json.dumps(results, indent=2) + '\n')
                 print(label, 'PASS', flush=True)
         require(hashlib.sha256(source.read_bytes()).hexdigest() == identity, 'input changed during service test')
         require(all(hashlib.sha256((harness.BIN / name).read_bytes()).hexdigest() == digest
                     for name, digest in binaries.items()), 'service binary changed during test')
         (directory / 'COMPLETE.json').write_text(json.dumps({'status': 'functional-four-combinations-passed', 'input_sha256': identity,
-            'expected_frames': args.expected_frames, 'performance_acceptance': False}) + '\n')
+            'expected_frames': args.expected_frames, 'stop_restart_cases': 4 if args.lifecycle else 0,
+            'performance_acceptance': False}) + '\n')
     finally:
         server.terminate()
         try: server.wait(timeout=15)
