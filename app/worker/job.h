@@ -10,6 +10,9 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <libavcodec/async.h>
+#if !defined(AVCODEC_EARLY_OUTPUT_API_VERSION) || AVCODEC_EARLY_OUTPUT_API_VERSION != 1
+#error "Matching native decoder early-output observation API 1 is required"
+#endif
 typedef struct NakiWatermark NakiWatermark;
 typedef struct NakiOperations NakiOperations;
 /* Worker-private mutable state. Controller code uses job_api.h only. */
@@ -45,6 +48,8 @@ typedef struct JobProgress {
     int64_t auto_updated_us;
     NakiWritePhase write_phase;
     AVCodecAsyncAutoStats auto_stats;
+    AVCodecEarlyOutputStats early_stats;
+    int early_stats_available;
     int fixed_output_width,fixed_output_height;
 } JobProgress;
 

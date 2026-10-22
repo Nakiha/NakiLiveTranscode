@@ -46,9 +46,16 @@ int pipeline_interrupted(void *opaque) {
 
 void pipeline_refresh_auto(Pipeline *p) {
     AVCodecAsyncAutoStats stats={0};
-    if (p->async) avcodec_async_get_auto_stats(p->async,&stats);
+    AVCodecEarlyOutputStats early={0};
+    int early_ret=AVERROR(EINVAL);
+    if (p->async) {
+        avcodec_async_get_auto_stats(p->async,&stats);
+        early_ret=avcodec_async_get_early_output_stats(p->async,&early);
+    } else if (p->decoder)early_ret=avcodec_get_early_output_stats(p->decoder,&early);
     pthread_mutex_lock(&p->job->mutex);
     p->job->progress.auto_stats=stats;
+    p->job->progress.early_stats=early;
+    p->job->progress.early_stats_available=early_ret>=0;
     p->job->progress.auto_updated_us=now_us();
     pthread_mutex_unlock(&p->job->mutex);
 }

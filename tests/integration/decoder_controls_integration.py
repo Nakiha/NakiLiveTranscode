@@ -83,6 +83,7 @@ def main():
     ap.add_argument('--expected-frames', type=int, default=48)
     ap.add_argument('--results', type=Path)
     ap.add_argument('--lifecycle', action='store_true', help='Stop each active backend, then verify a complete restart')
+    ap.add_argument('--expected-early-path', choices=['any', 'h264_hrd', 'hevc_prefix', 'fallback'], default='any')
     ap.add_argument('--include-pump', action='store_true', help='Also check the two async pump configurations')
     args = ap.parse_args()
     if args.expected_frames <= 0:
@@ -145,6 +146,16 @@ def main():
             require(state['decoder_pump'] == int(pump), 'wrong pump status')
             require(state['decoder_early_output_requested'] == int(early), 'wrong early-output request status')
             require(state['frames_decoded'] == state['frames_filtered'] == state['packets_out'] == args.expected_frames, 'wrong complete service frame count')
+            observed = state['decoder_early_output']
+            require(observed['available'] and observed['api_version'] == 1, 'early-output observations unavailable')
+            modes = observed['selected_by_mode']
+            require(sum(modes.values()) == observed['selected_frames'] == args.expected_frames, 'wrong codec selection count')
+            require(sum(observed['picture_decisions'].values()) == observed['pictures'], 'wrong picture decision count')
+            require(observed['requested_poc'] == int(early), 'wrong decoder request observation')
+            if not early or args.expected_early_path == 'fallback':
+                require(observed['early_selected_frames'] == 0, 'unexpected early-output selection')
+            elif args.expected_early_path != 'any':
+                require(modes[args.expected_early_path] > 0, 'requested fast path was never exercised')
             frames = traces(state, args.expected_frames)
             source_ids = [x['input_sequence'] for x in frames]
             require(set(source_ids) == set(range(args.expected_frames)), 'duplicate/missing/unexpected source identities')

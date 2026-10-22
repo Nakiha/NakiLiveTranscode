@@ -256,6 +256,32 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     yyjson_mut_obj_add_uint(doc, a, "increases", job->progress.auto_stats.increases);
     yyjson_mut_obj_add_uint(doc, a, "decreases", job->progress.auto_stats.decreases);
     yyjson_mut_obj_add_val(doc, yyjson_mut_doc_get_root(doc), "auto", a);
+    const AVCodecEarlyOutputStats *early=&job->progress.early_stats;
+    yyjson_mut_val *observation=yyjson_mut_obj(doc),*modes=yyjson_mut_obj(doc),*decisions=yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_bool(doc,observation,"available",job->progress.early_stats_available);
+    yyjson_mut_obj_add_str(doc,observation,"scope","codec_selected_lifetime_not_muxed;flush_cancel_may_discard");
+    yyjson_mut_obj_add_int(doc,observation,"api_version",early->version);
+    yyjson_mut_obj_add_int(doc,observation,"requested_poc",early->requested_poc);
+    yyjson_mut_obj_add_int(doc,observation,"requested_idr",early->requested_idr);
+    yyjson_mut_obj_add_uint(doc,observation,"pictures",early->pictures);
+    yyjson_mut_obj_add_uint(doc,observation,"candidate_pictures",early->candidate_pictures);
+    yyjson_mut_obj_add_uint(doc,observation,"suppressed_duplicates",early->suppressed_frames);
+    yyjson_mut_obj_add_str(doc,observation,"last_worker_decision",job->progress.early_stats_available?
+        avcodec_early_output_reason_name(early->last_reason):"unavailable");
+    const char *mode_names[]={"ordinary","h264_hrd","h264_verified","hevc_idr","hevc_prefix"};
+    uint64_t total=0,fast=0;
+    for(int i=0;i<AV_EARLY_MODE_COUNT;i++) {
+        yyjson_mut_obj_add_uint(doc,modes,mode_names[i],early->frames[i]);
+        total+=early->frames[i];if(i)fast+=early->frames[i];
+    }
+    yyjson_mut_obj_add_uint(doc,observation,"selected_frames",total);
+    yyjson_mut_obj_add_uint(doc,observation,"early_selected_frames",fast);
+    for(int i=0;i<AV_EARLY_REASON_COUNT;i++)
+        yyjson_mut_obj_add_uint(doc,decisions,avcodec_early_output_reason_name(i),early->decisions[i]);
+    yyjson_mut_obj_add_val(doc,observation,"selected_by_mode",modes);
+    yyjson_mut_obj_add_val(doc,observation,"picture_decisions",decisions);
+    yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"decoder_early_output",observation);
+
     pthread_mutex_unlock(&job->mutex);
     if(!job->parent) {
     LoggerStats stats; logger_get_stats(job->logger,&stats);yyjson_mut_val *logging=yyjson_mut_obj(doc);

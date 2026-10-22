@@ -113,3 +113,27 @@ The current batch's platform-specific execution results are in the accompanying
 specialized malformed-AU/OOM/thread review of that redesign, realistic sustained
 load/CPU/queue age and complete-service P95/P99 comparisons. Keep current
 defaults while those gates are incomplete.
+
+## Actual codec selections
+
+`decoder_early_output` in a job **request** remains the independent initialization
+boolean. The object of the same name in a job **status** is an observation:
+`available`, `api_version`, `requested_poc`, `requested_idr`, `pictures`,
+`candidate_pictures`, `selected_frames`, `early_selected_frames`,
+`suppressed_duplicates`, `last_worker_decision`, `selected_by_mode` and
+`picture_decisions`. Modes distinguish ordinary selection, H264 HRD, externally
+verified H264, HEVC IDR and HEVC prefix selection. The service never asserts an
+external H264 verified-even input contract.
+
+These lifetime counters come from the decoder and survive flush. They count
+frames committed to codec queues, not service receives or actual mux writes;
+flush/cancel can discard queued selections. Snapshots are approximate while
+workers run. Picture decisions count completed access units and identify such
+conditions as missing HRD/CFR declarations, unsupported pictures, parameter
+changes, missing anchors, presentation gaps and output allocation failures.
+A decision is not a per-output fallback reason. Use `packets_out` and frame traces
+for actual completed local writes; the selected-frame counters cannot replace
+those measurements. Counts are retained after decoder teardown for final status.
+
+Current implementation and local acceptance evidence:
+[early-output stability](decoder-early-output-stability-20261022.md).

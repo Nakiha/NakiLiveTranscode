@@ -3251,6 +3251,64 @@
           "stop_origin_request_id": {
             "type": "string",
             "maxLength": 128
+          },
+          "decoder_early_output": {
+            "type": "object",
+            "description": "Native codec lifetime observations, API v1. Approximate while running; codec-selected counts are not muxed counts and flush/cancel can discard queued selections. Independent from the initialization boolean of the same name in JobConfig. See decoder-controls-20261022.md.",
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "api_version": {
+                "type": "integer"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "requested_poc": {
+                "type": "integer"
+              },
+              "requested_idr": {
+                "type": "integer"
+              },
+              "pictures": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "candidate_pictures": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "selected_frames": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "early_selected_frames": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "suppressed_duplicates": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "last_worker_decision": {
+                "type": "string"
+              },
+              "selected_by_mode": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "picture_decisions": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
           }
         },
         "additionalProperties": true

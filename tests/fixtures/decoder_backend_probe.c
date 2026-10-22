@@ -87,7 +87,17 @@ int main(int argc,char **argv) {
                 if(!eof)av_usleep(100);
             }
             assert(closed&&next==count&&produced==expected);
+            AVCodecEarlyOutputStats before,after;
+            assert((async?avcodec_async_get_early_output_stats(async,&before):avcodec_get_early_output_stats(decoder,&before))>=0);
+            assert(before.version==AVCODEC_EARLY_OUTPUT_API_VERSION&&before.requested_poc==early);
+            uint64_t total=0,early_total=0,decisions=0;
+            for(int i=0;i<AV_EARLY_MODE_COUNT;i++){total+=before.frames[i];if(i)early_total+=before.frames[i];}
+            for(int i=0;i<AV_EARLY_REASON_COUNT;i++)decisions+=before.decisions[i];
+            assert(total==(uint64_t)(cycle+1)*expected&&decisions==before.pictures);
+            assert(early||!early_total);
             if(async)assert(avcodec_async_flush(async)>=0);else avcodec_flush_buffers(decoder);
+            assert((async?avcodec_async_get_early_output_stats(async,&after):avcodec_get_early_output_stats(decoder,&after))>=0);
+            assert(!memcmp(&before,&after,sizeof(before)));
         }
         avcodec_async_free(&async);avcodec_free_context(&decoder);
         printf("PASS backend=%s early=%d cycles=%d expected=%d\n",backend==0?"sync":backend==1?"async-fixed":"async-auto",early,cycles,expected);
