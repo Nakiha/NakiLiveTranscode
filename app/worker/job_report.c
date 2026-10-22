@@ -167,6 +167,9 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_int(doc,"frames_dropped_rate",job->stats.frames_dropped_rate);
     json_str(doc,"rate_control",job->config.constrained_crf?"constrained_crf":(job->config.cqf?"cqf":"bitrate"));
     json_int(doc,"decoder_pump",job->config.decoder_pump);
+    json_int(doc,"decoder_async",job->config.decoder_async);
+    json_int(doc,"decoder_auto_threads",job->config.decoder_async&&job->config.decoder_auto_threads);
+    json_int(doc,"decoder_early_output_requested",job->config.decoder_early_output);
     json_int(doc,"codec_trace",job->config.codec_trace);
     json_int(doc,"reader_queue_capacity",job->config.reader_queue_capacity);
     if(job->config.constrained_crf) {json_int(doc,"crf",job->config.qp);json_int(doc,"source_rate_limit",job->config.source_rate_limit);json_int(doc,"rate_window_ms",1000);}

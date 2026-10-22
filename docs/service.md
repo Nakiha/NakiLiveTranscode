@@ -116,7 +116,7 @@ worker 默认每 10 秒生成 status，由自身 logger 写进程事件文件；
 | `ingress_to_mux_ms` | 上述视频包 ingress → 对应转码包完成本地 mux/AVIO flush；不含 ingress 之前的探流/pace/追踪准备 |
 | `scheduled_to_mux_ms` | 文件回放计划到达时间 → 写出，只有 pace=true 时出现，暴露反压积压 |
 
-`ingress_to_mux_ms` 是**服务内部端到端时延**，不是源端采集到播放器显示时延。它不含收到包之前的网络/探测缓冲，也不代表接收端已收到或显示；写文件完成不等于 fsync 持久化。`decoder_ready.startup_ms` 从完整 HTTP 请求进入业务回调开始，截止 async decoder 初始化；完整启动耗时看 `startup.request_to_first_video_mux_ms` / `request_to_first_key_mux_ms` 和无条件输出的 `first_frame` 事件。它们包含校验、进程等待/创建、IPC、输入打开探测和首帧各阶段，仍不包含 HTTP 上传之前/期间或接收端显示。摘要对已经输出的帧统计；失败或取消时未输出帧不进入耗时均值。
+`ingress_to_mux_ms` 是**服务内部端到端时延**，不是源端采集到播放器显示时延。它不含收到包之前的网络/探测缓冲，也不代表接收端已收到或显示；写文件完成不等于 fsync 持久化。`decoder_ready.startup_ms` 从完整 HTTP 请求进入业务回调开始，截止所选 decoder 后端初始化；完整启动耗时看 `startup.request_to_first_video_mux_ms` / `request_to_first_key_mux_ms` 和无条件输出的 `first_frame` 事件。它们包含校验、进程等待/创建、IPC、输入打开探测和首帧各阶段，仍不包含 HTTP 上传之前/期间或接收端显示。摘要对已经输出的帧统计；失败或取消时未输出帧不进入耗时均值。
 
 时延统计覆盖每个成功输出视频帧，不受逐帧明细采样或日志队列丢弃影响；输入 I/首 I/后续 I、decoded key 和 output key 分开，窗口不重叠。日志队列满时丢弃日志并计数，不等待日志 I/O；锁外准备仍有并发/输入/scratch 上限，见[事件合同](process-events.md)。`bytes_out` 是所有音视频 AVIO 累计字节，`encoded_bytes` 是单包视频载荷；`packets_in/out` 保持视频口径，音频另有 audio_packets_out。interleave_call_ms 从编码包返回到 av_write_frame（含 TS PES flush）返回，包含交织排队；interleave_queue_ms 单列实际写前等待，avio_flush_ms 单列其后 AVIO flush，不能把这些重叠字段相加。TCP/UDP socket API 观测不与逐帧指标混用，也不覆盖 libsrt 内部 UDP socket。
 
@@ -137,3 +137,6 @@ worker 默认每 10 秒生成 status，由自身 logger 写进程事件文件；
 轻量崩溃测试：`python3 tests/crash_integration.py`，覆盖真实非法访问、线程/栈溢出、持锁故障、超时与权限降级、限额、worker/HTTP 崩溃报告和接管。见 [崩溃采集验证记录](validation-crashes-20261016.md)。
 
 [新增验证记录](validation-observability-20261016.md)；容器测试为 `python3 tests/docker_smoke.py`（先构建镜像）。
+
+
+实验性解码后端控制与四组合入口见 [decoder controls](decoder-controls-20261022.md)。`decoder_async=false` 选择同步接口，`decoder_auto_threads=false` 固定 async 派发线程上限；两者默认 true，保持已有行为。`decoder_pump` 仍是独立的 async 前端线程开关。

@@ -13,7 +13,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     Config c = {.bitrate=1500000, .max_threads=12, .min_threads=2, .budget_slots=12,
                 .queue_capacity=4, .encoder_threads=2, .fps=25, .frame_log_every=1, .slow_frame_ms=200,
                 .audio_copy=1, .mux_wait_ms=50, .qp=32, .reader_queue_capacity=8, .encoder_bit_depth=10, .encoder_input_bit_depth=10,
-                .decoder_early_output=-1};
+                .decoder_early_output=-1, .decoder_async=1, .decoder_auto_threads=1};
     strcpy(c.output_format, "mpegts");
     strcpy(c.encoder, "libx264");
     strcpy(c.single_output_id,"main");
@@ -51,7 +51,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
                 strlen(yyjson_get_str(val)) != yyjson_get_len(val)) { bad(error,cap,"Invalid string field"); goto end; }
             strcpy(dest, yyjson_get_str(val)); continue;
         }
-        if (!strcmp(name,"pace") || !strcmp(name,"frame_log") || !strcmp(name,"audio_copy") || !strcmp(name,"network_trace") || !strcmp(name,"rtmp_tcp_nodelay") || !strcmp(name,"source_rate_limit") || !strcmp(name,"decoder_pump") || !strcmp(name,"decoder_early_output") || !strcmp(name,"codec_trace") || !strcmp(name,"encoder_native8_reference")) {
+        if (!strcmp(name,"pace") || !strcmp(name,"frame_log") || !strcmp(name,"audio_copy") || !strcmp(name,"network_trace") || !strcmp(name,"rtmp_tcp_nodelay") || !strcmp(name,"source_rate_limit") || !strcmp(name,"decoder_pump") || !strcmp(name,"decoder_early_output") || !strcmp(name,"decoder_async") || !strcmp(name,"decoder_auto_threads") || !strcmp(name,"codec_trace") || !strcmp(name,"encoder_native8_reference")) {
             if (!yyjson_is_bool(val)) { bad(error,cap,"Expected boolean"); goto end; }
             if(!strcmp(name,"pace"))c.pace=yyjson_get_bool(val);
             else if(!strcmp(name,"audio_copy"))c.audio_copy=yyjson_get_bool(val);
@@ -60,6 +60,8 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
             else if(!strcmp(name,"codec_trace"))c.codec_trace=yyjson_get_bool(val);
             else if(!strcmp(name,"decoder_pump"))c.decoder_pump=yyjson_get_bool(val);
             else if(!strcmp(name,"decoder_early_output"))c.decoder_early_output=yyjson_get_bool(val);
+            else if(!strcmp(name,"decoder_async"))c.decoder_async=yyjson_get_bool(val);
+            else if(!strcmp(name,"decoder_auto_threads"))c.decoder_auto_threads=yyjson_get_bool(val);
             else if(!strcmp(name,"source_rate_limit"))c.source_rate_limit=yyjson_get_bool(val);
             else if(!strcmp(name,"rtmp_tcp_nodelay"))c.rtmp_tcp_nodelay=yyjson_get_bool(val);
             else c.frame_log=yyjson_get_bool(val);
@@ -90,6 +92,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         if (!yyjson_is_int(val) || yyjson_get_sint(val)<min || yyjson_get_sint(val)>max) {bad(error,cap,"Integer out of range"); goto end;}
         *field=(int)yyjson_get_sint(val);
     }
+    if(c.decoder_pump&&!c.decoder_async) {bad(error,cap,"decoder_pump requires decoder_async");goto end;}
     int multi=naki_outputs_parse(root,&c,error,cap);
     if(multi<0)goto end;
     if(multi) {

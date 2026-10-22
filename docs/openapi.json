@@ -1515,7 +1515,7 @@
           "decoder_pump": {
             "type": "boolean",
             "default": false,
-            "description": "Direct output only: dedicated owner of async decode frontend with one bounded dispatch slot."
+            "description": "Direct output only: dedicated owner of async decode frontend with one bounded dispatch slot; requires decoder_async=true. This is not the async backend switch."
           },
           "codec_trace": {
             "type": "boolean",
@@ -1544,6 +1544,16 @@
             "type": "boolean",
             "default": false,
             "description": "Experimental byte reference buffers and integer ME SIMD; direct guarded live CQF, internal 8-bit only. Fractional prediction and residuals retain signed working precision."
+          },
+          "decoder_async": {
+            "type": "boolean",
+            "default": true,
+            "description": "Initialization-only decoder backend. true uses the existing asynchronous owner; false uses synchronous send/receive on the pipeline owner. Independent of decoder_early_output. decoder_pump requires true. Synchronous calls may block for decoding."
+          },
+          "decoder_auto_threads": {
+            "type": "boolean",
+            "default": true,
+            "description": "Async-only pressure-based dispatch/budget control. false keeps fixed max_threads for controlled comparisons. Ignored when decoder_async=false; no async budget is created there. Omission preserves the existing automatic async default."
           }
         },
         "allOf": [

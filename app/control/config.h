@@ -27,6 +27,7 @@ typedef struct Config {
     int network_trace,encoder_max_future_frames,rtmp_tcp_nodelay;
     int reader_queue_capacity,constrained_crf,source_rate_limit,decoder_pump,codec_trace;
     int decoder_early_output; /* -1=omitted legacy defaults; boolean override is independent of async/pump */
+    int decoder_async,decoder_auto_threads; /* defaults true; auto applies only to async */
     int audio_copy, mux_wait_ms;
     int output_fps,cqf,qp,maxrate,encoder_bit_depth,encoder_input_bit_depth,encoder_native8_reference;
     char single_output_id[33]; /* Logical identity; output_count still selects direct vs branch execution. */
