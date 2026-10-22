@@ -137,6 +137,14 @@ def main():
                         require(state['frames_decoded']==state['frames_filtered']==state['packets_out']==count,'declared frame count mismatch')
                         require(state['decoder_async']==int(asynchronous) and state['decoder_pump']==int(pump) and
                                 state['decoder_auto_threads']==0 and state['decoder_early_output_requested']==int(early),'wrong controls')
+                        observed=state['decoder_early_output']
+                        require(observed['available'] and observed['selected_frames']==count and
+                                sum(observed['selected_by_mode'].values())==count,'invalid complete codec observations')
+                        require(early or observed['early_selected_frames']==0,'disabled policy selected early frames')
+                        expected_path=entry.get('expected_early_path')
+                        if early and expected_path:
+                            if expected_path=='fallback':require(observed['early_selected_frames']==0,'fallback unexpectedly selected early frames')
+                            else:require(observed['selected_by_mode'][expected_path]>0,'expected early path was not exercised')
                         rows=traces(state,count)
                         ordered=[(r['pts_us'],r['input_sequence'],r['decoded_picture_type'],r['decoded_key']) for r in rows]
                         require(set(r['input_sequence'] for r in rows)==set(range(count)),'missing/duplicate source IDs')
@@ -148,7 +156,7 @@ def main():
                         require(len(output)==1 and int(output[0]['nb_read_frames'])==count,'decoded output count mismatch')
                         fields=['ingress_to_mux_ms','input_queue_ms','decoder_submit_to_receive_ms','decode_ms']
                         result=dict(case=label,input=entry['case'],repeat=repeat,asynchronous=asynchronous,early=early,pump=pump,
-                                    frames=count,post_accept_to_terminal_s=terminal_elapsed,
+                                    frames=count,post_accept_to_terminal_s=terminal_elapsed,codec_observation=observed,
                                     all={f:distribution(rows,f) for f in fields},
                                     steady={f:distribution(rows[32:-48],f) for f in fields})
                         results.append(result)

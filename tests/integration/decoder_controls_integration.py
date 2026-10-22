@@ -98,6 +98,8 @@ def main():
         directory = Path(tempfile.mkdtemp(prefix='decoder-controls-', dir=ROOT / 'out'))
     source = args.input.resolve() if args.input else directory / 'hrd-b3.mp4'
     if not args.input:
+        if args.expected_early_path == 'any':
+            args.expected_early_path = 'h264_hrd'
         command = ['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=60', '-frames:v', str(args.expected_frames),
                    '-c:v', 'libx264', '-threads', '2', '-preset', 'veryfast', '-x264-params',
                    'keyint=48:min-keyint=48:scenecut=0:bframes=3:b-adapt=0:force-cfr=1:nal-hrd=vbr:vbv-maxrate=1200:vbv-bufsize=2400', '-an', str(source)]
