@@ -54,7 +54,7 @@ typedef struct Stamp {
     int64_t network_first_read_us,network_complete_us,demux_finished_us,network_tag_position;
     int encoder_future_frames,actual_slice_qp,decoder_tracked;
     NakiRateDecision rate;
-    int64_t async_ready_us,decoder_owner_us;
+    int64_t async_ready_us,decoder_owner_us,decoder_receive_us,submit_first_us;
     int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
     int64_t encoder_submit_us, encoder_accepted_us, scheduled_us, filter_started_us;
     int picture_type, decoded_key, input_key, first_i;
@@ -91,6 +91,7 @@ typedef struct Pipeline {
     AVFormatContext *input, *output;
     AVCodecContext *decoder, *encoder;
     AVCodecAsyncContext *async;
+    int64_t decoder_receive_us; /* receive return, written only by decoder frontend owner */
     AVFilterGraph *graph;
     AVFilterContext *source, *sink;
     NakiWatermarkCompositor *watermark_compositor;

@@ -140,6 +140,15 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     json_int(doc,"intra_reason",stamp.intra_reason);
     char output_type[2]={av_get_picture_type_char(actual_picture_type),0}; json_str(doc,"output_picture_type",output_type);
     json_int(doc,"input_sequence",stamp.sequence); json_int(doc,"pts_us",pts_us);
+    json_int(doc,"decoder_async",p->job->config.decoder_async);
+    json_int(doc,"decoder_auto_threads",p->job->config.decoder_async&&p->job->config.decoder_auto_threads);
+    if(stamp.decoder_receive_us&&stamp.submit_first_us) {
+        json_int(doc,"decoder_first_submit_monotonic_us",stamp.submit_first_us);
+        json_int(doc,"decoder_receive_monotonic_us",stamp.decoder_receive_us);
+        json_num(doc,"decoder_submit_retry_ms",(stamp.submitted_us-stamp.submit_first_us)/1000.0);
+        json_num(doc,"decoder_submit_to_receive_ms",(stamp.decoder_receive_us-stamp.submitted_us)/1000.0);
+        json_num(doc,"decoder_receive_to_prepare_ms",(stamp.decoded_us-stamp.decoder_receive_us)/1000.0);
+    }
     json_int(doc,"output_dts_us",av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q));
     json_int(doc,"encoded_bytes",bytes);
     if(p->job->config.network_trace) {

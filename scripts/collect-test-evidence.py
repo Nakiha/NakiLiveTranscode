@@ -22,8 +22,20 @@ def collect(root, entries, destination):
         summary = entry / 'summary.json'
         if summary.is_file() and not summary.is_symlink():
             try:
-                for step in json.loads(summary.read_text()).get('steps', []):
-                    pending.extend(pathlib.Path(p) for p in step.get('artifacts', []))
+                payload = json.loads(summary.read_text())
+                # Suite summaries can be arrays of case results. Retain them
+                # as evidence; only runner objects contain artifact references.
+                if isinstance(payload, list):
+                    continue
+                if not isinstance(payload, dict) or not isinstance(payload.get('steps', []), list):
+                    raise ValueError('Summary must be an object or array; runner steps must be an array')
+                for step in payload.get('steps', []):
+                    if not isinstance(step, dict):
+                        raise ValueError('Runner step must be an object')
+                    artifacts = step.get('artifacts', [])
+                    if not isinstance(artifacts, list) or not all(isinstance(p, str) for p in artifacts):
+                        raise ValueError('Runner artifacts must be an array of paths')
+                    pending.extend(pathlib.Path(p) for p in artifacts)
             except (OSError, ValueError, TypeError) as error:
                 errors.append(f'{summary}: {error}')
     for entry in pending:

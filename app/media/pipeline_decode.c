@@ -29,6 +29,7 @@ static void *decode_main(void *opaque) {
         pthread_mutex_lock(&q->mutex);available=!q->occupied;pthread_mutex_unlock(&q->mutex);
         if(available) {
             ret=avcodec_async_receive_frame(p->async,frame);
+            if(ret>=0)p->decoder_receive_us=now_us();
             if(ret==AVERROR_EOF){ret=0;break;}
             if(ret>=0) {
                 if(!pipeline_stamp_valid(frame->opaque_ref)){ret=AVERROR_INVALIDDATA;break;}
@@ -80,7 +81,11 @@ static void *decode_main(void *opaque) {
             pthread_mutex_unlock(&q->mutex);
             if(progress)wake_job(p->job);
         } else if(pending.packet||(done&&!eof_sent)) {
-            if(pending.packet)((Stamp *)pending.packet->opaque_ref->data)->submitted_us=now_us();
+            if(pending.packet) {
+                Stamp *stamp=(Stamp *)pending.packet->opaque_ref->data;
+                stamp->submitted_us=now_us();
+                if(!stamp->submit_first_us)stamp->submit_first_us=stamp->submitted_us;
+            }
             ret=avcodec_async_send_packet(p->async,pending.packet);
             if(!ret) {if(pending.packet)pipeline_input_free(&pending);else eof_sent=1;progress=1;}
             else if(ret==AVERROR(EAGAIN))ret=0;

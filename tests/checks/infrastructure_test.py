@@ -166,6 +166,53 @@ class Infrastructure(unittest.TestCase):
         self.assertEqual(report['status'], 'complete')
         self.assertTrue(report['files'][0]['sha256'])
 
+    def test_array_summary_is_opaque_and_runner_references_are_collected(self):
+        root = self.path / 'out'
+        root.mkdir()
+        runner, decoder, previous = [root / name for name in ('checks-new', 'decoder-new', 'previous')]
+        for path in (runner, decoder, previous):
+            path.mkdir()
+        payload = json.dumps([dict(passed=True, steps=[dict(artifacts=[str(self.source)])])])
+        (decoder / 'summary.json').write_text(payload)
+        (decoder / 'frames.json').write_text('[0,1,2]')
+        (previous / 'old.log').write_text('referenced existing evidence')
+        (runner / 'summary.json').write_text(json.dumps(dict(steps=[dict(artifacts=[str(previous)])])))
+        saved = self.path / 'saved-array'
+        report = collector.collect(root, [runner, decoder], saved)
+        self.assertEqual(report['status'], 'complete', report)
+        self.assertEqual(len(report['files']), 4)
+        self.assertEqual((saved / 'out/decoder-new/summary.json').read_text(), payload)
+        self.assertTrue((saved / 'out/previous/old.log').is_file())
+
+    def test_array_summary_cli_preserves_success_and_failed_command_exit(self):
+        program = ("import json,pathlib,sys; p=pathlib.Path(sys.argv[1])/'decoder-new'; p.mkdir(); "
+                   "(p/'summary.json').write_text(json.dumps([{'passed': True}])); sys.exit(int(sys.argv[2]))")
+        for code in (0, 7):
+            with self.subTest(code=code):
+                root = self.path / f'out-{code}'
+                destination = root / 'results'
+                result = subprocess.run([sys.executable, str(ROOT / 'scripts/collect-test-evidence.py'),
+                    '--root', str(root), '--destination', str(destination), '--',
+                    sys.executable, '-c', program, str(root), str(code)], capture_output=True, timeout=15)
+                self.assertEqual(result.returncode, code, result.stderr)
+                report = json.loads(next(destination.glob('*/collection.json')).read_text())
+                self.assertEqual(report['test_exit_code'], code)
+                self.assertEqual(report['status'], 'complete', report)
+                self.assertEqual(len(report['files']), 1)
+
+    def test_malformed_runner_summary_fails_without_losing_raw_evidence(self):
+        root = self.path / 'out'
+        root.mkdir()
+        entry = root / 'checks-new'
+        entry.mkdir()
+        for index, payload in enumerate([None, 'scalar', dict(steps=None), dict(steps=[1]), dict(steps=[dict(artifacts=[1])])]):
+            with self.subTest(payload=payload):
+                (entry / 'summary.json').write_text(json.dumps(payload))
+                report = collector.collect(root, [entry], self.path / f'invalid-summary-{index}')
+                self.assertEqual(report['status'], 'failed', report)
+                self.assertTrue(report['errors'])
+                self.assertEqual(len(report['files']), 1)
+
     def test_benchmark_strict_option_and_controller_credit_metadata(self):
         config = self.path / 'config.json'
         config.write_text(json.dumps(dict(input=str(self.source), network_trace=True,

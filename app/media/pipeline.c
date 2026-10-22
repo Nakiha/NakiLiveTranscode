@@ -1,4 +1,6 @@
 #include "pipeline_internal.h"
+#include "decode_output_policy.h"
+#include "decode_backend.h"
 
 static int handle_audio(Pipeline *p, const InputItem *item);
 int pipeline_stamp_valid(const AVBufferRef *ref) {
@@ -303,6 +305,7 @@ int pipeline_prepare_decoded_frame(Pipeline *p, AVFrame *frame) {
     int ret=av_buffer_make_writable(&frame->opaque_ref);
     if (ret<0) return ret;
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
+    stamp->decoder_receive_us=p->decoder_receive_us;
     stamp->decoded_us=now_us();
     if(p->job->config.codec_trace) {
         AVFrameSideData *sd=av_frame_get_side_data(frame,AV_FRAME_DATA_LIVE_DECODE_TRACE);
@@ -485,7 +488,7 @@ static int initialize_decoder(Pipeline *p) {
     if(ret<0)return ret;
     p->frame_rate=p->video_rate.value;
     pthread_mutex_lock(&p->job->mutex);p->job->progress.video_rate=p->video_rate;pthread_mutex_unlock(&p->job->mutex);
-    p->stage="async decoder initialization";
+    p->stage=p->job->config.decoder_async?"async decoder initialization":"synchronous decoder initialization";
     const AVCodec *codec=avcodec_find_decoder(stream->codecpar->codec_id);
     if (!codec) return AVERROR_DECODER_NOT_FOUND;
     p->decoder=avcodec_alloc_context3(codec);
@@ -500,16 +503,11 @@ static int initialize_decoder(Pipeline *p) {
     p->decoder->thread_count=p->job->config.max_threads;
     p->decoder->thread_type=FF_THREAD_FRAME; p->decoder->flags|=AV_CODEC_FLAG_COPY_OPAQUE;
     p->decoder->max_pixels=NAKI_INPUT_MAX_PIXELS;
-    if(stream->codecpar->codec_id==AV_CODEC_ID_HEVC &&
-       (ret=av_opt_set_int(p->decoder->priv_data,"live_idr_early_output",1,0))<0) return ret;
-    if(stream->codecpar->codec_id==AV_CODEC_ID_HEVC &&
-       (ret=av_opt_set_int(p->decoder->priv_data,"live_poc_early_output",1,0))<0) return ret;
+    if((ret=naki_decode_output_policy(p->decoder,p->job->config.decoder_early_output))<0)return ret;
     if ((ret=avcodec_open2(p->decoder,codec,NULL))<0) return ret;
-    if ((ret=avcodec_async_create(&p->async,&p->decoder,p->job->config.queue_capacity,pipeline_decode_notify,p))<0) return ret;
-    AVCodecAsyncBudget *budget=NULL;
-    ret=avcodec_async_budget_create(&budget,p->job->config.budget_slots,NULL);
-    if (ret>=0) ret=avcodec_async_enable_auto(p->async,p->job->config.min_threads,budget);
-    avcodec_async_budget_free(&budget);
+    ret=naki_decode_backend_init(&p->decoder,&p->async,p->job->config.decoder_async,
+        p->job->config.decoder_auto_threads,p->job->config.queue_capacity,
+        p->job->config.min_threads,p->job->config.budget_slots,pipeline_decode_notify,p);
     if (ret<0) return ret;
     pipeline_refresh_auto(p);
     pipeline_checkpoint(p,&p->job->progress.decoder_ready_us);
@@ -758,12 +756,13 @@ void *pipeline_main(void *opaque) {
         uint64_t wake;
         while (read(job->wake_fd,&wake,sizeof(wake))<0 && errno==EINTR) {}
         int progress=0;
-        p.stage="async decode receive";
+        p.stage=job->config.decoder_async?"async decode receive":"synchronous decode receive";
         for (int batch=0;batch<1;batch++) {
-            ret=job->config.decoder_pump?pipeline_decode_receive(&p,frame,&pending):avcodec_async_receive_frame(p.async,frame);
+            ret=job->config.decoder_pump?pipeline_decode_receive(&p,frame,&pending):naki_decode_receive(p.decoder,p.async,frame);
             if (ret==AVERROR_EOF) {decoder_eof=1; ret=0; break;}
             if (ret==AVERROR(EAGAIN)) {ret=0; break;}
             if (ret<0) goto cleanup;
+            if(!job->config.decoder_pump)p.decoder_receive_us=now_us();
             ret=p.branches?fanout_frame(&p,frame):process_frame(&p,frame); av_frame_unref(frame);
             if (ret<0) goto cleanup;
             progress=1;
@@ -787,9 +786,13 @@ void *pipeline_main(void *opaque) {
         }
         if (input_done && input_error<0) {p.stage=p.sei_read_error?"input SEI parsing / complete-AU contract":"input read"; ret=input_error; goto cleanup;}
         if (!job->config.decoder_pump && (pending.packet || (input_done && !eof_sent))) {
-            p.stage="async decode submit";
-            if (pending.packet) ((Stamp *)pending.packet->opaque_ref->data)->submitted_us=now_us();
-            ret=avcodec_async_send_packet(p.async,pending.packet);
+            p.stage=job->config.decoder_async?"async decode submit":"synchronous decode submit";
+            if (pending.packet) {
+                Stamp *stamp=(Stamp *)pending.packet->opaque_ref->data;
+                stamp->submitted_us=now_us();
+                if(!stamp->submit_first_us)stamp->submit_first_us=stamp->submitted_us;
+            }
+            ret=naki_decode_send(p.decoder,p.async,pending.packet);
             if (!ret) {
                 if (pending.packet) pipeline_input_free(&pending); else eof_sent=1;
                 progress=1;

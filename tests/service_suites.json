@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "native_quick": ["decode-dispatch", "frame-policy", "frame-policy-config", "watermark-config", "branch-queue", "identity-intent", "control-spec", "sei", "component-update", "operation-store", "operation-cache", "audio-signature", "video-rate", "video-filter", "live-rate", "vvenc-input8", "native8", "event-logger", "logger-submit"],
+  "native_quick": ["decoder-controls", "decode-dispatch", "frame-policy", "frame-policy-config", "watermark-config", "branch-queue", "identity-intent", "control-spec", "sei", "component-update", "operation-store", "operation-cache", "audio-signature", "video-rate", "video-filter", "live-rate", "vvenc-input8", "native8", "event-logger", "logger-submit"],
   "suites": [
     {"id":"infrastructure", "script":"tests/checks/infrastructure_test.py", "profiles":["quick","full"], "binaries":["naki-live-transport-fixture"]},
     {"id":"organization", "script":"tests/checks/organization_test.py", "profiles":["quick","full"], "tools":["cc"]},
@@ -25,6 +25,7 @@
     {"id":"sei", "script":"tests/integration/sei_integration.py", "profiles":["full"], "binaries":["naki-sei-fixture","naki-sei-decode-probe","naki-live-hook-worker"]},
     {"id":"frame-policy", "script":"tests/integration/frame_policy_integration.py", "profiles":["full"]},
     {"id":"probe", "script":"tests/integration/probe_integration.py", "profiles":["full"], "binaries":["naki-probe-test","naki-probe-budget-test"], "indirect":["tests/support/probe_budget_integration.py"]},
+    {"id":"decoder-controls", "script":"tests/integration/decoder_controls_integration.py", "args":["--lifecycle"], "profiles":["full"], "tools":["ffmpeg","ffprobe"], "binaries":["naki-decoder-backend-probe"], "timeout_s":360},
     {"id":"decoder", "script":"tests/integration/decoder_integration.py", "profiles":["full"], "tools":["gcc","pkg-config"], "timeout_s":600, "indirect":["tests/support/input_reorder_matrix.py"], "sources":["experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/async_probe.c","experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_probe.c","experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_lifetime_test.c"]},
     {"id":"service", "script":"tests/integration/service_integration.py", "profiles":["full","sanitize"]},
     {"id":"cqf-rate", "script":"tests/integration/cqf_rate_integration.py", "profiles":["full"]},
