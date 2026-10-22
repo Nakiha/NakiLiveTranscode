@@ -9,8 +9,10 @@
 ## 实现和依赖身份
 
 - 应用功能来自 `c92dac4682134c853c3a44e4e7e068f77bb9d39f`。
-  此次后续改动是停止/重启检查、可指定次数的重放探针、CI 证据收集修复及技术说明；应用
-  `app/` 下的 C/H 未进一步变化。
+  初次 main 集成 `a5024a593a71018cc79c26f463dc4b9969890864` 的后续改动是
+  停止/重启检查、可指定次数的重放探针、CI 证据收集修复及技术说明；该次集成
+  没有进一步修改 `app/` 下的 C/H。下述控制恢复跟进另行修改
+  `app/controller/service_http.c`，不修改解码算法、默认值或 SDK pin。
 - FFmpeg 精确 pin 为 `2673319b815fa6da6fccd0c3801e099b2e473066`。
   它包含加固后的 AVC 实现及修正后的测试判定。其 codec 源码仍与 phase3
   一致，不能将 phase2 加固前性能写成该版本的测量。
@@ -112,6 +114,33 @@ steps/artifacts；保留非法引用、symlink、未封口 trace 和容量边界
 CI 状态按其精确提交另行读取，不能将旧 run 或本机检查写成新提交 CI passed。
 SDK 已归档在[精确依赖发布](https://github.com/Nakiha/NakiLiveTranscode/releases/tag/ffmpeg-linux-amd64-5306ab531bcb2e7af9fd1efe)，
 key 为 `5306ab531bcb2e7af9fd1efe`。本机模拟执行不用于容量结论。
+
+### main CI 的控制恢复跟进
+
+[初次 main CI](https://github.com/Nakiha/NakiLiveTranscode/actions/runs/39751904660)
+绑定 a5024a5：复用精确 SDK、镜像构建成功，full 前 38 步通过，第 39 步
+control-lifecycle 在恢复后重放已接受的创建请求时得到 HTTP 503，整体失败。
+修复后的证据收集器成功归档该失败，未继续消毒器、smoke 或最终打包。
+
+原因是创建入口先检查所有 worker 是否完成恢复，才查找已有 operation_id。
+即使活动任务已恢复，只要备用 worker 尚在恢复，读取已确认结果也被拒绝。
+跟进改动先核对保留记录及 fingerprint：相同意图返回已有结果，冲突返回
+409；没有记录的新任务仍经过所有恢复、冲突和准入检查，恢复期间继续 503。
+关闭服务、stop/update 和健康状态的门槛保持不变。
+
+回归主动 SIGSTOP 一个备用 worker，再重启控制器，在 readiness=false 且
+recovering>0 的窗口中同时核对已有创建重放成功、新创建被拒绝和指纹冲突。
+该定向用例先在旧代码上稳定复现 503。测试对需要新控制操作的步骤显式等待
+readiness，对新任务等待 admission，而不把 assignment 已恢复或创建 ACK
+误当成操作历史和整个池都已恢复。恢复关闭期间的负向断言保留。
+
+跟进本机结果：正常构建 control-lifecycle 7/7；注册入口 selected 3/3
+（SDK consumer、infrastructure 13 项及 control-lifecycle）；应用 ASan/UBSan
+下 acceptance-exit 与上述定向 targets-and-recovery 两项均通过。尝试把整个
+control-lifecycle 直接放进应用消毒器构建时，transient-recovery 的故障注入
+LD_PRELOAD 因 ASan runtime 排序检查退出，保留失败记录；不关闭该检查，
+不把未完成的完整消毒器运行算通过。该 full 专用套件与正式 sanitize 入口的
+覆盖范围保持分开。新提交的原生 CI 结果另行按提交读取。
 
 目标机仍需比较相同构建、相同固定线程/队列下的四组合：真实输入的 B3/B7/
 动态 B、持续吞吐、CPU/帧、RSS/FD、队列深度及最老帧年龄、首帧启动、服务

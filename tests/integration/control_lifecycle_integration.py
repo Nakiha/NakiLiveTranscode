@@ -59,8 +59,10 @@ def acceptance_exit():
             failure = future.result(timeout=1.5)
             assert time.monotonic() - began < 1.5, failure
         wait(lambda: not server.api()["supervisor"]["active"])
+        wait(lambda: server.api('/health')['admission']['open'])
         replacement = server.silent("replacement")
         assert replacement["supervisor"]["worker_pid"] != worker["pid"]
+        wait(lambda: server.api('/health')['readiness']['ready'])
         server.api("/v1/job/stop", {"job_id": replacement["job_id"]}, 202)
         wait(lambda: server.api()["state"] == "stopped")
         RESULTS["acceptance-exit-pending-request-reaped-next-admission"] = "passed"
@@ -70,21 +72,30 @@ def acceptance_exit():
 
 def targets_and_recovery():
     server = Server(RUN, "targets")
+    paused_spare = None
     try:
         first = server.silent("first")
+        wait(lambda: server.api('/health')['readiness']['ready'])
         server.api("/v1/job/stop", {}, 400)
         server.api("/v1/job/stop", {"job_id": "stale"}, 409)
         assert server.api()["job_id"] == first["job_id"] and server.api()["state"] != "stopped"
         server.api("/v1/job/stop", {"job_id": first["job_id"]}, 202)
         wait(lambda: server.api()["state"] == "stopped")
+        wait(lambda: server.api('/health')['admission']['open'])
         spec={"input":"udp://127.0.0.1:1","output":str(RUN/"second.ts")}
         second = server.api("/v1/jobs",{"operation_id":"create-second","spec":spec},202)
         replay=server.api("/v1/jobs",{"spec":dict(reversed(list(spec.items()))),"operation_id":"create-second"},202)
         assert replay["job_id"]==second["job_id"]
         server.api("/v1/jobs",{"operation_id":"create-second","spec":dict(spec,output=str(RUN/"conflict.ts"))},409)
+        wait(lambda: server.api('/health')['readiness']['ready'])
         server.api("/v1/jobs",{"operation_id":"different-create","spec":spec},409)
         server.api("/v1/job/stop", {"job_id": first["job_id"]}, 409)
         pid = second["supervisor"]["worker_pid"]
+        # Hold an unrelated standby unresolved across controller recovery.
+        # Known create outcomes remain readable; this must not admit a new job.
+        paused_spare = wait(lambda: next((w['pid'] for w in server.api('/health')['pool']['workers']
+                                         if w['state'] == 'ready' and w['pid'] != pid), None))
+        os.kill(paused_spare, signal.SIGSTOP)
         # Exercise the worker's second target check through its authenticated private endpoint.
         server.process.kill()
         server.process.wait(timeout=3)
@@ -110,13 +121,23 @@ def targets_and_recovery():
         wait(server.online)
         recovered = wait(lambda: (state if (state := server.api()).get("job_id") == second["job_id"] and state["supervisor"]["recovered"] else None))
         assert recovered["supervisor"]["worker_pid"] == pid
+        health = server.api('/health')
+        assert health['pool']['recovering'] > 0 and not health['readiness']['ready'], health
         replay=server.api("/v1/jobs",{"operation_id":"create-second","spec":spec},202)
         assert replay["job_id"]==second["job_id"]
+        server.api('/v1/jobs', {'operation_id': 'must-not-create-recovering', 'spec': spec}, 503)
+        server.api('/v1/jobs', {'operation_id': 'create-second', 'spec': dict(spec, output=str(RUN/'conflict-recovering.ts'))}, 409)
+        assert server.api()['job_id'] == second['job_id']
+        os.kill(paused_spare, signal.SIGCONT)
+        paused_spare = None
+        wait(lambda: server.api('/health')['readiness']['ready'])
         stop_path=f'/v1/jobs/{second["job_id"]}/stop'
         accepted_stop=server.api(stop_path,{"operation_id":"stop-second"},202)
         assert accepted_stop["kind"]=="stop" and accepted_stop["outcome_known"]
         wait(lambda: server.api()["state"] == "stopped")
+        wait(lambda: server.api('/health')['admission']['open'])
         third=server.silent("third")
+        wait(lambda: server.api('/health')['readiness']['ready'])
         replay=server.api("/v1/jobs",{"operation_id":"create-second","spec":spec},202)
         assert replay["job_id"]==second["job_id"] and server.api()["job_id"]==third["job_id"]
         replay_stop=server.api(stop_path,{"operation_id":"stop-second"},202)
@@ -132,6 +153,11 @@ def targets_and_recovery():
         wait(lambda:server.api()["state"]=="stopped")
         RESULTS["stale-http-and-private-ipc-targets-real-recovery"] = "passed"
     finally:
+        if paused_spare is not None:
+            try:
+                os.kill(paused_spare, signal.SIGCONT)
+            except ProcessLookupError:
+                pass
         server.close()
 
 
@@ -164,6 +190,7 @@ def transient_recovery():
         assert server.api("/health")["pool"]["recovering"]>0
         recovered=wait(lambda:(value if (value:=server.api()).get("job_id")==assigned["job_id"] and value["supervisor"]["recovered"] else None))
         assert recovered["supervisor"]["worker_pid"]==pid
+        wait(lambda: server.api('/health')['readiness']['ready'])
         assert server.api('/health/ready')['readiness']['ready']
         server.api("/v1/job/stop",{"job_id":assigned["job_id"]},202)
         wait(lambda:server.api()["state"]=="stopped")
@@ -255,6 +282,7 @@ def lost_acceptance():
         original=recovered["job_id"]
         retry=server.api("/v1/jobs",{"operation_id":"lost-ack-create","spec":spec},202)
         assert retry["job_id"]==original and recovered["supervisor"]["worker_pid"] in [w["pid"] for w in workers]
+        wait(lambda: server.api('/health')['readiness']['ready'])
         server.api("/v1/job/stop",{"job_id":original},202)
         wait(lambda:server.api()["state"]=="stopped")
         RESULTS["worker-owned-before-ack-http-loss-retry-recovers-original-job"]="passed"

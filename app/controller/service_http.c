@@ -254,8 +254,6 @@ void service_handle_request(struct evhttp_request *req,void *opaque) {
     if((!strcmp(uri,"/v1/job")||!strcmp(uri,"/v1/jobs")) && method==EVHTTP_REQ_POST) {
         int canonical=!strcmp(uri,"/v1/jobs");
         if(s->shutting_down) {service_error_reply(req,503,"Service is shutting down"); return;}
-        for(int i=0;i<MAX_WORKERS;i++)if(s->workers[i].pid && s->workers[i].needs_info) {service_error_reply(req,503,"Recovering existing workers"); return;}
-        if(s->recovery_conflict) {service_error_reply(req,503,"Multiple workers require operator reconciliation"); return;}
         yyjson_doc *envelope=read_body(req,16384);if(!envelope)return;
         yyjson_val *root=yyjson_doc_get_root(envelope),*spec=root;
         char operation_id[129];
@@ -280,6 +278,11 @@ void service_handle_request(struct evhttp_request *req,void *opaque) {
             else service_reply(req,503,service_creation_status(record));
             return;
         }
+        /* A matching retained create is a read of its known outcome, not new
+         * admission. An unrelated standby can still be reconciling after the
+         * active assignment has been recovered. Keep all new work gated. */
+        for(int i=0;i<MAX_WORKERS;i++)if(s->workers[i].pid && s->workers[i].needs_info) {yyjson_doc_free(parsed);service_error_reply(req,503,"Recovering existing workers"); return;}
+        if(s->recovery_conflict) {yyjson_doc_free(parsed);service_error_reply(req,503,"Multiple workers require operator reconciliation"); return;}
         if(s->active) {yyjson_doc_free(parsed);service_error_reply(req,409,"Single-stream service already has an active job");return;}
         const char *closed=service_admission_reason(s,received);
         if(closed) {yyjson_doc_free(parsed);service_error_reply(req,503,closed);return;}
