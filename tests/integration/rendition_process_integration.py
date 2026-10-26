@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -56,6 +57,7 @@ class Harness:
         self.private = tempfile.TemporaryDirectory(prefix='rp-', dir='/tmp')
         self.server = None
         self.logs = []
+        self.crash_directory = None
 
     def api(self, path='/v1/job', body=None, expected=200):
         request = urllib.request.Request(self.base + path, data=None if body is None else json.dumps(body).encode(),
@@ -82,7 +84,9 @@ class Harness:
                 return health if (health['readiness']['ready'] if recovering else health['admission']['open']) else None
             except OSError:
                 return None
-        return wait(ready)
+        health=wait(ready)
+        self.crash_directory=Path(health['crash_report_dir'])
+        return health
 
     def close(self):
         if self.server and self.server.poll() is None:
@@ -95,6 +99,14 @@ class Harness:
                 raise
         for log in self.logs:
             log.close()
+        # On WSL the collector deliberately uses a private Linux directory if
+        # the workspace cannot enforce 0700. Preserve reports before cleanup.
+        if self.crash_directory and self.crash_directory.is_dir():
+            reports=self.run/'crash-reports';reports.mkdir(exist_ok=True)
+            for path in self.crash_directory.glob('crash-*.json'):
+                target=reports/path.name
+                if target.exists():require(target.read_bytes()==path.read_bytes(),'crash evidence changed')
+                else:shutil.copy2(path,target)
         self.private.cleanup()
 
 
@@ -306,7 +318,7 @@ def fault_case(harness, sample, frames, fault):
             observed.setdefault(packets, set()).add(sampled)
         require(any(len(values) >= 2 for values in observed.values()), 'did not observe a live control heartbeat while media stalled')
     reports = []
-    for path in (harness.run / 'logs/crashes').glob('*.json'):
+    for path in harness.crash_directory.glob('crash-*.json'):
         report = json.loads(path.read_text())
         if report.get('rendition_id') == 'bad':
             reports.append(report)

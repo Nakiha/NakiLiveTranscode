@@ -64,7 +64,7 @@ class Entrypoints(unittest.TestCase):
         self.assertIn('tests/integration/docker_smoke.py', self.catalog['separate_gates'])
         self.assertIn('tests/checks/workflow_publication_test.py', self.catalog['separate_gates'])
         sanitized = {row['id'] for row in suites.values() if 'sanitize' in row['profiles']}
-        self.assertEqual(sanitized, {'service', 'multi-output', 'watermark-review', 'lifecycle-media'})
+        self.assertEqual(sanitized, {'service', 'multi-output', 'watermark-review', 'lifecycle-media', 'renditions-sanitize'})
 
     def test_selection_is_profile_bounded_and_preserves_catalog_order(self):
         args = runner.parse_args(['full', '--suite', 'live-mux', '--suite', 'service'])

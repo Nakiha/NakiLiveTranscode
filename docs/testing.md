@@ -14,7 +14,7 @@ bash scripts/test-sanitizers.sh
 
 | 入口 | 实际覆盖 | 不代表什么 |
 | --- | --- | --- |
-| quick | 27 个带 quick 标签的原生测试；入口失败传播/超时/覆盖保护；SDK identity/expectation、发布绑定、事件维护检查 | 不跑服务媒体、真实网络、进程接管、完整崩溃或容量测量；并非纯静态 lint，部分检查会编译微型 ELF/创建临时 Git 仓库 |
+| quick | 28 个带 quick 标签的原生测试；入口失败传播/超时/覆盖保护；SDK identity/expectation、发布绑定、事件维护检查 | 不跑服务媒体、真实网络、进程接管、完整崩溃或容量测量；并非纯静态 lint，部分检查会编译微型 ELF/创建临时 Git 仓库 |
 | full | quick 加原 ci-test.sh 的全部 Python 套件，以及单/多输出生命周期矩阵：构建缓存、媒体/水印/SEI/音频/帧率/队列、真实传输、控制与接管、健康、finalize、崩溃、独立符号；保留原 VVC 单次测量 | 不包含实际 Docker smoke、外部采集、目标机器容量、24/72 小时 soak；单次 VVC 结果不是稳定性能结论 |
 | sanitizers | 独立 ASan/UBSan 构建，27 个快速原生测试及 service、multi-output、watermark-review、lifecycle-media；默认启用 leak 检查及遇错停止 | 不重新插桩 FFmpeg、VVenC、系统 libevent/libcurl/libx264/libunwind；不证明整个媒体栈无泄漏/竞态，也不覆盖 TSan |
 
@@ -31,7 +31,7 @@ bash scripts/test-service.sh quick --suite native
 bash scripts/test-service.sh full --suite lifecycle-media --list
 ```
 
-`--suite ID` 可重复，ID 必须属于所选 profile；未知、跨 profile 或重复选择均失败。执行顺序遵循清单，默认不带参数时仍执行完整 profile。`native` 表示全部 27 项 CTest quick；缺依赖和失败不会隐式跳过。结果中的 `scope=selected` 和 `selected_suites` 明确区分局部通过与完整回归通过。非 quick 选择始终执行 SDK gate；符号目录只在选择 symbols 时要求。
+`--suite ID` 可重复，ID 必须属于所选 profile；未知、跨 profile 或重复选择均失败。执行顺序遵循清单，默认不带参数时仍执行完整 profile。`native` 表示全部 28 项 CTest quick；缺依赖和失败不会隐式跳过。结果中的 `scope=selected` 和 `selected_suites` 明确区分局部通过与完整回归通过。非 quick 选择始终执行 SDK gate；符号目录只在选择 symbols 时要求。
 
 当前步骤及间接调用以 `--list` 和清单为准；历史报告中的计数保留各自源码窗口。独立性能入口见[性能测量](benchmarking.md)，不以性能测量替代功能门槛。
 
@@ -92,7 +92,7 @@ CPU/PSS、帧数及像素比较失败必须传播非零退出；资源采集失�
 | workflow_publication_test | dependency workflow 在 SDK 查询前独立执行；只运行本地 stub，不发布 |
 | docker_smoke | Service workflow 在 full/sanitizers 后，用实际运行镜像与匹配符号独立执行 |
 
-`ctest -L quick` 当前执行 27 项；不带标签的 CTest 还包含有专用集成驱动的 helper。两者均不能代替 full。原来的专题 Python 脚本仍可独立运行。
+`ctest -L quick` 当前执行 28 项；不带标签的 CTest 还包含有专用集成驱动的 helper。两者均不能代替 full。原来的专题 Python 脚本仍可独立运行。
 
 ## 证据与完成标准
 

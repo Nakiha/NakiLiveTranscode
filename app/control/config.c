@@ -169,15 +169,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if (strchr(c.encoder_preset,'|') || !strstr(presets,preset_key)) {bad(error,cap,"Invalid preset for selected encoder"); goto end;}
     if (c.min_threads>c.max_threads || (!!c.width != !!c.height) || c.width%2 || c.height%2) {bad(error,cap,"Invalid thread limits or dimensions (use two even dimensions)"); goto end;}
     if((uint64_t)c.width*c.height>NAKI_INPUT_MAX_PIXELS) {bad(error,cap,"live-4k-v1 output canvas exceeds 4096x2160 pixels");goto end;}
-    if (strcmp(c.output_format,"mpegts") && strcmp(c.output_format,"mp4") && strcmp(c.output_format,"flv")) {bad(error,cap,"output_format must be mpegts, mp4 or flv"); goto end;}
-    if (strchr(c.output,':') && strncmp(c.output,"udp://",6) && strncmp(c.output,"tcp://",6) &&
-        strncmp(c.output,"rtmp://",7) && strncmp(c.output,"srt://",6) && strncmp(c.output,"http://",7)) {
-        bad(error,cap,"Use a local output path or udp://, tcp://, rtmp://, srt://, http:// URL"); goto end;
-    }
-    if ((!strncmp(c.output,"rtmp://",7) && strcmp(c.output_format,"flv")) ||
-        (!strncmp(c.output,"srt://",6) && strcmp(c.output_format,"mpegts"))) {
-        bad(error,cap,"rtmp output requires flv; srt output requires mpegts"); goto end;
-    }
+    if(naki_output_validate(c.output,c.output_format,error,cap))goto end;
     if (c.pace && strstr(c.input, "://")) {bad(error,cap,"pace is for local file replay only"); goto end;}
     if(c.rendition_backend&&!c.output_count) {
         OutputConfig o;naki_logical_output(&c,0,&o);c.outputs[0]=o;c.output_count=1;
@@ -185,4 +177,17 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     *out=c; ret=0;
 end:
     yyjson_doc_free(doc); return ret;
+}
+
+int naki_output_validate(const char *output,const char *format,char *error,size_t cap) {
+    if(!output||!*output||!format||
+       (strcmp(format,"mpegts")&&strcmp(format,"mp4")&&strcmp(format,"flv")))
+        return bad(error,cap,"output_format must be mpegts, mp4 or flv, with a nonempty output");
+    if(strchr(output,':')&&strncmp(output,"udp://",6)&&strncmp(output,"tcp://",6)&&
+       strncmp(output,"rtmp://",7)&&strncmp(output,"srt://",6)&&strncmp(output,"http://",7))
+        return bad(error,cap,"Use a local output path or udp://, tcp://, rtmp://, srt://, http:// URL");
+    if((!strncmp(output,"rtmp://",7)&&strcmp(format,"flv"))||
+       (!strncmp(output,"srt://",6)&&strcmp(format,"mpegts")))
+        return bad(error,cap,"rtmp output requires flv; srt output requires mpegts");
+    return 0;
 }

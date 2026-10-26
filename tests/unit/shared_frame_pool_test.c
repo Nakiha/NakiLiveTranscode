@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "media/shared_frame_pool.h"
+#include <limits.h>
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
@@ -116,6 +117,10 @@ int main(int argc,char **argv) {
     stop_child(&healthy);assert(!naki_pool_reap(pool,1,1));assert(!naki_pool_reap(pool,0,2));
     naki_pool_view_close(&view);close(fd);assert(!naki_pool_close(&pool)&&!pool);assert(descriptors()==before);
     assert(!naki_pool_open(&pool,3,4096,16384));assert(!naki_pool_join_local(pool,0,1,2));
+    /* An immediately returned frame must reuse its committed slot rather than
+     * fault every sparse slot into physical memory during serial playback. */
+    unsigned reused=UINT_MAX;
+    for(unsigned i=0;i<20;i++){NakiPoolToken t=acquire(pool,0x70);if(i)assert(t.slot==reused);reused=t.slot;assert(!naki_pool_producer_release(pool,&t));}
     assert(naki_pool_reap(pool,0,1)==-ESTALE); /* Local proof cannot impersonate a pidfd. */
     token=acquire(pool,0x79);assert(!naki_pool_offer(pool,&token,0,1));assert(!naki_pool_producer_release(pool,&token));
     assert(!naki_pool_reap_local_joined(pool,0,1));assert(!naki_pool_close(&pool));assert(descriptors()==before);

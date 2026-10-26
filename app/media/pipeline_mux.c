@@ -35,14 +35,14 @@ static int write_packet_now(Pipeline *p, AVPacket *packet, int64_t *interleaved,
     pthread_mutex_lock(&job->mutex);
     job->progress.write_started_us=now_us(); job->progress.write_phase=NAKI_WRITE_PHASE_MUX_WRITE;
     pthread_mutex_unlock(&job->mutex);
-    atomic_store(&p->write_interrupt.deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
+    atomic_store(&pipeline_output_interrupt(p)->deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
     int ret=av_write_frame(p->output,packet);
     /* Flush TS audio PES too: AVIO flushing alone cannot release those bytes. */
     if(ret>=0 && !strcmp(job->config.output_format,"mpegts")) ret=av_write_frame(p->output,NULL);
     *interleaved=now_us();
     pthread_mutex_lock(&job->mutex); job->progress.write_phase=NAKI_WRITE_PHASE_AVIO_FLUSH; pthread_mutex_unlock(&job->mutex);
     avio_flush(p->output->pb); *written=now_us();
-    atomic_store(&p->write_interrupt.deadline,0);
+    atomic_store(&pipeline_output_interrupt(p)->deadline,0);
     pthread_mutex_lock(&job->mutex); job->progress.write_started_us=0; job->progress.write_phase=NAKI_WRITE_PHASE_NONE; pthread_mutex_unlock(&job->mutex);
     if(ret>=0 && p->output->pb->error<0)ret=p->output->pb->error;
     if(ret>=0 && dts_us>p->mux_max_dts_us)p->mux_max_dts_us=dts_us;

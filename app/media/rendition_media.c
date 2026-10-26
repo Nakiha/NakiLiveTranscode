@@ -1,10 +1,10 @@
 #include "rendition_media.h"
 #include "pipeline_internal.h"
 
-int naki_rendition_media_open(Pipeline **out,Job *job,const AVFrame *prototype,AVRational tb,NakiVideoRate rate,int wrap_bits) {
+int naki_rendition_media_open(Pipeline **out,Job *job,const AVFrame *prototype,AVRational tb,NakiVideoRate rate,int wrap_bits,int io_timeout_ms) {
     Pipeline *p=calloc(1,sizeof(*p));if(!p)return AVERROR(ENOMEM);*out=p;
     *p=(Pipeline){.job=job,.input_tb=tb,.frame_rate=rate.value,.video_rate=rate,.input_wrap_bits=wrap_bits,
-        .custom_output_fd=-1,.last_pts=AV_NOPTS_VALUE,.mux_max_dts_us=INT64_MIN,.stage="rendition prepare",.io_timeout_us=5000000};
+        .custom_output_fd=-1,.last_pts=AV_NOPTS_VALUE,.mux_max_dts_us=INT64_MIN,.stage="rendition prepare",.io_timeout_us=(int64_t)io_timeout_ms*1000};
     p->write_interrupt.job=job;atomic_init(&p->write_interrupt.deadline,0);atomic_init(&p->write_interrupt.cleanup,0);
     NakiMediaJobInfo info={.job_id=job->id,.request_id=job->request_id,.config=&job->config,.request_us=job->lifecycle.started_us,.output_id=job->output_id};
     int ret=naki_media_hooks_open(&info,&p->hooks);if(ret>0||(ret>=0&&p->hooks.api_version!=NAKI_MEDIA_HOOK_API))return AVERROR(EINVAL);

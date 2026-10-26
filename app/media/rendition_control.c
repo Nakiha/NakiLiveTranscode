@@ -62,7 +62,8 @@ int naki_renditions_submit(Job *job,yyjson_val *request,const char *origin,yyjso
     }
     NakiOperationHandle op;ret=naki_operations_reserve(job->operations,&in,now,&op);if(ret!=1){free(json);if(!ret)*result=naki_operations_get(job->operations,op);goto done;}
     m->desired_revision++;
-    m->transition.deadline_us=now+12000000;m->transition.action=u.action;m->transition.slot=slot;m->transition.operation=op;m->transition.revision=m->desired_revision;m->transition.config=cfg;m->transition.spec=spec;m->transition.config_json=json;
+    m->transition.accepted_us=now;m->transition.deadline_us=now+12000000;m->transition.action=u.action;m->transition.slot=slot;m->transition.operation=op;m->transition.revision=m->desired_revision;m->transition.config=cfg;m->transition.spec=spec;m->transition.config_json=json;
+    if(u.action!=NAKI_RENDITION_REMOVE)m->transition.deadline_us=naki_rendition_prepare_deadline(u.action==NAKI_RENDITION_ADD?&spec:&m->slots[slot].spec,now);
     naki_operations_transition(job->operations,op,NAKI_OP_PREPARING,0,0,NULL,now);
     *result=naki_operations_get(job->operations,op);ret=0;wake_job(job);
 done:
@@ -109,7 +110,8 @@ static void automatic_restart(Pipeline *p,int64_t now) {
             .origin_request_id="automatic_restart",.component="rendition",.action="restart_rendition",.expected_revision=m->desired_revision,.revision=m->desired_revision+1};
         NakiOperationHandle op;ret=naki_operations_reserve(j->operations,&in,now,&op);r->automatic_attempts++;r->restart_at_us=0;
         if(ret!=1)return;
-        m->desired_revision++;m->transition.action=NAKI_RENDITION_RESTART;m->transition.automatic=1;m->transition.operation=op;m->transition.slot=i;m->transition.revision=m->desired_revision;m->transition.deadline_us=now+12000000;
+        m->desired_revision++;m->transition.action=NAKI_RENDITION_RESTART;m->transition.automatic=1;m->transition.operation=op;m->transition.slot=i;m->transition.revision=m->desired_revision;m->transition.accepted_us=now;m->transition.deadline_us=now+12000000;
+        m->transition.deadline_us=naki_rendition_prepare_deadline(&r->spec,now);
         naki_operations_transition(j->operations,op,NAKI_OP_PREPARING,0,0,NULL,now);
         yyjson_mut_doc *event=new_event("rendition_automatic_restart",j);json_str(event,"output_id",r->spec.id);json_str(event,"operation_id",operation_id);json_int(event,"attempt",r->automatic_attempts);logger_submit(j->logger,NULL,event);return;
     }

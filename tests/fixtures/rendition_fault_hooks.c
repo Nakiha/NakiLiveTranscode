@@ -11,11 +11,17 @@
 #include <unistd.h>
 #include <libavutil/buffer.h>
 #include <libavutil/error.h>
+#include <libavformat/avformat.h>
 static atomic_int target;
 static const char *mode;
 static AVBufferRef *held[NAKI_RENDITION_VIDEO_CREDIT];
 static uint64_t held_hash[NAKI_RENDITION_VIDEO_CREDIT];
 static unsigned held_count,packets;
+int __real_av_write_trailer(AVFormatContext *context);
+int __wrap_av_write_trailer(AVFormatContext *context) {
+    int ret=__real_av_write_trailer(context);
+    return atomic_load(&target)&&!strcmp(mode,"trailer_error")?AVERROR(EIO):ret;
+}
 static pthread_mutex_t deadlock=PTHREAD_MUTEX_INITIALIZER;
 static uint64_t hash(const AVBufferRef *b){uint64_t h=UINT64_C(14695981039346656037);for(size_t i=0;i<b->size;i++)h=(h^b->data[i])*UINT64_C(1099511628211);return h;}
 int __real_naki_frame_wire_unpack(AVFrame *frame,AVBufferRef *owner,uint64_t limit);

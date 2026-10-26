@@ -2,6 +2,8 @@
 
 编码分支进程隔离、动态增删、保活和多目标接入：见 [rendition 运行时](rendition-runtime.md)（实验功能；默认后端不变）；本轮结果见 [issue #4 本机验收](rendition-acceptance-20261026.md)。
 
+后续审计修复与当前合入检查见 [2026-10-27 审计复核](validation-rendition-audit-20261027.md)；原验收报告保留其历史源码窗口。
+
 更新日期：2026-10-26。当前为实验性的 Linux/WSL 0.9.0 服务：一个活动 H.264/HEVC 输入、1–4 个固定逻辑输出。FFmpeg 使用 n9.0.2 fork，历史目录名 `ffmpeg-7.0.3` 不代表当前库版本。
 
 最新实验记录：[后续I帧预算与GOP派发细分](validation-i-budget-gop-dispatch-20261018.md)，沿用HEVC 8Mbps输入，分别验证I帧模型、预算及等待边界。

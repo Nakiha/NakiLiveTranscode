@@ -32,7 +32,7 @@ typedef struct Child {
     AVFrame prototype;
     AVRational tb;
     NakiVideoRate rate;
-    int wrap_bits;
+    int wrap_bits,io_timeout_ms;
 } Child;
 typedef struct RawOwner {Child *child;NakiRenditionMessage message;} RawOwner;
 static void complete(Child *c,NakiRenditionMessage message,unsigned kind) {
@@ -51,7 +51,7 @@ static AVBufferRef *raw_owner(Child *c,NakiRenditionMessage *m) {
 static int scoped(Child *c,const NakiRenditionMessage *m){return !strcmp(c->session,m->session)&&!strcmp(c->instance,m->instance)&&c->generation==m->rendition_generation&&m->source_generation>=c->source_generation;}
 static void *media_main(void *opaque) {
     Child *c=opaque;Job *j=c->job;(void)crash_thread_init();
-    int ret=naki_rendition_media_open(&c->media,j,&c->prototype,c->tb,c->rate,c->wrap_bits);
+    int ret=naki_rendition_media_open(&c->media,j,&c->prototype,c->tb,c->rate,c->wrap_bits,c->io_timeout_ms);
     c->prepare_error=ret;pthread_mutex_lock(&c->media_mutex);c->accepts_updates=ret>=0;pthread_mutex_unlock(&c->media_mutex);atomic_store(&c->prepared,1);
     AVFrame *frame=av_frame_alloc();if(!frame&&ret>=0)ret=AVERROR(ENOMEM);
     while(ret>=0&&!atomic_load(&j->lifecycle.cancel)) {
@@ -100,12 +100,14 @@ static int bootstrap(Child *c,yyjson_val *v) {
     if(c->tb.num<=0||c->tb.den<=0||c->prototype.width<1||c->prototype.height<1||(int64_t)c->prototype.width*c->prototype.height>NAKI_INPUT_MAX_PIXELS||
        (c->prototype.format!=AV_PIX_FMT_YUV420P&&c->prototype.format!=AV_PIX_FMT_YUV420P10LE)||naki_video_rate_resolve((AVRational){I("fps_num"),I("fps_den")},j->config.fps,&c->rate)<0)return -1;
     j->lifecycle.started_us=I("request_us");j->progress.window_start_us=j->lifecycle.started_us;
+    int64_t prepare_accepted_us=I("prepare_accepted_us");c->io_timeout_ms=I("io_timeout_ms");
+    if(prepare_accepted_us<=0||c->io_timeout_ms<100||c->io_timeout_ms>10000)return -EINVAL;
     j->progress.input_open_started_us=I("input_open_started_us");j->progress.input_open_done_us=I("input_open_done_us");j->progress.input_probe_done_us=I("input_probe_done_us");j->progress.decoder_ready_us=I("decoder_ready_us");j->progress.video_rate=c->rate;
     j->progress.assigned_us=I("assigned_us");j->progress.worker_received_us=I("worker_received_us");j->progress.worker_spawned_us=I("worker_spawned_us");j->progress.worker_ready_us=I("worker_ready_us");j->lifecycle.prewarmed=I("prewarmed");
 #undef I
     j->progress.rendition_inflight_limit=c->inflight_limit;
     j->operations=naki_operations_open(256,2*1024*1024,1800000000);if(!j->operations)return -1;
-    j->watermark=naki_watermark_open(&j->config.watermark,j->lifecycle.started_us,&j->lifecycle.cancel);
+    j->watermark=naki_watermark_open(&j->config.watermark,prepare_accepted_us,&j->lifecycle.cancel);
     if(!j->watermark||naki_watermark_bind(j->watermark,j->operations,j->id,j->output_id,j->request_id,j->logger))return -1;
     j->watermark_snapshot=naki_watermark_status;
     j->lifecycle.state=NAKI_JOB_STATE_STARTING;naki_overload_init(&j->flow.overload);if(!c->is_thread){crash_set_job(j->id);if(crash_set_rendition(c->session,j->output_id,c->generation))return -1;}

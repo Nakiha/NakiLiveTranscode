@@ -46,6 +46,7 @@ int naki_config_fingerprint(const Config *config,char out[65],char *error,size_t
 int naki_logical_output_count(const Config *config);
 void naki_logical_output(const Config *config,int index,OutputConfig *out);
 int naki_outputs_parse(yyjson_val *root,Config *out,char *error,size_t cap);
+int naki_output_validate(const char *output,const char *format,char *error,size_t cap);
 void naki_output_config(Config *out,const Config *common,int index);
 
 char *naki_rendition_config_json(const char *session,size_t bytes,yyjson_val *output,char *error,size_t cap);

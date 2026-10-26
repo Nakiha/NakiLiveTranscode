@@ -85,3 +85,13 @@ GET `/v1/job` 的 `outputs` 是有界摘要，包含 rendition PID/generation、
 测试必须预先固定输入帧数/循环数，独立解码输出，按源帧 id/PTS 检查丢重与显示顺序。EOF、异常退出、零帧、比较失败都必须使进程非零退出。对照要同一 SDK/构建、输入、滤镜、质量、GOP/B、线程和 pacing；CPU 合计服务所有进程（含 collector），实际写出 P50/P95/P99 取每个完成帧。离线不限速灌入触发独立分支预算时应报告失败/过载，不能以剩余输出当性能通过。
 
 当前验收证据、未完成项目、构建标识及数据摘要见 [本轮验证报告](rendition-acceptance-20261026.md)；本文描述接口与实现契约，不替代验收结论。
+
+## 审计修复后的生命周期边界
+
+修复与本轮 full、sanitizer、Compose 验证结果见 [2026-10-27 审计复核](validation-rendition-audit-20261027.md)。
+
+初始输出和动态 destination 共用输出协议/封装校验；`file:` 等协议别名明确拒绝。本地路径始终独占创建，不能借热加目标截断已有录制。迁移 primary mux 时保留底层协议最初引用的中断对象地址，由新的唯一 mux owner 驱动期限，直至该 writer join 后才释放原对象。每个 destination 的 trailer、flush、close 错误均进入目标终态；仅在所有保留目标都失败时令 rendition 失败。
+
+每路 `io_timeout_ms` 通过 rendition bootstrap 传递，适用于复用前的输出打开、写出和收尾；热复用后的各目标仍按既定 1 秒预算执行。required 水印的期限以本次 add/restart 操作接受时间计算；初始分支保留任务接受时间。会话追踪中的 HTTP-handler-to-mux 起点不变。准备上限至少 12 秒；required 资源预算与输出 I/O 预算之和超过该值时，额外保留 2 秒收尾/调度余量，最大 42 秒，不再提前截断合法的长资源预算。
+
+异步 writer 的 ready 只是资源准备完成；媒体 owner 必须先提交 PREPARED，再在验证 IDR 时提交 APPLYING/APPLIED，确认实际写出后更新 delivery。状态提交失败不能继续伪装激活。共享视频/音频池优先复用最近的空闲槽，保留原 credit、代次与退出证明规则，避免串行无积压播放也逐渐触碰所有稀疏槽；这不等于进程 OOM 隔离。

@@ -119,6 +119,9 @@ typedef struct Pipeline {
     NakiTimeline timeline;
     NakiIntraState intra;
     Interrupt read_interrupt, write_interrupt;
+    /* A migrated mux keeps the protocol's original interrupt address alive.
+     * The source Pipeline outlives all joined destination writers. */
+    Interrupt *output_interrupt;
     PipelineReader reader;
     DecodePump pump;
     Ledger ledger[LEDGER_CAPACITY];
@@ -143,6 +146,9 @@ typedef struct Pipeline {
     enum AVColorSpace input_colorspace;
     enum AVColorRange input_range;
 } Pipeline;
+static inline Interrupt *pipeline_output_interrupt(Pipeline *p) {
+    return p->output_interrupt?p->output_interrupt:&p->write_interrupt;
+}
 struct Branch {
     Pipeline pipeline;
     NakiBranchQueue queue;

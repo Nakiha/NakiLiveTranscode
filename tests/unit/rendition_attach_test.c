@@ -7,6 +7,9 @@
 int pipeline_reader_epoch_ready(Pipeline *p,int64_t generation){(void)p;(void)generation;abort();}
 NakiFrameIdentity pipeline_frame_identity(Pipeline *p,const Stamp *s,int64_t pts,AVRational tb){(void)p;(void)s;(void)pts;(void)tb;abort();}
 int main(void){
+    OutputConfig spec={.io_timeout_ms=10000,.watermark={.enabled=1,.required=1,.startup_timeout_ms=30000}};
+    assert(naki_rendition_prepare_deadline(&spec,100)==42000100);
+    spec.watermark.required=0;assert(naki_rendition_prepare_deadline(&spec,100)==12000100);
     Job *j=calloc(1,sizeof(*j));Pipeline *p=calloc(1,sizeof(*p));NakiRenditions *m=calloc(1,sizeof(*m));assert(j&&p&&m);
     j->renditions=m;p->job=j;m->job=j;m->source_generation=1;
     m->slots[0].pid=1;m->slots[0].prepared=1;m->slots[0].prepare_source_generation=1;

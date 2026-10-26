@@ -12,6 +12,7 @@ def main():
     programs=[('rendition_process_integration.py',['--phase',phase]) for phase in ['smoke','thread','lifecycle','faults']]
     programs += [(name,[]) for name in ['rendition_recovery.py','rendition_destinations.py','rendition_audio_sei.py','rendition_network_restart.py','rendition_lifetime.py','rendition_format_race.py','rendition_churn.py','rendition_matrix.py']]
     programs += [('rendition_matrix.py',['--advanced']),('rendition_matrix.py',['--sustain'])]
+    programs += [('rendition_regressions.py',[])]
     if args.phase=='functional':programs=[(name,options) for name,options in programs if name!='rendition_matrix.py']
     elif args.phase=='metrics':programs=[(name,options) for name,options in programs if name=='rendition_matrix.py']
     if args.sanitizer:

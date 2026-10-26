@@ -51,6 +51,7 @@ static yyjson_mut_doc *boot_message(Pipeline *p,Rendition *r) {
     if(*events)b=snprintf(event,sizeof(event),"%s.%s.g%llu",events,r->spec.id,(unsigned long long)r->generation);
     if(a<0||b<0||(size_t)a>=sizeof(trace)||(size_t)b>=sizeof(event)){yyjson_mut_doc_free(d);return NULL;}json_str(d,"log_path",trace);json_str(d,"event_prefix",event);
     json_int(d,"rendition_generation",r->generation);json_int(d,"source_generation",m->source_generation);json_int(d,"inflight_bytes",r->spec.inflight_bytes);
+    json_int(d,"prepare_accepted_us",r->prepare_accepted_us);json_int(d,"io_timeout_ms",r->spec.io_timeout_ms);
     json_int(d,"video_pool",naki_pool_id(m->video));json_int(d,"audio_pool",naki_pool_id(m->audio));
 #define I(k) json_int(d,#k,m->prototype.k)
     I(width);I(height);I(format);I(color_range);I(colorspace);I(color_primaries);I(color_trc);I(chroma_location);
@@ -80,6 +81,7 @@ int naki_rendition_spawn(Pipeline *p,unsigned index) {
     NakiRenditions *m=p->job->renditions;Rendition *r=&m->slots[index];
     if(r->pid||!r->config_json)return -EBUSY;
     if(m->next_instance_generation==UINT64_MAX)return -EOVERFLOW;
+    r->prepare_accepted_us=m->transition.operation&&m->transition.slot==index?m->transition.accepted_us:p->job->lifecycle.started_us;
     int sockets[3][2];for(unsigned i=0;i<3;i++)sockets[i][0]=sockets[i][1]=-1;
     int poolfd[2]={-1,-1},ret=0;posix_spawn_file_actions_t actions;int initialized=0;
     for(unsigned i=0;i<3;i++)if(socketpair(AF_UNIX,SOCK_SEQPACKET|SOCK_NONBLOCK|SOCK_CLOEXEC,0,sockets[i])){ret=-errno;goto done;}
@@ -110,6 +112,7 @@ int naki_rendition_spawn(Pipeline *p,unsigned index) {
     r->control=sockets[0][0];sockets[0][0]=-1;r->media=sockets[1][0];sockets[1][0]=-1;r->completion=sockets[2][0];sockets[2][0]=-1;
     r->prepare_source_generation=m->source_generation;
     r->generation=++m->next_instance_generation;r->incarnations++;r->watermark_cached_revision=0;pthread_mutex_lock(&r->job->mutex);r->job->rendition_pid=r->pid;r->job->rendition_generation=r->generation;pthread_mutex_unlock(&r->job->mutex);r->prepared=r->finished=r->failed=r->stopping=r->eof_sent=r->remove_draining=0;r->stop_deadline_us=0;r->prepared_deadline_us=now_us()+12000000;
+    r->prepared_deadline_us=naki_rendition_prepare_deadline(&r->spec,r->prepare_accepted_us);
     pthread_mutex_lock(&r->job->mutex);if(r->job->remote_snapshot){yyjson_doc_free(r->job->remote_snapshot);r->job->remote_snapshot=NULL;}memset(&r->job->stats,0,sizeof(r->job->stats));r->job->lifecycle.error[0]=0;r->job->lifecycle.ended_us=0;r->job->progress.rendition_exit_known=0;r->job->progress.rendition_exit_code=-1;r->job->progress.rendition_exit_signal=0;pthread_mutex_unlock(&r->job->mutex);
     atomic_store(&r->job->lifecycle.done,0);atomic_store(&r->job->lifecycle.cancel,0);atomic_store(&r->job->lifecycle.branch_failed,0);
     pthread_mutex_lock(&r->job->mutex);r->job->lifecycle.state=NAKI_JOB_STATE_STARTING;pthread_mutex_unlock(&r->job->mutex);

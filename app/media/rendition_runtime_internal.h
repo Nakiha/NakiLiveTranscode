@@ -30,10 +30,16 @@ typedef struct Rendition {
     NakiOperationHandle remote_operations[256];
     uint64_t written_generation,watermark_cached_revision;
     int64_t stop_deadline_us,prepared_deadline_us;
+    int64_t prepare_accepted_us;
     unsigned queued_video,queued_audio;
     uint64_t queued_bytes,queued_work_us;
     Lease leases[LEASES];
 } Rendition;
+static inline int64_t naki_rendition_prepare_deadline(const OutputConfig *spec,int64_t accepted_us) {
+    int64_t resource_ms=spec->watermark.enabled&&spec->watermark.required?spec->watermark.startup_timeout_ms:0;
+    int64_t budget_ms=resource_ms+spec->io_timeout_ms+2000;
+    return accepted_us+FFMAX(INT64_C(12000),budget_ms)*1000;
+}
 struct NakiRenditions {
     Job *job;
     pthread_mutex_t mutex;
@@ -49,7 +55,7 @@ struct NakiRenditions {
     int64_t next_source_rate_us;
     struct {yyjson_doc *request;NakiOperationHandle operation;unsigned slot;uint64_t generation;char origin[129];} commands[8];
     unsigned command_head,command_count;
-    struct {int action,started,automatic;int64_t deadline_us;unsigned slot;uint64_t revision,source_generation;NakiOperationHandle operation;Config config;OutputConfig spec;char *config_json;} transition;
+    struct {int action,started,automatic;int64_t accepted_us,deadline_us;unsigned slot;uint64_t revision,source_generation;NakiOperationHandle operation;Config config;OutputConfig spec;char *config_json;} transition;
 };
 
 int naki_rendition_spawn(Pipeline *p,unsigned index);

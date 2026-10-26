@@ -112,7 +112,9 @@ int naki_pool_acquire(NakiFramePool *p,NakiPoolToken *t,uint8_t **pixels) {
         if(s->refs)continue;
         if(s->generation==UINT64_MAX){ret=-EOVERFLOW;goto done;}
         s->generation++;s->bytes=0;s->refs=PRODUCER_BIT;s->published=0;
-        p->producer=(int)i;p->cursor=(i+1)%p->count;
+        /* Prefer the most recently used free slot. Rotating on every frame
+         * commits the whole memfd even when only one frame is ever retained. */
+        p->producer=(int)i;p->cursor=i;
         *t=(NakiPoolToken){.pool_id=p->id,.generation=s->generation,.slot=i};
         *pixels=p->mapping+p->data_offset+i*p->slot_bytes;ret=0;break;
     }

@@ -8,7 +8,7 @@
 int pipeline_finalize_output(Pipeline *p,int primary,int stopped) {
     Job *job=p->job;int trailer=0,flush=0,closed=0;int64_t began=now_us();
     int64_t deadline=began+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US);
-    atomic_store(&p->write_interrupt.cleanup,1);atomic_store(&p->write_interrupt.deadline,deadline);
+    atomic_store(&pipeline_output_interrupt(p)->cleanup,1);atomic_store(&pipeline_output_interrupt(p)->deadline,deadline);
     pthread_mutex_lock(&job->mutex);job->progress.finalize_started_us=began;job->progress.finalize_deadline_us=deadline;
     job->progress.write_started_us=began;job->progress.write_phase=NAKI_WRITE_PHASE_OUTPUT_FINALIZE;pthread_mutex_unlock(&job->mutex);
     if(p->header_written)trailer=av_write_trailer(p->output);
@@ -39,7 +39,7 @@ int pipeline_finalize_output(Pipeline *p,int primary,int stopped) {
         p->hooks.close(p->hooks.opaque,&end);p->hooks=(NakiMediaHooks){0};
     }
     if(p->output) {avformat_free_context(p->output);p->output=NULL;}
-    atomic_store(&p->write_interrupt.deadline,0);return primary;
+    atomic_store(&pipeline_output_interrupt(p)->deadline,0);return primary;
 }
 
 static int local_write(void *opaque, const uint8_t *buffer, int size) {
@@ -273,9 +273,9 @@ int pipeline_open_mux(Pipeline *p) {
     p->video->time_base=p->encoder->time_base; p->video->avg_frame_rate=p->output_rate.value;
     p->output->flags|=AVFMT_FLAG_FLUSH_PACKETS;
     p->output->max_delay=0; p->output->max_interleave_delta=0;
-    p->output->interrupt_callback=(AVIOInterruptCB){pipeline_interrupted,&p->write_interrupt};
+    p->output->interrupt_callback=(AVIOInterruptCB){pipeline_interrupted,pipeline_output_interrupt(p)};
     p->stage="output open/header";
-    atomic_store(&p->write_interrupt.deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
+    atomic_store(&pipeline_output_interrupt(p)->deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
     if (!strstr(cfg->output,"://") && !strchr(cfg->output,':')) {
         p->custom_output_fd=open(cfg->output,O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0644);
         if (p->custom_output_fd<0) return AVERROR(errno);
@@ -293,7 +293,7 @@ int pipeline_open_mux(Pipeline *p) {
         if (ret<0) return ret;
     }
     ret=avformat_write_header(p->output,NULL);
-    atomic_store(&p->write_interrupt.deadline,0);
+    atomic_store(&pipeline_output_interrupt(p)->deadline,0);
     if (ret<0) return ret;
     p->header_written=1;
     if(strcmp(cfg->output_format,"mp4")) {
