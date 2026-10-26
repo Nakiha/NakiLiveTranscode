@@ -41,6 +41,14 @@ full 与 sanitizer 都确认测试前后源码摘要、选定二进制及 SDK ma
 
 旧测试摘要中固定的 QEMU/仿真环境描述来自早期测试脚本，不作为本轮环境或性能声明；本轮环境以上述 WSL2 说明为准。没有将历史 n7 或旧 QEMU 数据当成本轮容量证据。
 
+## 远端 SDK 与 CI 后续
+
+经维护者显式授权，依赖 workflow `40367471581` 已在 `a65d651752b5d7aa09164e95a92f1cf098f91ace` 发布精确 prerelease `ffmpeg-linux-amd64-d731edff2fd09adaa2cbab94`；下载校验 SDK SHA256 为 `7aad38570e7ceb9c8cddf64ca7a41073b22dad5c141005bac2b0116efbed9703`。归档包含 FFmpeg/VVenC 独立调试符号和配置记录。
+
+PR workflow `40359542492` attempt 2 的 full 与 ASan/UBSan 均通过；随后 runner 从 Azure Ubuntu 包镜像安装 smoke 工具时下载过慢，耗尽 45 分钟 job 限制，尚未执行 Compose smoke。后续修正让 smoke 复用同轮 test 镜像中的工具，避免第二次宿主机 apt 安装，不修改业务源码、SDK 配方或检查阈值。
+
+CI 工具修正的本地 quick 为 11/11；新的镜像工具路径与原有宿主机工具路径均通过完整 Compose smoke，证据分别为 `out/docker-smoke-4zvn5r49/COMPLETE.json` 和 `out/docker-smoke-jxxa1_5l/COMPLETE.json`。工具镜像为 `naki-live-transcode:ci-tools-20261027`，实际被测运行镜像及三套符号仍为上文记录的版本。Docker Desktop 的本地代理需要把 bind source 转换为其 host 路径，转换仅位于本轮 out 下的本地驱动；容器内 target、正式 smoke 与 CI 的 Linux 工作区路径保持一致。证据根 `out/ci-tools-fix-20261027-021613/` 保留两次 smoke 日志和本地驱动。远端检查需以包含此 CI 修正的新提交为准。
+
 ## 独立共享池复测
 
 同一个原始探针：129 槽、1920×1080 YUV420 8-bit，每帧 offer 后立即归还消费者和 producer 引用，观察 1/129/258 帧。修复前峰值 RSS 为 4608/393728/393728 KiB，修复后为 4608/4608/4608 KiB；occupied/retained 始终为零。证据分别在 `out/audit-verify-20261026-230813/native-results.log` 和本轮 `pool-probe.log`。

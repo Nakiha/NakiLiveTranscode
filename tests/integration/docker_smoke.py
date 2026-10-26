@@ -18,7 +18,13 @@ ENV=dict(os.environ,NAKI_HTTP_PORT="0",NAKI_UDP_PORT="0")
 COMPOSE=["docker","compose","-f",str(ROOT/"compose.yaml"),"-p",PROJECT]
 
 
-def command(args,timeout=40):
+def command(args,timeout=40,*,tool=False):
+    args=list(map(str,args))
+    if tool and (image:=ENV.get("NAKI_SMOKE_TOOLS_IMAGE")):
+        # Reuse the already-built test image's independent distro FFmpeg and
+        # binutils. Compose stays on the host; no nested Docker is needed.
+        args=["docker","run","--rm","--init","--user",f"{os.getuid()}:{os.getgid()}",
+              "--mount",f"type=bind,source={ROOT},target={ROOT}","--workdir",str(ROOT),image,*args]
     result=subprocess.run(args,cwd=ROOT,env=ENV,check=True,capture_output=True,text=True,timeout=timeout)
     with (RUN/"commands.log").open("a") as log:
         log.write(" ".join(args)+"\n"+result.stdout+result.stderr+"\n")
@@ -32,8 +38,8 @@ def control(action,*args):
 def run():
     global RUN
     RUN=pathlib.Path(tempfile.mkdtemp(prefix="docker-smoke-",dir=ROOT/"out"))
-    subprocess.run(["ffmpeg","-v","error","-f","lavfi","-i","testsrc2=size=960x540:rate=25", "-frames:v","75",
-                    "-c:v","libx264","-threads","2","-preset","veryfast","-bf","3",str(RUN/"input.mp4")],check=True,timeout=30)
+    command(["ffmpeg","-v","error","-f","lavfi","-i","testsrc2=size=960x540:rate=25", "-frames:v","75",
+             "-c:v","libx264","-threads","2","-preset","veryfast","-bf","3",str(RUN/"input.mp4")],timeout=30,tool=True)
     config={"input":"/data/input.mp4","output":"/data/output.ts","width":640,"height":360,"frame_log":True}
     (RUN/"job.json").write_text(json.dumps(config))
     started=False
@@ -53,7 +59,7 @@ def run():
         assert state["logging"]["dropped_frames"]==0
         command(COMPOSE+["cp","transcode:/data/output.ts",str(RUN/"output.ts")])
         result=command(["ffprobe","-v","error","-select_streams","v:0","-count_frames","-show_entries",
-                        "stream=width,height,nb_read_frames","-of","json",str(RUN/"output.ts")])
+                        "stream=width,height,nb_read_frames","-of","json",str(RUN/"output.ts")],tool=True)
         stream=json.loads(result)["streams"][0]
         assert stream["width"]==640 and stream["height"]==360 and stream["nb_read_frames"]=="75"
         vvc_config={"input":"/data/input.mp4","output":"/data/output-vvc.mp4","output_format":"mp4",
@@ -110,7 +116,7 @@ def run():
         assert json.loads(command(["docker","inspect",container]))[0]["RestartCount"]==0
         command(COMPOSE+["cp","transcode:/data/recovery.ts",str(RUN/"recovery.ts")])
         recovered_stream=json.loads(command(["ffprobe","-v","error","-select_streams","v:0","-count_frames",
-                                             "-show_entries","stream=nb_read_frames","-of","json",str(RUN/"recovery.ts")]))["streams"][0]
+                                             "-show_entries","stream=nb_read_frames","-of","json",str(RUN/"recovery.ts")],tool=True))["streams"][0]
         assert recovered_stream["nb_read_frames"]=="75"
         crash_dir=control("health")["crash_report_dir"]
         reports=json.loads(command(COMPOSE+["exec","-T","transcode","python3","-c",
@@ -127,7 +133,7 @@ def run():
                          "--symbols",str(pathlib.Path(symbols_dir)/"app"),
                          "--symbols",str(pathlib.Path(symbols_dir)/"ffmpeg"),
                          "--symbols",str(pathlib.Path(symbols_dir)/"vvenc"),
-                         "--require-module",required,"--output",str(report_file.with_suffix(".symbolized.txt"))])
+                         "--require-module",required,"--output",str(report_file.with_suffix(".symbolized.txt"))],tool=True)
         time.sleep(.2)
         command(COMPOSE+["run","--rm","--no-deps","log-maintenance","--directory","/var/log/naki","--min-age-seconds","0"])
         count=int(command(COMPOSE+["exec","-T","transcode","python3","-c",
