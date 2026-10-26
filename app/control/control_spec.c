@@ -32,12 +32,15 @@ int naki_config_fingerprint(const Config *c,char out[65],char *error,size_t cap)
 #define I(k) yyjson_mut_obj_add_sint(d,root,#k,c->k)
     I(max_threads);I(min_threads);I(budget_slots);I(queue_capacity);I(fps);I(pace);I(frame_log);I(frame_log_every);I(slow_frame_ms);
     if(c->reader_queue_capacity!=8) {I(reader_queue_capacity);}
+    /* Explicit default is the same request; changing retention changes intent. */
+    if(c->idle_timeout_ms!=NAKI_IDLE_TIMEOUT_DEFAULT_MS) {I(idle_timeout_ms);}
     if(c->decoder_pump) {I(decoder_pump);}
     /* Explicit legacy defaults retain existing request identity. */
     if(!c->decoder_async) {I(decoder_async);}
     if(!c->decoder_auto_threads) {I(decoder_auto_threads);}
     /* Omitted preserves codec-specific legacy defaults and existing fingerprints. */
     if(c->decoder_early_output>=0) {I(decoder_early_output);}
+    if(c->rendition_backend) {I(rendition_backend);I(rendition_auto_restart);I(rendition_restart_limit);I(rendition_restart_backoff_ms);}
     if(c->codec_trace) {I(codec_trace);}
     if(c->constrained_crf) {I(constrained_crf);I(source_rate_limit);}
     if(c->network_trace) {I(network_trace);}

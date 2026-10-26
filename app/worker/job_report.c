@@ -108,6 +108,27 @@ static yyjson_mut_val *first_frame_json(yyjson_mut_doc *doc,const Job *job) {
     for(int i=0;i<2;i++)if(job->progress.first_chain[i])yyjson_mut_arr_add_val(items,yyjson_mut_val_mut_copy(doc,yyjson_mut_doc_get_root(job->progress.first_chain[i])));
     return items;
 }
+/* Keep the session snapshot bounded independently of rendition count. Full
+ * per-rendition state remains in its private cached snapshot and event log. */
+static yyjson_mut_doc *remote_brief(const yyjson_doc *source) {
+    yyjson_mut_doc *d=yyjson_mut_doc_new(NULL);if(!d)return NULL;
+    yyjson_mut_val *out=yyjson_mut_obj(d);yyjson_mut_doc_set_root(d,out);
+    yyjson_val *root=yyjson_doc_get_root((yyjson_doc *)source);
+    const char *keys[]={"event","job_id","request_id","output_id","log_path","process_id","instance_id","state","error",
+        "progress","video_rate","output_finalize","destinations","actual_output","frames_decoded","frames_filtered","frames_dropped_rate",
+        "delivery_statistics_scope","frames_selected","frames_dropped_overload","packets_out","bytes_out","audio_tracks","audio_packets_out","audio_dropped","audio_unsupported",
+        "sei_extracted","sei_written","sei_protected_frames","sei_types","delivery_inflight","ingress_to_mux","encode","filter","branch_queue","frame_types","watermark"};
+    for(unsigned i=0;i<sizeof(keys)/sizeof(*keys);i++){yyjson_val *v=yyjson_obj_get(root,keys[i]);if(v){if((!strcmp(keys[i],"log_path")||!strcmp(keys[i],"actual_output"))&&yyjson_is_str(v)&&yyjson_get_len(v)>512)yyjson_mut_obj_add_null(d,out,keys[i]);else yyjson_mut_obj_add_val(d,out,keys[i],yyjson_val_mut_copy(d,v));}}
+    yyjson_mut_val *first=yyjson_mut_arr(d);yyjson_val *record;size_t index,count;
+    yyjson_arr_foreach(yyjson_obj_get(root,"first_frame_checkpoints"),index,count,record){
+        yyjson_mut_val *item=yyjson_mut_obj(d);
+        const char *fields[]={"frame_id","generation","pts_us","first_video","first_output_key","packet_ingress_monotonic_us","mux_flush_done_monotonic_us","request_to_mux_ms","boundary"};
+        for(unsigned i=0;i<sizeof(fields)/sizeof(*fields);i++){yyjson_val *v=yyjson_obj_get(record,fields[i]);if(v)yyjson_mut_obj_add_val(d,item,fields[i],yyjson_val_mut_copy(d,v));}
+        yyjson_mut_arr_add_val(first,item);
+    }
+    yyjson_mut_obj_add_val(d,out,"first_frame_checkpoints",first);
+    yyjson_mut_obj_add_str(d,out,"detail_scope","summary");return d;
+}
 static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     yyjson_mut_doc *doc = new_event("status", job);
     if (!doc) return NULL;
@@ -116,8 +137,15 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_str(doc, "state", naki_job_state_name(job->lifecycle.state));
     json_str(doc, "error", job->lifecycle.error);
     json_str(doc, "log_path", job->log_path);
+    json_str(doc,"actual_output",job->config.output);
+    if(job->remote_rendition==2)json_str(doc,"delivery_statistics_scope","primary_destination");
+    if(job->destination_snapshot)yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"destinations",yyjson_mut_val_mut_copy(doc,yyjson_mut_doc_get_root(job->destination_snapshot)));
     json_int(doc,"snapshot_generated_us",now_us());
     json_int(doc,"snapshot_generation",(int64_t)++job->progress.snapshot_generation);
+    if(job->renditions){json_int(doc,"topology_revision",job->progress.topology_revision);json_int(doc,"effective_topology_revision",job->progress.effective_topology_revision);
+        json_int(doc,"source_format_generation",job->progress.source_format_generation);json_int(doc,"idle_timeout_ms",job->config.idle_timeout_ms);json_int(doc,"idle_deadline_us",job->progress.idle_deadline_us);json_int(doc,"idle_state",job->progress.idle_state);
+        json_int(doc,"shared_pool_reserved_bytes",job->progress.shared_pool_bytes);json_int(doc,"shared_pool_occupied_slots",job->progress.shared_pool_occupied);}
+
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"progress",progress_json(doc,job));
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"video_rate",video_rate_json(doc,job));
     yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"first_frame_checkpoints",first_frame_json(doc,job));
@@ -171,6 +199,8 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     json_int(doc,"decoder_auto_threads",job->config.decoder_async&&job->config.decoder_auto_threads);
     json_int(doc,"decoder_early_output_requested",job->config.decoder_early_output);
     json_int(doc,"codec_trace",job->config.codec_trace);
+    if(job->parent){yyjson_mut_val *inflight=yyjson_mut_obj(doc);yyjson_mut_obj_add_uint(doc,inflight,"frames",job->stats.branch_inflight_frames);yyjson_mut_obj_add_uint(doc,inflight,"bytes",job->stats.branch_inflight_bytes);yyjson_mut_obj_add_uint(doc,inflight,"frame_limit",128);yyjson_mut_obj_add_uint(doc,inflight,"byte_limit",job->progress.rendition_inflight_limit);yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"delivery_inflight",inflight);}
+
     json_int(doc,"reader_queue_capacity",job->config.reader_queue_capacity);
     if(job->config.constrained_crf) {json_int(doc,"crf",job->config.qp);json_int(doc,"source_rate_limit",job->config.source_rate_limit);json_int(doc,"rate_window_ms",1000);}
     if(job->config.cqf) {json_int(doc,"qp",job->config.qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",job->config.maxrate);}
@@ -301,7 +331,21 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
         yyjson_mut_val *outputs=yyjson_mut_arr(doc);unsigned failed=0,completed=0;uint64_t packets=0,bytes=0,filtered=0,sei_written=0,sei_protected=0;
         for(int i=0;i<job->config.output_count;i++) {
             Job *b=job->outputs[i];if(!b)continue;
+            pthread_mutex_lock(&b->mutex);
+            if(!*b->output_id){pthread_mutex_unlock(&b->mutex);continue;}
+            if(b->remote_snapshot) {
+                yyjson_mut_doc *remote=remote_brief(b->remote_snapshot);
+                if(remote){yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(remote),"state");if(*b->lifecycle.error)yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(remote),"error");json_str(remote,"state",naki_job_state_name(b->lifecycle.state));if(*b->lifecycle.error)json_str(remote,"error",b->lifecycle.error);json_int(remote,"rendition_pid",b->rendition_pid);json_int(remote,"rendition_generation",b->rendition_generation);json_int(remote,"exit_status_known",b->progress.rendition_exit_known);json_int(remote,"exit_code",b->progress.rendition_exit_code);json_int(remote,"exit_signal",b->progress.rendition_exit_signal);
+                    json_int(remote,"raw_video_retained",b->progress.raw_video_retained);json_int(remote,"raw_audio_retained",b->progress.raw_audio_retained);
+                    json_int(remote,"queue_video_items",b->stats.branch_video_queued);json_int(remote,"queue_audio_packets",b->stats.branch_audio_queued);json_int(remote,"queue_bytes",b->stats.branch_queue_bytes);json_int(remote,"queue_work_us",b->stats.branch_queue_media_us);
+                    json_int(remote,"automatic_restart_attempts",b->progress.automatic_restart_attempts);json_int(remote,"automatic_restart_at_us",b->progress.automatic_restart_at_us);
+                    packets+=b->stats.packets_out;bytes+=b->stats.bytes_out;filtered+=b->stats.frames_filtered;sei_written+=b->stats.sei_written;sei_protected+=b->stats.sei_protected;failed+=b->lifecycle.branch_failed;completed+=b->lifecycle.state==NAKI_JOB_STATE_COMPLETED;
+                    yyjson_mut_arr_add_val(outputs,yyjson_mut_val_mut_copy(doc,yyjson_mut_doc_get_root(remote)));yyjson_mut_doc_free(remote);}
+                pthread_mutex_unlock(&b->mutex);continue;
+            }
+            pthread_mutex_unlock(&b->mutex);
             yyjson_mut_doc *bd=new_event("output_status",b);pthread_mutex_lock(&b->mutex);
+            if(b->remote_rendition){json_int(bd,"rendition_pid",b->rendition_pid);json_int(bd,"rendition_generation",b->rendition_generation);json_int(bd,"exit_status_known",b->progress.rendition_exit_known);json_int(bd,"exit_code",b->progress.rendition_exit_code);json_int(bd,"exit_signal",b->progress.rendition_exit_signal);}
             json_str(bd,"state",naki_job_state_name(b->lifecycle.state));json_str(bd,"error",b->lifecycle.error);
             yyjson_mut_obj_add_val(bd,yyjson_mut_doc_get_root(bd),"progress",progress_json(bd,b));
             yyjson_mut_obj_add_val(bd,yyjson_mut_doc_get_root(bd),"video_rate",video_rate_json(bd,b));
@@ -321,7 +365,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
             json_int(bd,"queued_work_us",b->stats.branch_queue_media_us);json_int(bd,"queue_video_items",b->stats.branch_video_queued);json_int(bd,"queue_audio_packets",b->stats.branch_audio_queued);
             json_int(bd,"queue_video_high",b->stats.branch_video_high);json_int(bd,"queue_audio_high",b->stats.branch_audio_high);
             json_str(bd,"queue_rejection_reason",naki_branch_reason_name(b->stats.branch_rejection_reason));
-            yyjson_mut_val *limits=yyjson_mut_obj(bd),*rejections=yyjson_mut_obj(bd);const OutputConfig *limit=&job->config.outputs[i];
+            yyjson_mut_val *limits=yyjson_mut_obj(bd),*rejections=yyjson_mut_obj(bd);const OutputConfig *limit=b->remote_rendition?&b->config.outputs[0]:&job->config.outputs[i];
             yyjson_mut_obj_add_int(bd,limits,"video_items",limit->queue_items);yyjson_mut_obj_add_int(bd,limits,"audio_packets",limit->audio_packets);
             yyjson_mut_obj_add_int(bd,limits,"total_items",limit->queue_items+limit->audio_packets);yyjson_mut_obj_add_uint(bd,limits,"bytes",limit->queue_bytes);
             yyjson_mut_obj_add_sint(bd,limits,"nominal_work_us",(int64_t)limit->queue_media_ms*1000);yyjson_mut_obj_add_sint(bd,limits,"age_us",(int64_t)limit->max_lag_ms*1000);
@@ -345,15 +389,15 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
         yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"outputs",outputs);
         json_int(doc,"sei_written",sei_written);json_int(doc,"sei_protected_frames",sei_protected);
         json_int(doc,"outputs_failed",failed);json_int(doc,"outputs_completed",completed);
-        yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(doc),"packets_out");json_int(doc,"packets_out",packets);
+        if(!job->renditions){yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(doc),"packets_out");json_int(doc,"packets_out",packets);
         yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(doc),"bytes_out");json_int(doc,"bytes_out",bytes);
-        yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(doc),"frames_filtered");json_int(doc,"frames_filtered",filtered);
+        yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(doc),"frames_filtered");json_int(doc,"frames_filtered",filtered);}
     }
     return doc;
 }
 yyjson_mut_doc *job_snapshot(Job *job) {return snapshot(job,0,0);}
 yyjson_mut_doc *job_report(Job *job,int final) {
     yyjson_mut_doc *doc=snapshot(job,1,final);
-    if(doc&&!final)for(int i=0;i<job->config.output_count;i++)if(job->outputs[i])logger_submit(job->logger,NULL,snapshot(job->outputs[i],1,0));
+    if(doc&&!final)for(int i=0;i<job->config.output_count;i++)if(job->outputs[i]&&!job->outputs[i]->remote_rendition)logger_submit(job->logger,NULL,snapshot(job->outputs[i],1,0));
     return doc;
 }

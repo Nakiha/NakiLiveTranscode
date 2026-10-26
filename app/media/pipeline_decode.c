@@ -44,7 +44,7 @@ static void *decode_main(void *opaque) {
                 Stamp *stamp=(Stamp *)frame->opaque_ref->data;
                 int protect=stamp->picture_type==AV_PICTURE_TYPE_I||stamp->frame_id==1||
                     naki_sei_count(pipeline_stamp_sei(frame->opaque_ref),&p->job->config.sei)>0;
-                if(p->job->config.policy.intra==NAKI_INTRA_SOURCE&&!p->job->config.policy.overload_levels&&
+                if(!p->job->config.rendition_backend&&p->job->config.policy.intra==NAKI_INTRA_SOURCE&&!p->job->config.policy.overload_levels&&
                    !naki_video_rate_keep((uint64_t)stamp->frame_id,p->rate_divisor,protect)) {
                     pthread_mutex_lock(&p->job->mutex);
                     p->job->stats.frames_decoded++;p->job->stats.frames_dropped_rate++;

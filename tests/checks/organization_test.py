@@ -63,7 +63,7 @@ class Organization(unittest.TestCase):
             result = subprocess.run([sys.executable, str(ROOT / 'scripts/bench-service.py'), 'service',
                 '--config', str(config), '--list'], cwd=directory, capture_output=True, text=True, check=True)
             listing = json.loads(result.stdout)
-            self.assertEqual(listing['benchmark']['input'], str(directory / 'input.mp4'))
+            self.assertEqual(listing['benchmark']['input'], str((directory / 'input.mp4').resolve()))
             self.assertTrue(listing['sdk_gate'])
             self.assertFalse(listing['benchmark']['capacity_claim'])
             bad = subprocess.run([sys.executable, str(ROOT / 'scripts/bench-service.py'), 'service',

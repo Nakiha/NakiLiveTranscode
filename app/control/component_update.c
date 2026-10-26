@@ -19,9 +19,36 @@ static int keys(yyjson_val *object,const char *allowed,const char *path,char *er
     return 0;
 }
 static unsigned present(yyjson_val *object,const char *key,unsigned bit) {return yyjson_obj_get(object,key)?bit:0;}
+static int topology(yyjson_val *root,const char *job,NakiUpdateRequest *out,char *error,size_t size) {
+    if(keys(root,"|operation_id||target||expected_revision||action||spec||expected_generation|","update",error,size))return -1;
+    yyjson_val *target=yyjson_obj_get(root,"target"),*action=yyjson_obj_get(root,"action"),*revision=yyjson_obj_get(root,"expected_revision");
+    if(keys(target,"|output_id||component||destination_id|","target",error,size))return -1;
+    if(!naki_json_id(yyjson_obj_get(root,"operation_id"),128)||!naki_json_id(yyjson_obj_get(target,"output_id"),32)||!yyjson_is_uint(revision)||!yyjson_get_uint(revision)||yyjson_get_uint(revision)>=INT64_MAX||!yyjson_is_str(action))return fail(error,size,"topology","invalid identity, revision or action");
+    const char *names[]={"add_rendition","remove_rendition","restart_rendition","add_destination","remove_destination","request_random_access"};
+    NakiUpdateRequest u={0};for(unsigned i=0;i<sizeof(names)/sizeof(*names);i++)if(!strcmp(yyjson_get_str(action),names[i]))u.action=(int)i+1;
+    if(!u.action)return fail(error,size,"action","unsupported topology action");
+    const char *component=yyjson_get_str(yyjson_obj_get(target,"component"));
+    int destination=u.action==NAKI_DESTINATION_ADD||u.action==NAKI_DESTINATION_REMOVE;
+    if(!component||strcmp(component,destination?"destination":"rendition"))return fail(error,size,"target.component","does not match action");
+    yyjson_val *destination_id=yyjson_obj_get(target,"destination_id");
+    if(destination){if(!naki_json_id(destination_id,32))return fail(error,size,"target.destination_id","required");strcpy(u.destination_id,yyjson_get_str(destination_id));}
+    else if(destination_id)return fail(error,size,"target.destination_id","not allowed for rendition action");
+    u.spec=yyjson_obj_get(root,"spec");
+    if(u.action==NAKI_RENDITION_ADD||u.action==NAKI_DESTINATION_ADD){if(!yyjson_is_obj(u.spec))return fail(error,size,"spec","required object");}
+    else if(u.spec)return fail(error,size,"spec","not allowed for this action");
+    yyjson_val *generation=yyjson_obj_get(root,"expected_generation");if(generation&&(!yyjson_is_uint(generation)||!yyjson_get_uint(generation)))return fail(error,size,"expected_generation","must be positive integer");
+    u.expected_generation=yyjson_get_uint(generation);u.expected_revision=yyjson_get_uint(revision);
+    strcpy(u.operation_id,yyjson_get_str(yyjson_obj_get(root,"operation_id")));strcpy(u.output_id,yyjson_get_str(yyjson_obj_get(target,"output_id")));
+    yyjson_mut_doc *d=yyjson_mut_doc_new(NULL);if(!d)return -1;yyjson_mut_val *intent=yyjson_val_mut_copy(d,root);yyjson_mut_doc_set_root(d,intent);yyjson_mut_obj_remove_key(intent,"operation_id");yyjson_mut_obj_add_str(d,intent,"kind","topology");yyjson_mut_obj_add_strcpy(d,intent,"job_id",job);
+    size_t bytes;char *text=yyjson_mut_write(d,0,&bytes);yyjson_mut_doc_free(d);yyjson_doc *v=text?yyjson_read(text,bytes,0):NULL;free(text);
+    int ret=v?naki_intent_fingerprint(yyjson_doc_get_root(v),u.fingerprint,error,size):-1;if(v)yyjson_doc_free(v);if(!ret)*out=u;return ret;
+}
 int naki_update_parse(yyjson_val *root,const char *job_id,NakiUpdateRequest *out,char *error,size_t size) {
     NakiUpdateRequest update={0};
-    if(!naki_id_valid(job_id,63)||naki_intent_validate(root,error,size)||keys(root,"|operation_id||target||expected_revision||patch|","update",error,size))return -1;
+    if(!naki_id_valid(job_id,63)||naki_intent_validate(root,error,size))return -1;
+    const char *component_name=yyjson_get_str(yyjson_obj_get(yyjson_obj_get(root,"target"),"component"));
+    if(component_name&&(!strcmp(component_name,"rendition")||!strcmp(component_name,"destination")))return topology(root,job_id,out,error,size);
+    if(keys(root,"|operation_id||target||expected_revision||patch||expected_generation|","update",error,size))return -1;
     yyjson_val *operation=yyjson_obj_get(root,"operation_id"),*target=yyjson_obj_get(root,"target"),*revision=yyjson_obj_get(root,"expected_revision"),*patch=yyjson_obj_get(root,"patch");
     if(!naki_json_id(operation,128))return fail(error,size,"operation_id","invalid control ID");
     if(keys(target,"|output_id||component|","target",error,size)||yyjson_obj_size(target)!=2)return fail(error,size,"target","requires output_id and component");
@@ -53,6 +80,9 @@ int naki_update_parse(yyjson_val *root,const char *job_id,NakiUpdateRequest *out
     update.patch.present=present(patch,"enabled",NAKI_PATCH_ENABLED)|present(resource,"uri",NAKI_PATCH_URI)|present(resource,"load_timeout_ms",NAKI_PATCH_LOAD_TIMEOUT)|
         present(placement,"anchor",NAKI_PATCH_ANCHOR)|present(placement,"opacity",NAKI_PATCH_OPACITY)|present(offset,"x",NAKI_PATCH_X)|present(offset,"y",NAKI_PATCH_Y)|
         present(dimensions,"width",NAKI_PATCH_WIDTH)|present(dimensions,"height",NAKI_PATCH_HEIGHT)|present(dimensions,"fit",NAKI_PATCH_FIT);
+    yyjson_val *generation=yyjson_obj_get(root,"expected_generation");
+    if(generation&&(!yyjson_is_uint(generation)||!yyjson_get_uint(generation)))return fail(error,size,"expected_generation","must be positive integer");
+    update.expected_generation=yyjson_get_uint(generation);
     strcpy(update.operation_id,yyjson_get_str(operation));strcpy(update.output_id,yyjson_get_str(output));update.expected_revision=yyjson_get_uint(revision);
     yyjson_mut_doc *intent=yyjson_mut_doc_new(NULL);if(!intent)return fail(error,size,"update","allocation failure");
     yyjson_mut_val *intent_root=yyjson_val_mut_copy(intent,root);yyjson_mut_doc_set_root(intent,intent_root);yyjson_mut_obj_remove_key(intent_root,"operation_id");

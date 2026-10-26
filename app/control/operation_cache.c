@@ -37,12 +37,12 @@ int naki_operation_result_terminal(yyjson_val *record) {
     const char *state=yyjson_get_str(yyjson_obj_get(record,"state"));if(!state)return 0;
     if(!strcmp(state,"failed")||!strcmp(state,"superseded")||!strcmp(state,"cancelled")||!strcmp(state,"stopped"))return 1;
     const char *delivery=yyjson_get_str(yyjson_obj_get(yyjson_obj_get(record,"delivery"),"state"));
-    return !strcmp(state,"applied")&&delivery&&(!strcmp(delivery,"first_written")||!strcmp(delivery,"not_written"));
+    return !strcmp(state,"applied")&&delivery&&(!strcmp(delivery,"first_written")||!strcmp(delivery,"not_written")||!strcmp(delivery,"uncertain"));
 }
 int naki_operation_cache_put(NakiOperationCache *cache,yyjson_val *root,int64_t now) {
     const char *job=yyjson_get_str(yyjson_obj_get(root,"job_id")),*kind=yyjson_get_str(yyjson_obj_get(root,"kind"));
     if(!cache||!job||strcmp(job,cache->job_id)||!kind)return -EINVAL;
-    if(strcmp(kind,"update"))return 0;
+    if(strcmp(kind,"update")&&strcmp(kind,"topology"))return 0;
     const char *id=yyjson_get_str(yyjson_obj_get(root,"operation_id")),*fingerprint=yyjson_get_str(yyjson_obj_get(root,"intent_fingerprint"));
     if(!naki_id_valid(id,128)||!fingerprint||strlen(fingerprint)!=64)return -EINVAL;
     yyjson_val *version=yyjson_obj_get(root,"result_version");

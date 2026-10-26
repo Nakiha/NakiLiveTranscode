@@ -5,7 +5,7 @@
 #include <yyjson.h>
 typedef struct NakiOperations NakiOperations;
 typedef uint64_t NakiOperationHandle;
-typedef enum NakiOperationKind {NAKI_OP_CREATE,NAKI_OP_UPDATE,NAKI_OP_STOP} NakiOperationKind;
+typedef enum NakiOperationKind {NAKI_OP_CREATE,NAKI_OP_UPDATE,NAKI_OP_STOP,NAKI_OP_TOPOLOGY} NakiOperationKind;
 typedef enum NakiOperationState {
     NAKI_OP_ACCEPTED,NAKI_OP_PREPARING,NAKI_OP_PREPARED,NAKI_OP_APPLYING,NAKI_OP_APPLIED,
     NAKI_OP_FAILED,NAKI_OP_SUPERSEDED,NAKI_OP_CANCELLED,NAKI_OP_STOPPING,NAKI_OP_STOPPED
@@ -19,6 +19,7 @@ typedef struct NakiFrameIdentity {
 typedef struct NakiOperationIntent {
     NakiOperationKind kind;
     const char *job_id,*operation_id,*output_id,*fingerprint,*origin_request_id;
+    const char *component,*action,*destination_id;
     uint64_t expected_revision,revision;
 } NakiOperationIntent;
 NakiOperations *naki_operations_open(unsigned update_capacity,size_t byte_limit,int64_t retention_us);
@@ -44,4 +45,11 @@ yyjson_mut_doc *naki_operations_get(NakiOperations *store,NakiOperationHandle ha
 /* Bounded export index, stable while reservations are pinned by the caller's job lifecycle. */
 yyjson_mut_doc *naki_operations_page(NakiOperations *store,unsigned cursor,unsigned maximum,unsigned *next);
 size_t naki_operations_record_bytes(void);
+/* Mirror only explicit child record fields, never handles or runtime objects.
+ * Caller binds handle to the independently authenticated rendition generation. */
+int naki_operations_observe(NakiOperations *store,NakiOperationHandle handle,yyjson_val *record,int64_t now_us);
+/* Call only after pidfd exit proof; preserve confirmed first_written and mark
+ * missing delivery acknowledgements uncertain instead of not_written. */
+int naki_operations_holder_exited(NakiOperations *store,NakiOperationHandle handle,int64_t now_us);
+
 #endif

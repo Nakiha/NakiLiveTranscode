@@ -260,7 +260,9 @@ def final_before_pending(sample,red,written):
         'NAKI_TEST_OPERATION_ORDER_DIR':str(order),'NAKI_TEST_OPERATION_ORDER_ID':'ordered'})
     pool=concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        accepted=server.api('/v1/jobs',{'operation_id':'create-'+name,'spec':{'input':str(sample),'output':str(RUN/(name+'.ts')),'encoder':'libvvenc','output_format':'mpegts','pace':True}},202)
+        # Test channel capture order at the real write gate, independently of
+        # VVC lookahead exceeding the production RPC's intentional 2s timeout.
+        accepted=server.api('/v1/jobs',{'operation_id':'create-'+name,'spec':{'input':str(sample),'output':str(RUN/(name+'.ts')),'encoder':'libx264','output_format':'mpegts','pace':True}},202)
         job=accepted['job_id']
         def entered():
             try:return json.loads((gate/'entered.json').read_text())
@@ -282,7 +284,7 @@ def final_before_pending(sample,red,written):
             wait(lambda:any(e.get('event')=='update_first_written' and e.get('operation_id')=='ordered' for e in read_events(server.logs/'logs/events')))
             server.api(f'/v1/jobs/{job}/stop',{'operation_id':'stop-'+name},202)
         else:(gate/'fail').touch()
-        response=request.result(timeout=4);assert response['result_version']>captured['result_version']
+        response=request.result(timeout=4);assert response.get('result_version',0)>captured['result_version'],response
         wait(lambda:server.api()['state']==('stopped' if written else 'failed'))
         wait(lambda:(order/'sent-old-pending.json').exists())
         sent_page=json.loads((order/'sent-final-page.json').read_text())

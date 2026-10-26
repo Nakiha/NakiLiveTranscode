@@ -211,6 +211,14 @@ void crash_set_job(const char *id) {
     snprintf(record.job_id,sizeof(record.job_id),"%s",id);
     send(channel,&record,sizeof(record),MSG_DONTWAIT|MSG_NOSIGNAL);
 }
+int crash_set_rendition(const char *session,const char *output,uint64_t generation) {
+    if(channel<0||!session||strlen(session)!=32||!output||!strlen(output)||strlen(output)>32||!generation)return -1;
+    CrashRecord record={.magic=CRASH_MAGIC,.version=CRASH_VERSION,.kind=CRASH_RENDITION,.pid=getpid()};
+    snprintf(record.job_id,sizeof(record.job_id),"%s",output);record.registers[0]=generation;
+    memcpy(&record.registers[1],session,32);
+    ssize_t n;do{n=send(channel,&record,sizeof(record),MSG_DONTWAIT|MSG_NOSIGNAL);}while(n<0&&errno==EINTR);
+    return n==sizeof(record)?0:-1;
+}
 int crash_collector_pid(void) {return collector_pid;}
 int crash_client_enabled(void) {
     if(!initialized || channel<0)return 0;

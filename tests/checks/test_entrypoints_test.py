@@ -43,7 +43,7 @@ class Entrypoints(unittest.TestCase):
     def test_full_preserves_every_former_ci_suite_once(self):
         suites = self.catalog['suites']
         actual = [pathlib.Path(row['script']).stem for row in suites if 'full' in row['profiles']]
-        self.assertEqual(set(actual), set(LEGACY) | {'infrastructure_test', 'test_entrypoints_test', 'pipeline_lifecycle_integration', 'organization_test', 'cqf_rate_integration', 'quality_tools_test', 'live_budget_test', 'read_origin_integration', 'codec_phases_integration', 'codec_phase_tools_test', 'decoder_controls_integration'})
+        self.assertEqual(set(actual), set(LEGACY) | {'rendition_integration', 'infrastructure_test', 'test_entrypoints_test', 'pipeline_lifecycle_integration', 'organization_test', 'cqf_rate_integration', 'quality_tools_test', 'live_budget_test', 'read_origin_integration', 'codec_phases_integration', 'codec_phase_tools_test', 'decoder_controls_integration'})
         self.assertEqual(len(actual), len(set(actual)))
         self.assertEqual(len({row['id'] for row in suites}), len(suites))
         for row in suites:

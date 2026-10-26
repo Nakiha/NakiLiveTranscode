@@ -35,6 +35,6 @@ yyjson_mut_doc *new_event(const char *event, const Job *job) {
     json_int(doc, "monotonic_us", now_us());
     json_int(doc,"process_id",getpid());
     if(*naki_process_id())json_str(doc,"instance_id",naki_process_id());
-    if (job) {json_str(doc, "job_id", job->id); json_str(doc,"request_id",job->request_id);json_str(doc,"create_request_id",job->request_id);if(*job->output_id)json_str(doc,"output_id",job->output_id);}
+    if (job) {if(job->rendition_generation)json_int(doc,"rendition_generation",job->rendition_generation);json_str(doc, "job_id", job->id); json_str(doc,"request_id",job->request_id);json_str(doc,"create_request_id",job->request_id);if(*job->output_id)json_str(doc,"output_id",job->output_id);}
     return doc;
 }

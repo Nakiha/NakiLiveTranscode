@@ -1,6 +1,8 @@
 # 进程池、首帧追踪与控制接管
 
-当前 0.9.0 是 Linux 单输入、1–4 个固定逻辑输出实验服务，FLV/TS 支持有界 AAC/MP3 透传，MP4 视频限定。naki-live 使用 libevent HTTP；独立 worker 持有同任务媒体连接、共享解码及各输出 filter/encoder/mux，唯一 logger 写进程事件/trace。容器配置 Python 标准库监管入口重启异常退出的 controller；媒体/IPC 为 C。本机验证与实际镜像/远程验收须分开读取，见[合并前复查](validation-final-review.md)及对应提交的 CI 记录。
+可选的 [rendition 运行时](rendition-runtime.md) 在同一 session 内增加独立 exec 编码分支或线程对照；另用有界、版本化的只读共享媒体通道，不把像素放进本页的控制 JSON。控制器仍不持有媒体上下文。
+
+当前 0.9.0 默认路径是 Linux 单输入、1–4 个固定逻辑输出实验服务，FLV/TS 支持有界 AAC/MP3 透传，MP4 视频限定。naki-live 使用 libevent HTTP；独立 worker 持有同任务媒体连接、共享解码及各输出 filter/encoder/mux，唯一 logger 写进程事件/trace。容器配置 Python 标准库监管入口重启异常退出的 controller；媒体/IPC 为 C。本机验证与实际镜像/远程验收须分开读取，见[合并前复查](validation-final-review.md)及对应提交的 CI 记录。
 
 ## 小型待命池
 

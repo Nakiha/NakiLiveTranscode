@@ -3,6 +3,7 @@
 #include "platform/runtime.h"
 #include "frame_policy_runtime.h"
 #include "media/pipeline.h"
+#include "media/rendition_runtime.h"
 #include "platform/ipc.h"
 #include "media/watermark.h"
 #include <curl/curl.h>
@@ -45,8 +46,8 @@ static int start_job(Job *job, yyjson_doc *doc) {
     char fingerprint[65];const char *expected=yyjson_get_str(yyjson_obj_get(root,"spec_fingerprint"));
     valid=valid&&naki_json_id(yyjson_obj_get(root,"creation_operation_id"),128)&&naki_json_id(yyjson_obj_get(root,"service_namespace"),128)&&
         expected&&!naki_config_fingerprint(&job->config,fingerprint,error,sizeof(error))&&!strcmp(expected,fingerprint);
-    free(config);
-    if(!valid)return -1;
+    if(!valid){free(config);return -1;}
+    job->public_config=config;
     strcpy(job->id,id); strcpy(job->request_id,request_id); strcpy(job->log_path,path); job->lifecycle.state=NAKI_JOB_STATE_STARTING;
     if(!job->config.output_count)strcpy(job->output_id,job->config.single_output_id);
     crash_set_job(job->id);
@@ -79,6 +80,7 @@ static int start_job(Job *job, yyjson_doc *doc) {
         b->watermark=naki_watermark_open(&b->config.watermark,b->lifecycle.started_us,&b->lifecycle.cancel);if(!b->watermark)return -1;
         if(naki_watermark_bind(b->watermark,job->operations,job->id,b->output_id,job->request_id,job->logger))return -1;
     }
+    if(job->config.rendition_backend&&naki_renditions_create(job))return -1;
     return pthread_create(&job->thread,NULL,pipeline_main,job) ? -1 : 0;
 }
 static int stop_intent(Job *job,const char *operation,const char *origin,NakiOperationHandle *handle) {
@@ -107,6 +109,7 @@ static int targeted(yyjson_val *root,Job *job) {
 
 /* Private executable: fd 3 is the first controller; the private endpoint permits later takeover. */
 int main(int argc,char **argv) {
+    if(argc>1&&!strcmp(argv[1],"--rendition"))return naki_rendition_child_main(argc,argv);
     if(naki_process_init())return 1;
     crash_set_instance(naki_process_id());
     if(argc!=9)return 2;
@@ -240,6 +243,7 @@ int main(int argc,char **argv) {
                     int ret=!id||strcmp(id,job->id)||!instance||strcmp(instance,naki_process_id());
                     if(ret)snprintf(error,sizeof(error),"job/worker target mismatch");
                     else ret=naki_watermark_update(yyjson_obj_get(root,"update"),&config,&revision,error,sizeof(error));
+                    if(!ret&&job->renditions){ret=-ENOTSUP;snprintf(error,sizeof(error),"use_typed_updates_with_expected_generation");}
                     Job *target=job;const char *output_id=yyjson_get_str(yyjson_obj_get(yyjson_obj_get(root,"update"),"output_id"));
                     if(!ret&&job->config.output_count) {
                         target=NULL;for(int i=0;i<job->config.output_count;i++)if(output_id&&!strcmp(output_id,job->outputs[i]->output_id))target=job->outputs[i];
@@ -262,10 +266,11 @@ int main(int argc,char **argv) {
                     if(output_id)json_str(watermark_reply,"output_id",output_id);
                     if(result_doc) {yyjson_mut_obj_add_val(watermark_reply,yyjson_mut_doc_get_root(watermark_reply),"operation",yyjson_mut_val_mut_copy(watermark_reply,yyjson_mut_doc_get_root(result_doc)));yyjson_mut_doc_free(result_doc);}
                     next_snapshot=0;
-                } else if((ipc_kind(doc,"update")||ipc_kind(doc,"operation_get"))&&running&&!operation_reply) {
+                } else if((ipc_kind(doc,"update")||ipc_kind(doc,"operation_get")||ipc_kind(doc,"rendition_get"))&&running&&!operation_reply) {
                     yyjson_val *root=yyjson_doc_get_root(doc);char error[256]="target_mismatch";yyjson_mut_doc *record=NULL;int code=409;
                     if(targeted(root,job)) {
-                        if(ipc_kind(doc,"operation_get")) {
+                        if(ipc_kind(doc,"rendition_get")){record=naki_renditions_snapshot(job,yyjson_get_str(yyjson_obj_get(root,"output_id")));code=record?200:404;snprintf(error,sizeof(error),"rendition_not_found_or_not_available");}
+                        else if(ipc_kind(doc,"operation_get")) {
                             const char *operation=yyjson_get_str(yyjson_obj_get(root,"operation_id"));NakiOperationHandle handle;
                             code=naki_id_valid(operation,128)&&!naki_operations_lookup(job->operations,job->id,operation,&handle)?200:404;
                             if(code==200)record=naki_operations_get(job->operations,handle);
@@ -274,20 +279,24 @@ int main(int argc,char **argv) {
                             NakiUpdateRequest update;const char *origin=yyjson_get_str(yyjson_obj_get(root,"origin_request_id"));
                             if(!naki_id_valid(origin,128)||naki_update_parse(yyjson_obj_get(root,"update"),job->id,&update,error,sizeof(error)))code=400;
                             else {
-                                Job *target=target_output(job,update.output_id);
-                                if(!target) {code=404;snprintf(error,sizeof(error),"output_not_found");}
+                                Job *target=job->renditions?NULL:target_output(job,update.output_id);
+                                if(job->renditions) {
+                                    int ret=naki_renditions_submit(job,yyjson_obj_get(root,"update"),origin,&record,error,sizeof(error));
+                                    code=!ret?202:ret==-ENOENT?404:ret==-EINVAL?400:ret==-ENOSPC||ret==-EAGAIN?429:ret==-ENOMEM?503:ret==-ENOTSUP?422:409;
+                                } else if(update.action||update.expected_generation){code=409;snprintf(error,sizeof(error),"rendition_runtime_required");}
+                                else if(!target) {code=404;snprintf(error,sizeof(error),"output_not_found");}
                                 else {
                                     int ret=naki_watermark_submit(target->watermark,&update,origin,&record,error,sizeof(error));
-                                    code=!ret?202:ret==-ENOSPC?429:ret==-ENOMEM?503:409;
+                                    code=!ret?202:ret==-ENOSPC?429:ret==-ENOMEM?503:ret==-ENOTSUP?422:409;
                                 }
                             }
                         }
                     }
-                    operation_reply=ipc_message("operation_reply");json_str(operation_reply,"job_id",job->id);
+                    operation_reply=ipc_message(ipc_kind(doc,"rendition_get")?"rendition_reply":"operation_reply");json_str(operation_reply,"job_id",job->id);
                     json_str(operation_reply,"requester_instance_id",yyjson_get_str(yyjson_obj_get(root,"instance_id")));
                     json_int(operation_reply,"token",yyjson_get_sint(yyjson_obj_get(root,"token")));json_int(operation_reply,"http_status",code);
                     json_str(operation_reply,"error",error);
-                    if(record) {yyjson_mut_obj_add_val(operation_reply,yyjson_mut_doc_get_root(operation_reply),"operation",yyjson_mut_val_mut_copy(operation_reply,yyjson_mut_doc_get_root(record)));yyjson_mut_doc_free(record);}
+                    if(record) {yyjson_mut_obj_add_val(operation_reply,yyjson_mut_doc_get_root(operation_reply),ipc_kind(doc,"rendition_get")?"rendition":"operation",yyjson_mut_val_mut_copy(operation_reply,yyjson_mut_doc_get_root(record)));yyjson_mut_doc_free(record);}
                     next_snapshot=0;
                 } else if(ipc_kind(doc,"operations_sync")&&running&&targeted(yyjson_doc_get_root(doc),job)) {
                     owner_info_needed=1;export_pending=1;export_cursor=0;export_id++;if(export_reply)yyjson_mut_doc_free(export_reply);export_reply=NULL;
@@ -305,7 +314,7 @@ int main(int argc,char **argv) {
         }
         if(running && !joined) {
             naki_policy_tick(job,current);
-            for(int i=0;i<job->config.output_count;i++)if(job->outputs[i]&&!atomic_load(&job->outputs[i]->lifecycle.done))naki_policy_tick(job->outputs[i],current);
+            for(int i=0;i<job->config.output_count;i++)if(job->outputs[i]&&!job->outputs[i]->remote_rendition&&!atomic_load(&job->outputs[i]->lifecycle.done))naki_policy_tick(job->outputs[i],current);
         }
         if(channel.fd<0 && !disconnected_us)disconnected_us=current;
         if(running && !joined && atomic_load(&job->lifecycle.done)) {
@@ -366,10 +375,12 @@ int main(int argc,char **argv) {
         /* Losing control does not cancel media. Keep final state until a controller acknowledges it. */
     }
     if(running && !joined) {request_stop(job); pthread_join(job->thread,NULL);}
+    naki_renditions_close(job);
     naki_watermark_close(&job->watermark);
     for(int i=0;i<job->config.output_count;i++)if(job->outputs[i]) {
         Job *b=job->outputs[i];naki_watermark_close(&b->watermark);
         for(int k=0;k<2;k++)if(b->progress.first_chain[k])yyjson_mut_doc_free(b->progress.first_chain[k]);
+        if(b->remote_snapshot)yyjson_doc_free(b->remote_snapshot);
         close(b->wake_fd);pthread_mutex_destroy(&b->mutex);free(b);
     }
     if(watermark_reply)yyjson_mut_doc_free(watermark_reply);
@@ -385,6 +396,6 @@ int main(int argc,char **argv) {
     if(assignment)yyjson_doc_free(assignment);
     for(int i=0;i<2;i++)if(job->progress.first_chain[i])yyjson_mut_doc_free(job->progress.first_chain[i]);
     close(job->wake_fd); channel_close(&channel); close(listener); unlink(endpoint);
-    pthread_mutex_destroy(&channel.mutex); pthread_mutex_destroy(&job->mutex); free(job);
+    pthread_mutex_destroy(&channel.mutex); pthread_mutex_destroy(&job->mutex);free(job->public_config); free(job);
     return result;
 }

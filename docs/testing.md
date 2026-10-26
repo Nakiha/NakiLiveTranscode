@@ -14,9 +14,9 @@ bash scripts/test-sanitizers.sh
 
 | 入口 | 实际覆盖 | 不代表什么 |
 | --- | --- | --- |
-| quick | 15 个带 quick 标签的原生测试；入口失败传播/超时/覆盖保护；SDK identity/expectation、发布绑定、事件维护检查 | 不跑服务媒体、真实网络、进程接管、完整崩溃或容量测量；并非纯静态 lint，部分检查会编译微型 ELF/创建临时 Git 仓库 |
+| quick | 27 个带 quick 标签的原生测试；入口失败传播/超时/覆盖保护；SDK identity/expectation、发布绑定、事件维护检查 | 不跑服务媒体、真实网络、进程接管、完整崩溃或容量测量；并非纯静态 lint，部分检查会编译微型 ELF/创建临时 Git 仓库 |
 | full | quick 加原 ci-test.sh 的全部 Python 套件，以及单/多输出生命周期矩阵：构建缓存、媒体/水印/SEI/音频/帧率/队列、真实传输、控制与接管、健康、finalize、崩溃、独立符号；保留原 VVC 单次测量 | 不包含实际 Docker smoke、外部采集、目标机器容量、24/72 小时 soak；单次 VVC 结果不是稳定性能结论 |
-| sanitizers | 独立 ASan/UBSan 构建，15 个快速原生测试及 service、multi-output、watermark-review、lifecycle-media；默认启用 leak 检查及遇错停止 | 不重新插桩 FFmpeg、VVenC、系统 libevent/libcurl/libx264/libunwind；不证明整个媒体栈无泄漏/竞态，也不覆盖 TSan |
+| sanitizers | 独立 ASan/UBSan 构建，27 个快速原生测试及 service、multi-output、watermark-review、lifecycle-media；默认启用 leak 检查及遇错停止 | 不重新插桩 FFmpeg、VVenC、系统 libevent/libcurl/libx264/libunwind；不证明整个媒体栈无泄漏/竞态，也不覆盖 TSan |
 
 构建默认启用测试目标，可用 `NAKI_BUILD_TESTING=OFF` 只构建四个服务可执行文件；此时不能运行 native/完整 profile，但可用相应构建目录和 `--bin-dir` 运行不依赖 helper 的选定套件。
 
@@ -31,9 +31,21 @@ bash scripts/test-service.sh quick --suite native
 bash scripts/test-service.sh full --suite lifecycle-media --list
 ```
 
-`--suite ID` 可重复，ID 必须属于所选 profile；未知、跨 profile 或重复选择均失败。执行顺序遵循清单，默认不带参数时仍执行完整 profile。`native` 表示全部 15 项 CTest quick；缺依赖和失败不会隐式跳过。结果中的 `scope=selected` 和 `selected_suites` 明确区分局部通过与完整回归通过。非 quick 选择始终执行 SDK gate；符号目录只在选择 symbols 时要求。
+`--suite ID` 可重复，ID 必须属于所选 profile；未知、跨 profile 或重复选择均失败。执行顺序遵循清单，默认不带参数时仍执行完整 profile。`native` 表示全部 27 项 CTest quick；缺依赖和失败不会隐式跳过。结果中的 `scope=selected` 和 `selected_suites` 明确区分局部通过与完整回归通过。非 quick 选择始终执行 SDK gate；符号目录只在选择 symbols 时要求。
 
-本次新增 organization 检查后，quick 是 7 个步骤，full 是 35 个步骤，sanitize 仍是 6 个步骤；历史记录中的旧计数不回写。独立性能入口见[性能测量](benchmarking.md)，不以性能测量替代功能门槛。
+当前步骤及间接调用以 `--list` 和清单为准；历史报告中的计数保留各自源码窗口。独立性能入口见[性能测量](benchmarking.md)，不以性能测量替代功能门槛。
+
+## 编码分支运行时检查（issue #4）
+
+```sh
+bash scripts/test-service.sh full --suite native --suite renditions
+# 使用另建的 NAKI_SANITIZERS=ON build/bin 目录
+python3 scripts/test-service.py sanitize --suite native --suite renditions-sanitize
+```
+
+`renditions` 使用同一输入覆盖四路 process/thread、增删/恢复/保活、九类真实进程故障、controller 接管、AAC/MP3/SEI、TCP 接收端重连、格式与 stop/EOF 竞争、每后端 20 轮增删、32 组合矩阵、高级能力和持续负载。`renditions-sanitize` 执行功能与增删压力，跳过故意原生崩溃和性能矩阵。进程媒体测试保留 ASan/UBSan，但因 holder 守卫禁止 LSan 派生 tracer 而关闭进程场景 LSan；独立 native quick 仍启用 LSan。SDK/系统库不重新插桩。
+
+CPU/PSS、帧数及像素比较失败必须传播非零退出；资源采集失败不能替换为零。性能测试期间不并发运行其他容器负载。选定套件通过不等于整个 full profile 通过，旧混合 VVC 容量失败及最终数据见 [本轮验收](rendition-acceptance-20261026.md)。目录、媒体、日志与构建保留在各轮唯一 `out/`，只提交脱敏技术摘要。
 
 ## 测试源码目录
 
@@ -68,7 +80,7 @@ bash scripts/test-service.sh full --suite lifecycle-media --list
 
 | 测试/工具 | 执行位置 |
 | --- | --- |
-| 13 个无参数原生测试、event-logger 和 logger-submit | CTest quick；两个日志 wrapper 每次建立新目录，logger-submit 覆盖准备期间的保序、限额、释放/停机与维护 |
+| quick 原生测试、event-logger 和 logger-submit | CTest quick；两个日志 wrapper 每次建立新目录，logger-submit 覆盖准备期间的保序、限额、释放/停机与维护 |
 | logger | observability_integration；CTest 另提供独立 wrapper，未放进 quick 以免 full 重复执行 |
 | live-mux 原生检查 | live_mux_integration；CTest 另注册为 integration-helper |
 | lifecycle-media | full/sanitizers 均执行旧单输出、outputs 单元素、2/4 路的 86 场景矩阵；仅测试 worker 链接故障包装器，覆盖部分初始化、停止、错误优先级及资源归还 |
@@ -80,7 +92,7 @@ bash scripts/test-service.sh full --suite lifecycle-media --list
 | workflow_publication_test | dependency workflow 在 SDK 查询前独立执行；只运行本地 stub，不发布 |
 | docker_smoke | Service workflow 在 full/sanitizers 后，用实际运行镜像与匹配符号独立执行 |
 
-直接 `ctest --test-dir <build>` 目前执行 17 个原生测试；`ctest -L quick` 执行其中 15 个。两者均不能代替 full。原来的专题 Python 脚本仍可独立运行。
+`ctest -L quick` 当前执行 27 项；不带标签的 CTest 还包含有专用集成驱动的 helper。两者均不能代替 full。原来的专题 Python 脚本仍可独立运行。
 
 ## 证据与完成标准
 

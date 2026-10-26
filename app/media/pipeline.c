@@ -1,8 +1,9 @@
 #include "pipeline_internal.h"
+#include "rendition_runtime.h"
 #include "decode_output_policy.h"
 #include "decode_backend.h"
 
-static int handle_audio(Pipeline *p, const InputItem *item);
+int pipeline_handle_audio(Pipeline *p, const InputItem *item);
 int pipeline_stamp_valid(const AVBufferRef *ref) {
     if(!ref||ref->size<sizeof(Stamp))return 0;
     const Stamp *s=(const Stamp *)ref->data;
@@ -102,6 +103,10 @@ static int prepare_audio_params(AVCodecParameters *par, const AVPacket *pkt) {
         AVCodecContext *probe=codec ? avcodec_alloc_context3(codec) : NULL;
         if(!probe)return AVERROR(ENOMEM);
         int ret=avcodec_parameters_to_context(probe,par);
+        /* This isolated packet determines coded rate/layout, not audible
+         * stream startup. Reapplying source initial_padding to a fresh probe
+         * can trim its only frame and return EAGAIN for every AAC packet. */
+        probe->flags2|=AV_CODEC_FLAG2_SKIP_MANUAL;probe->thread_count=1;
         if(ret>=0)ret=avcodec_open2(probe,codec,NULL);
         AVFrame *decoded=av_frame_alloc();
         if(!decoded){avcodec_free_context(&probe);return AVERROR(ENOMEM);}
@@ -149,6 +154,7 @@ static int process_audio(Pipeline *p, const InputItem *item) {
             logger_submit(p->job->logger,NULL,doc);naki_audio_signature_clear(&observed);return 0;
         }
     } else if(signature_ret<0) {
+        if(signature_ret==AVERROR(EAGAIN)&&!(track->pending_reported&1)){track->pending_reported|=1;yyjson_mut_doc *event=new_event("audio_parameters_pending",p->job);json_str(event,"stage","immutable input signature");json_int(event,"extradata_bytes",item->params->extradata_size);json_int(event,"packet_bytes",item->packet->size);logger_submit(p->job->logger,NULL,event);}
         if(signature_ret!=AVERROR(EAGAIN)) {
             track->rejected=1;yyjson_mut_doc *doc=new_event("audio_track_rejected",p->job);
             json_int(doc,"input_stream",track->input_index);json_str(doc,"codec",avcodec_get_name(item->params->codec_id));
@@ -158,7 +164,7 @@ static int process_audio(Pipeline *p, const InputItem *item) {
     }
     if(!track->output) {
         int ret=prepare_audio_params(item->params,item->packet);
-        if(ret==AVERROR(EAGAIN)){audio_count(p,0);naki_audio_signature_clear(&observed);return 0;}
+        if(ret==AVERROR(EAGAIN)){if(!(track->pending_reported&2)){track->pending_reported|=2;yyjson_mut_doc *event=new_event("audio_parameters_pending",p->job);json_str(event,"stage","bounded audio decoder probe");json_int(event,"extradata_bytes",item->params->extradata_size);json_int(event,"packet_bytes",item->packet->size);logger_submit(p->job->logger,NULL,event);}audio_count(p,0);naki_audio_signature_clear(&observed);return 0;}
         if(ret==AVERROR(ENOMEM)) {naki_audio_signature_clear(&observed);return ret;}
         if(ret>=0 && item->params->codec_id==AV_CODEC_ID_AAC) {
             const AVBitStreamFilter *filter=av_bsf_get_by_name("aac_adtstoasc");
@@ -228,7 +234,7 @@ static int process_audio(Pipeline *p, const InputItem *item) {
     av_packet_free(&packet);
     return ret;
 }
-static int handle_audio(Pipeline *p, const InputItem *item) {
+int pipeline_handle_audio(Pipeline *p, const InputItem *item) {
     if(p->video_started)return process_audio(p,item);
     NakiBranchItem accounting={.packet=item->packet,.parameters=item->params,.media_us=1,.ingress_us=0};
     int charged=naki_branch_item_charge(&accounting);if(charged<0)return charged;
@@ -383,11 +389,11 @@ static int rebuild_input_filter(Pipeline *p,const AVFrame *frame) {
     json_int(event,"output_width",p->encoder->width);json_int(event,"output_height",p->encoder->height);
     json_str(event,"encoder_action","unchanged");logger_submit(p->job->logger,NULL,event);return 0;
 }
-static int process_frame(Pipeline *p,AVFrame *frame) {
+int pipeline_process_frame(Pipeline *p,AVFrame *frame) {
     int ret=p->job->parent?av_buffer_make_writable(&frame->opaque_ref):p->job->config.decoder_pump?0:pipeline_prepare_decoded_frame(p,frame);
     if(ret<0)return ret;
     Stamp *stamp=(Stamp *)frame->opaque_ref->data;
-    if(p->job->config.decoder_pump)stamp->decoder_owner_us=now_us();
+    if(p->job->config.decoder_pump&&!p->job->parent)stamp->decoder_owner_us=now_us();
     if(p->job->parent) {
         stamp->branch_started_us=now_us();
         pthread_mutex_lock(&p->job->mutex);
@@ -406,7 +412,8 @@ static int process_frame(Pipeline *p,AVFrame *frame) {
     stamp->intra_reason=naki_intra_decide(&p->job->config.policy,&p->intra,stamp->source_us,stamp->picture_type==AV_PICTURE_TYPE_I);
     int sei_messages=naki_sei_count(pipeline_stamp_sei(frame->opaque_ref),&p->job->config.sei);
     int sei_protected=sei_messages>0;
-    int protect=stamp->intra_reason || stamp->picture_type==AV_PICTURE_TYPE_I || stamp->frame_id==1 || sei_protected;
+    int first=p->job->parent?p->rendition_frames++==0:stamp->frame_id==1;
+    int protect=stamp->intra_reason || stamp->picture_type==AV_PICTURE_TYPE_I || first || sei_protected;
     pthread_mutex_lock(&p->job->mutex);
     p->job->stats.frames_decoded++; if(p->job->stats.frame_id_last<(uint64_t)stamp->frame_id)p->job->stats.frame_id_last=(uint64_t)stamp->frame_id; p->job->stats.timestamp_wraps=stamp->timestamp_wraps;
     if(p->job->parent)p->job->stats.sei_extracted+=sei_messages;
@@ -489,6 +496,7 @@ static int initialize_decoder(Pipeline *p) {
         p->sei_input=(NakiSeiConfig){0};
         for(int i=0;i<p->job->config.output_count;i++)if(naki_sei_union(&p->sei_input,&p->job->config.outputs[i].sei))return AVERROR(ENOBUFS);
     }
+    p->reader.audio_subscribed=p->job->config.audio_copy;p->reader.subscription_generation=1;
     if(p->sei_input.count&&p->sei_length_size<0)return AVERROR_INVALIDDATA;
     p->input_wrap_bits=stream->pts_wrap_bits;
     ret=naki_video_rate_resolve(av_guess_frame_rate(p->input,stream,NULL),p->job->config.fps,&p->video_rate);
@@ -512,6 +520,9 @@ static int initialize_decoder(Pipeline *p) {
     p->decoder->max_pixels=NAKI_INPUT_MAX_PIXELS;
     if((ret=naki_decode_output_policy(p->decoder,p->job->config.decoder_early_output))<0)return ret;
     if ((ret=avcodec_open2(p->decoder,codec,NULL))<0) return ret;
+    p->initial_input_properties=(AVFrame){.width=p->decoder->width,.height=p->decoder->height,.format=p->decoder->pix_fmt,
+        .color_range=p->decoder->color_range,.colorspace=p->decoder->colorspace,.color_primaries=p->decoder->color_primaries,
+        .color_trc=p->decoder->color_trc,.chroma_location=p->decoder->chroma_sample_location,.sample_aspect_ratio=p->decoder->sample_aspect_ratio};
     ret=naki_decode_backend_init(&p->decoder,&p->async,p->job->config.decoder_async,
         p->job->config.decoder_auto_threads,p->job->config.queue_capacity,
         p->job->config.min_threads,p->job->config.budget_slots,pipeline_decode_notify,p);
@@ -579,10 +590,10 @@ static void *branch_main(void *opaque) {
         if(ret==AVERROR(ETIMEDOUT)||ret==AVERROR(EAGAIN)) {ret=p->live_mux?pipeline_drain_mux(p,0):0;continue;}
         if(ret<0)break;
         pthread_mutex_lock(&j->mutex);j->progress.last_input_us=now_us();j->progress.media_phase=NAKI_MEDIA_PHASE_RUNNING;pthread_mutex_unlock(&j->mutex);
-        if(item.frame)ret=process_frame(p,item.frame);
+        if(item.frame)ret=pipeline_process_frame(p,item.frame);
         else if(j->config.audio_copy&&strcmp(j->config.output_format,"mp4")) {
             InputItem audio={.packet=item.packet,.params=item.parameters,.tb=item.time_base,.demuxed_us=item.ingress_us};
-            ret=handle_audio(p,&audio);
+            ret=pipeline_handle_audio(p,&audio);
         }
         naki_branch_item_free(&item);
         if(ret>=0&&p->live_mux) {ret=pipeline_flush_deferred_audio(p);if(ret>=0)ret=pipeline_drain_mux(p,0);}
@@ -727,7 +738,7 @@ void *pipeline_main(void *opaque) {
     atomic_init(&p.read_interrupt.deadline,0); atomic_init(&p.write_interrupt.deadline,0);
     atomic_init(&p.read_interrupt.cleanup,0);atomic_init(&p.write_interrupt.cleanup,0);
     pipeline_reader_init(&p);int decode_init=pipeline_decode_init(&p);
-    InputItem pending={0}; AVFrame *frame=av_frame_alloc();int branches_joined=0;
+    InputItem pending={0}; AVFrame *frame=av_frame_alloc();int branches_joined=0,idle_finished=0;
     NakiMediaJobInfo info={.job_id=job->id,.request_id=job->request_id,.config=&job->config,.request_us=job->lifecycle.started_us,
         .output_id=job->config.output_count?NULL:job->output_id};
     p.stage="media hook initialization";
@@ -742,7 +753,7 @@ void *pipeline_main(void *opaque) {
         if(ret>=0&&job->config.output_count) {
             int ready=0;pthread_mutex_lock(&job->mutex);job->lifecycle.state=NAKI_JOB_STATE_WAITING_ASSETS;pthread_mutex_unlock(&job->mutex);
             for(int i=0;i<job->config.output_count;i++) {
-                Job *b=job->outputs[i];int gate=naki_watermark_wait(b->watermark);
+                Job *b=job->outputs[i];if(!b||!*b->output_id)continue;int gate=naki_watermark_wait(b->watermark);
                 if(gate<0) {
                     pthread_mutex_lock(&b->mutex);b->lifecycle.branch_failed=1;b->lifecycle.state=NAKI_JOB_STATE_FAILED;snprintf(b->lifecycle.error,sizeof(b->lifecycle.error),"required watermark startup failed: %d",gate);b->lifecycle.ended_us=now_us();pthread_mutex_unlock(&b->mutex);
                     naki_watermark_stop(b->watermark);atomic_store(&b->lifecycle.done,1);
@@ -753,12 +764,14 @@ void *pipeline_main(void *opaque) {
     }
     if(ret>=0)ret=initialize_decoder(&p);
     if (ret<0) goto cleanup;
-    if(job->config.output_count&&(ret=start_branches(&p))<0)goto cleanup;
+    if(job->config.rendition_backend) {if((ret=naki_renditions_open(&p))<0)goto cleanup;}
+    else if(job->config.output_count&&(ret=start_branches(&p))<0)goto cleanup;
     ret=pipeline_reader_start(&p);
     if (ret) {ret=AVERROR(ret); goto cleanup;}
     if(job->config.decoder_pump&&(ret=pipeline_decode_start(&p))<0)goto cleanup;
     int eof_sent=0, decoder_eof=0;
     while (!atomic_load(&job->lifecycle.cancel) && !decoder_eof) {
+        if(job->renditions){ret=naki_renditions_poll(&p,0);if(ret==AVERROR_EOF){ret=0;idle_finished=1;break;}if(ret<0)goto cleanup;if(!naki_renditions_capacity(&p)){poll(NULL,0,5);continue;}}
         if(p.branches&&(ret=check_branches(&p,0))<0) {p.stage="all outputs failed";goto cleanup;}
         uint64_t wake;
         while (read(job->wake_fd,&wake,sizeof(wake))<0 && errno==EINTR) {}
@@ -770,7 +783,7 @@ void *pipeline_main(void *opaque) {
             if (ret==AVERROR(EAGAIN)) {ret=0; break;}
             if (ret<0) goto cleanup;
             if(!job->config.decoder_pump)p.decoder_receive_us=now_us();
-            ret=p.branches?fanout_frame(&p,frame):process_frame(&p,frame); av_frame_unref(frame);
+            ret=job->renditions?naki_renditions_frame(&p,frame):p.branches?fanout_frame(&p,frame):pipeline_process_frame(&p,frame); av_frame_unref(frame);
             if (ret<0) goto cleanup;
             progress=1;
         }
@@ -778,21 +791,22 @@ void *pipeline_main(void *opaque) {
         int input_done=0, input_error=0;
         if (!job->config.decoder_pump && !pending.packet && !eof_sent) pending=pipeline_reader_pop(&p,&input_done,&input_error);
         if(pending.params) {
-            if(p.hooks.audio_packet) {
+            if(p.hooks.audio_packet&&!pending.hook_observed) {
+                pending.hook_observed=1;
                 NakiAudioPacketEvent event={.packet=pending.packet,.parameters=pending.params,.time_base=pending.tb,
                     .input_stream_index=pending.packet->stream_index,.demuxed_us=pending.demuxed_us,.dispatched_us=now_us()};
                 p.stage="audio media hook";
                 ret=p.hooks.audio_packet(p.hooks.opaque,&event);
                 if(ret>0)ret=AVERROR(EINVAL);
             }
-            if(ret>=0&&p.branches)ret=fanout_audio(&p,&pending);
-            else if(ret>=0 && job->config.audio_copy && strcmp(job->config.output_format,"mp4"))ret=handle_audio(&p,&pending);
-            pipeline_input_free(&pending);
-            if(ret<0)goto cleanup;
-            progress=1;
+            if(ret>=0&&job->renditions)ret=naki_renditions_audio(&p,&pending);
+            else if(ret>=0&&p.branches)ret=fanout_audio(&p,&pending);
+            else if(ret>=0 && job->config.audio_copy && strcmp(job->config.output_format,"mp4"))ret=pipeline_handle_audio(&p,&pending);
+            if(ret==AVERROR(EAGAIN)&&job->renditions)ret=0;
+            else {pipeline_input_free(&pending);if(ret<0)goto cleanup;progress=1;}
         }
         if (input_done && input_error<0) {p.stage=p.sei_read_error?"input SEI parsing / complete-AU contract":"input read"; ret=input_error; goto cleanup;}
-        if (!job->config.decoder_pump && (pending.packet || (input_done && !eof_sent))) {
+        if (!job->config.decoder_pump && !pending.params && (pending.packet || (input_done && !eof_sent))) {
             p.stage=job->config.decoder_async?"async decode submit":"synchronous decode submit";
             if (pending.packet) {
                 Stamp *stamp=(Stamp *)pending.packet->opaque_ref->data;
@@ -824,15 +838,16 @@ void *pipeline_main(void *opaque) {
             media_phase(&p,NAKI_MEDIA_PHASE_WAITING_INPUT);
             struct pollfd fd={.fd=job->wake_fd,.events=POLLIN};
             int n;
-            do {n=poll(&fd,1,p.branches?20:p.live_mux ? 10 : 1000);} while(n<0 && errno==EINTR && !atomic_load(&job->lifecycle.cancel));
+            do {n=poll(&fd,1,job->renditions?5:p.branches?20:p.live_mux ? 10 : 1000);} while(n<0 && errno==EINTR && !atomic_load(&job->lifecycle.cancel));
             if (n<0) {ret=AVERROR(errno); goto cleanup;}
         }
     }
-    if(!atomic_load(&job->lifecycle.cancel)) {
+    if(!atomic_load(&job->lifecycle.cancel)&&!idle_finished) {
         if(pipeline_reader_pending_sei(&p))ret=AVERROR_INVALIDDATA;
         if(ret<0) {p.stage="selected SEI has no decoded picture at EOF";goto cleanup;}
     }
-    if(p.branches) {
+    if(job->renditions) {ret=naki_renditions_finish(&p,atomic_load(&job->lifecycle.cancel));branches_joined=1;if(ret<0)p.stage="no rendition completed successfully";}
+    else if(p.branches) {
         ret=finish_branches(&p,atomic_load(&job->lifecycle.cancel));branches_joined=1;
         if(ret<0) {p.stage="all outputs failed";goto cleanup;}
     } else if (!atomic_load(&job->lifecycle.cancel))ret=pipeline_drain_output(&p);
@@ -840,16 +855,17 @@ cleanup:
     media_phase(&p,NAKI_MEDIA_PHASE_DRAINING);
     {
         int stopped=atomic_load(&job->lifecycle.cancel);
-        if(ret<0)atomic_store(&job->lifecycle.cancel,1);
-        if(stopped||ret<0) {
+        if(ret<0||idle_finished)atomic_store(&job->lifecycle.cancel,1);
+        if(stopped||ret<0||idle_finished) {
             /* Release a full shared reader ring before any private output
              * teardown/join can wait for its bounded I/O cleanup. */
             pipeline_reader_wake(&p);
         }
+        if(job->renditions&&!branches_joined)naki_renditions_finish(&p,1);
         if(p.branches&&!branches_joined)finish_branches(&p,1);
         for(int i=0;i<job->config.output_count;i++) {
             Job *b=job->outputs[i];
-            if(!atomic_load(&b->lifecycle.done))naki_watermark_owner_finish(b->watermark,ret,stopped);
+            if(!atomic_load(&b->lifecycle.done)&&!b->remote_rendition)naki_watermark_owner_finish(b->watermark,ret,stopped);
             naki_watermark_stop(b->watermark);
             if(!atomic_load(&b->lifecycle.done)) {
                 pthread_mutex_lock(&b->mutex);b->lifecycle.state=stopped?NAKI_JOB_STATE_STOPPED:NAKI_JOB_STATE_FAILED;b->lifecycle.branch_failed=!stopped;b->lifecycle.ended_us=now_us();

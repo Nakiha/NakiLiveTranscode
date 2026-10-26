@@ -323,6 +323,8 @@ void logger_submit_record(Logger *l,LoggerCategory category,TraceSink *sink,yyjs
     free(text);
 }
 void logger_submit(Logger *l,TraceSink *sink,yyjson_mut_doc *doc) {logger_submit_record(l,sink?LOGGER_FRAME_TRACE:LOGGER_EVENT,sink,doc);}
+const char *logger_event_prefix(const Logger *l){return l?l->options.event_prefix:"";}
+
 TraceSink *logger_trace_open(Logger *l, const char *prefix) {
     if(strlen(prefix)>=4096) return NULL;
     TraceSink *s=calloc(1,sizeof(*s));

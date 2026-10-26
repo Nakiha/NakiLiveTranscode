@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 static int bad(char *error, size_t cap, const char *message) { snprintf(error, cap, "%s", message); return -1; }
 int config_parse(const char *body, size_t size, Config *out, char *error, size_t cap) {
     yyjson_doc *doc = yyjson_read(body, size, 0);
@@ -13,7 +14,8 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     Config c = {.bitrate=1500000, .max_threads=12, .min_threads=2, .budget_slots=12,
                 .queue_capacity=4, .encoder_threads=2, .fps=25, .frame_log_every=1, .slow_frame_ms=200,
                 .audio_copy=1, .mux_wait_ms=50, .qp=32, .reader_queue_capacity=8, .encoder_bit_depth=10, .encoder_input_bit_depth=10,
-                .decoder_early_output=-1, .decoder_async=1, .decoder_auto_threads=1};
+                .decoder_early_output=-1, .decoder_async=1, .decoder_auto_threads=1,
+                .idle_timeout_ms=NAKI_IDLE_TIMEOUT_DEFAULT_MS,.rendition_restart_limit=3,.rendition_restart_backoff_ms=1000};
     strcpy(c.output_format, "mpegts");
     strcpy(c.encoder, "libx264");
     strcpy(c.single_output_id,"main");
@@ -30,6 +32,15 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         for (size_t i=0; i<count; i++) if (!strcmp(seen[i], name)) { bad(error, cap, "Duplicate key"); goto end; }
         if (count == 64) { bad(error, cap, "Too many keys"); goto end; }
         seen[count++] = name;
+        if(!strcmp(name,"rendition_backend")) {
+            if(!yyjson_is_str(val)||strlen(yyjson_get_str(val))!=yyjson_get_len(val)||
+               (strcmp(yyjson_get_str(val),"process")&&strcmp(yyjson_get_str(val),"thread"))) {bad(error,cap,"rendition_backend must be process or thread");goto end;}
+            c.rendition_backend=!strcmp(yyjson_get_str(val),"process")?1:2;continue;
+        }
+        if(!strcmp(name,"rendition_auto_restart")) {
+            if(!yyjson_is_bool(val)){bad(error,cap,"rendition_auto_restart must be boolean");goto end;}
+            c.rendition_auto_restart=yyjson_get_bool(val);continue;
+        }
         if(!strcmp(name,"timestamps") || !strcmp(name,"intra") || !strcmp(name,"frame_selection") || !strcmp(name,"watermark") || !strcmp(name,"outputs") || !strcmp(name,"sei"))continue;
         if(!strcmp(name,"rate_control")) {
             if(!yyjson_is_str(val) || strlen(yyjson_get_str(val))!=yyjson_get_len(val) ||
@@ -88,6 +99,9 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         else if (!strcmp(name,"frame_log_every")) {field=&c.frame_log_every; min=1; max=1000000;}
         else if (!strcmp(name,"slow_frame_ms")) {field=&c.slow_frame_ms; min=1; max=600000;}
         else if (!strcmp(name,"mux_wait_ms")) {field=&c.mux_wait_ms; min=1; max=1000;}
+        else if (!strcmp(name,"rendition_restart_limit")) {field=&c.rendition_restart_limit; min=1; max=10;}
+        else if (!strcmp(name,"rendition_restart_backoff_ms")) {field=&c.rendition_restart_backoff_ms; min=100; max=60000;}
+        else if (!strcmp(name,"idle_timeout_ms")) {field=&c.idle_timeout_ms; max=INT_MAX;}
         else { bad(error,cap,"Unknown configuration key"); goto end; }
         if (!yyjson_is_int(val) || yyjson_get_sint(val)<min || yyjson_get_sint(val)>max) {bad(error,cap,"Integer out of range"); goto end;}
         *field=(int)yyjson_get_sint(val);
@@ -95,7 +109,8 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if(c.decoder_pump&&!c.decoder_async) {bad(error,cap,"decoder_pump requires decoder_async");goto end;}
     int multi=naki_outputs_parse(root,&c,error,cap);
     if(multi<0)goto end;
-    if(multi) {
+    if(multi&&c.rendition_backend) {*out=c;ret=0;goto end;}
+    if(multi&&!c.rendition_backend) {
         if(c.encoder_native8_reference) {bad(error,cap,"encoder_native8_reference requires a direct output");goto end;}
         if(c.codec_trace) {bad(error,cap,"codec_trace requires a direct output");goto end;}
         if(c.decoder_pump) {bad(error,cap,"decoder_pump requires a direct output");goto end;}
@@ -104,10 +119,11 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         if(c.network_trace&&strncmp(c.input,"rtmp://",7)) {bad(error,cap,"network_trace requires plain RTMP input");goto end;}
         *out=c;ret=0;goto end;
     }
+    if(c.rendition_auto_restart&&!c.rendition_backend){bad(error,cap,"rendition_auto_restart requires rendition_backend");goto end;}
     if (!*c.input || !*c.output) {bad(error,cap,"input and output are required"); goto end;}
     if(naki_policy_config_parse(root,&c.policy,error,cap))goto end;
     if(naki_watermark_config(yyjson_obj_get(root,"watermark"),&c.watermark,error,cap))goto end;
-    if(naki_sei_config(yyjson_obj_get(root,"sei"),&c.sei,error,cap))goto end;
+    if(!multi&&naki_sei_config(yyjson_obj_get(root,"sei"),&c.sei,error,cap))goto end;
     int vvc=!strcmp(c.encoder,"libvvenc");
     if(c.encoder_input_bit_depth!=8&&c.encoder_input_bit_depth!=10) {bad(error,cap,"encoder_input_bit_depth must be 8 or 10");goto end;}
     if(yyjson_obj_get(root,"encoder_input_bit_depth")&&!vvc) {bad(error,cap,"encoder_input_bit_depth requires libvvenc");goto end;}
@@ -163,6 +179,9 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         bad(error,cap,"rtmp output requires flv; srt output requires mpegts"); goto end;
     }
     if (c.pace && strstr(c.input, "://")) {bad(error,cap,"pace is for local file replay only"); goto end;}
+    if(c.rendition_backend&&!c.output_count) {
+        OutputConfig o;naki_logical_output(&c,0,&o);c.outputs[0]=o;c.output_count=1;
+    }
     *out=c; ret=0;
 end:
     yyjson_doc_free(doc); return ret;

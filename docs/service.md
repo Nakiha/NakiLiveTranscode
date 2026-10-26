@@ -1,6 +1,8 @@
 # Linux 单输入转码实验服务
 
-当前版本 0.9.0，一个活动输入、1–4 个固定逻辑输出；能力/草案索引见[文档导航](README.md)，最近的源码绑定结果见[核心整理验证](validation-core-refactor.md)。本页描述当前 v1 合同，历史验证窗口不自动成为当前候选验收。
+显式 `rendition_backend: process/thread` 的动态编码分支、恢复、独立 destination 和能力限制见 [新运行时](rendition-runtime.md)。以下固定输出路径及协议清单不代表新进程后端支持 SRT，也不改变默认执行路径。
+
+当前版本 0.9.0，省略 `rendition_backend` 时保留一个活动输入、1–4 个固定逻辑输出；能力/草案索引见[文档导航](README.md)，最近的源码绑定结果见[核心整理验证](validation-core-refactor.md)。本页描述当前 v1 合同，历史验证窗口不自动成为当前候选验收。
 
 ## 依赖和构建
 

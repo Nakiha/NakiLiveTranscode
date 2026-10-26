@@ -1,5 +1,7 @@
 # 固定多输出与动态输入适配（v1，实验实现）
 
+本页主要描述省略 `rendition_backend` 的既有固定输出路径。显式选择 process/thread 后端的动态成员、原始帧信用及 native 故障边界见 [rendition 运行时](rendition-runtime.md)；两者的验收证据不能混用。
+
 当前已实现固定 2–4 路、可返回的分支故障隔离与固定输出适配，单逻辑输出仍走直接路径。早期确认/提交过程见[历史多输出记录](validation-multi-output.md)，当前候选与未验证项见[核心整理验证](validation-core-refactor.md)。旧 `/v2/jobs` 草案不是额外合同或现有 API。
 
 ## 创建和控制

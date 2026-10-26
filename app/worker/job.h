@@ -15,6 +15,7 @@
 #endif
 typedef struct NakiWatermark NakiWatermark;
 typedef struct NakiOperations NakiOperations;
+typedef struct NakiRenditions NakiRenditions;
 /* Worker-private mutable state. Controller code uses job_api.h only. */
 /* Job.mutex protects all mutable groups except their explicit atomics. Owners
  * publish progress/statistics here; snapshots never take queue/codec locks.
@@ -51,6 +52,13 @@ typedef struct JobProgress {
     AVCodecEarlyOutputStats early_stats;
     int early_stats_available;
     int fixed_output_width,fixed_output_height;
+    uint64_t topology_revision,effective_topology_revision,source_format_generation,shared_pool_bytes,shared_pool_occupied;
+    int64_t idle_deadline_us;
+    int idle_state;
+    uint64_t rendition_inflight_limit;
+    unsigned raw_video_retained,raw_audio_retained,automatic_restart_attempts;
+    int64_t automatic_restart_at_us;
+    int rendition_exit_known,rendition_exit_code,rendition_exit_signal;
 } JobProgress;
 
 typedef struct JobStats {
@@ -98,6 +106,14 @@ struct Job {
     NakiWatermark *watermark;
     NakiOperations *operations; /* Root job owns the shared bounded control store. */
     void (*watermark_snapshot)(NakiWatermark *,yyjson_mut_doc *);
+    NakiRenditions *renditions;
+    char *public_config; /* Immutable public creation intent, owned by root. */
+    yyjson_mut_doc *destination_snapshot; /* Child-owned mux topology, under mutex. */
+    yyjson_doc *remote_snapshot; /* Process rendition projection, under mutex. */
+    int remote_rendition;
+    int rendition_pid;
+    uint64_t rendition_generation;
+    atomic_int_fast64_t remote_source_rate;
     JobLifecycle lifecycle;
     JobProgress progress;
     JobStats stats;

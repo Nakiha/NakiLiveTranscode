@@ -165,41 +165,7 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     av_dict_free(&options);
     if (ret<0) return ret;
     pipeline_checkpoint(p,&p->job->progress.encoder_open_done_us);
-    p->video=avformat_new_stream(p->output,NULL);
-    if (!p->video) return AVERROR(ENOMEM);
-    ret=avcodec_parameters_from_context(p->video->codecpar,p->encoder);
-    if (ret<0) return ret;
-    p->video->time_base=p->encoder->time_base; p->video->avg_frame_rate=p->output_rate.value;
-    p->output->flags|=AVFMT_FLAG_FLUSH_PACKETS;
-    p->output->max_delay=0; p->output->max_interleave_delta=0;
-    p->output->interrupt_callback=(AVIOInterruptCB){pipeline_interrupted,&p->write_interrupt};
-    p->stage="output open/header";
-    atomic_store(&p->write_interrupt.deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
-    if (!strstr(cfg->output,"://") && !strchr(cfg->output,':')) {
-        p->custom_output_fd=open(cfg->output,O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0644);
-        if (p->custom_output_fd<0) return AVERROR(errno);
-        unsigned char *buffer=av_malloc(32768);
-        if (!buffer) return AVERROR(ENOMEM);
-        p->output->pb=avio_alloc_context(buffer,32768,1,p,NULL,local_write,local_seek);
-        if (!p->output->pb) {av_free(buffer); return AVERROR(ENOMEM);}
-        p->output->flags|=AVFMT_FLAG_CUSTOM_IO;
-    } else {
-        AVDictionary *io_options=NULL;
-        if(cfg->rtmp_tcp_nodelay&&!strncmp(cfg->output,"rtmp://",7))av_dict_set(&io_options,"tcp_nodelay","1",0);
-        ret=avio_open2(&p->output->pb,cfg->output,AVIO_FLAG_WRITE,&p->output->interrupt_callback,&io_options);
-        if(ret>=0&&av_dict_count(io_options))ret=AVERROR_OPTION_NOT_FOUND;
-        av_dict_free(&io_options);
-        if (ret<0) return ret;
-    }
-    ret=avformat_write_header(p->output,NULL);
-    atomic_store(&p->write_interrupt.deadline,0);
-    if (ret<0) return ret;
-    p->header_written=1;
-    if(strcmp(cfg->output_format,"mp4")) {
-        ret=avformat_live_mux_init(p->output,(int64_t)cfg->mux_wait_ms*1000,256,4*1024*1024);
-        if(ret<0)return ret;
-        p->live_mux=1;
-    }
+    ret=pipeline_open_mux(p);if(ret<0)return ret;
     pipeline_checkpoint(p,&p->job->progress.output_header_done_us);
     yyjson_mut_doc *doc=new_event("pipeline_ready",p->job);
     json_int(doc,"input_width",frame->width); json_int(doc,"input_height",frame->height);
@@ -236,7 +202,7 @@ int pipeline_drain_output(Pipeline *p) {
         if((ret=pipeline_receive_encoded(p))<0)return ret;
     }
     if(ret<0||(ret=pipeline_receive_encoded(p))<0)return ret;
-    if((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0)return ret;
+    if(!p->destinations&&((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0))return ret;
     return (pipeline_ledger_pending(p)||(p->job->config.constrained_crf&&p->rate.pending_bits))?AVERROR_INVALIDDATA:0;
 }
 
@@ -280,7 +246,7 @@ void pipeline_complete_job(Pipeline *p,int ret,int stopped) {
         j->lifecycle.state=j->lifecycle.branch_failed?NAKI_JOB_STATE_FAILED:atomic_load(&j->parent->lifecycle.cancel)?NAKI_JOB_STATE_STOPPED:NAKI_JOB_STATE_COMPLETED;
     } else {
         int partial=0;
-        for(int i=0;i<j->config.output_count;i++)if(j->outputs[i]->lifecycle.branch_failed)partial=1;
+        for(int i=0;i<j->config.output_count;i++)if(*j->outputs[i]->output_id&&j->outputs[i]->lifecycle.branch_failed)partial=1;
         j->lifecycle.state=stopped?NAKI_JOB_STATE_STOPPED:ret<0?NAKI_JOB_STATE_FAILED:partial?NAKI_JOB_STATE_COMPLETED_PARTIAL:NAKI_JOB_STATE_COMPLETED;
         if(ret<0&&!stopped) {
             char message[AV_ERROR_MAX_STRING_SIZE];av_strerror(ret,message,sizeof(message));
@@ -292,4 +258,48 @@ void pipeline_complete_job(Pipeline *p,int ret,int stopped) {
     if(!j->parent)logger_trace_finish(j->logger,j->trace);
     atomic_store(&j->lifecycle.done,1);
     if(j->parent)wake_job(j->parent);
+}
+
+/* One mux owner; encoder parameters are immutable after codec open. This also
+ * prepares an independent destination without opening a second encoder. */
+int pipeline_open_mux(Pipeline *p) {
+    Config *cfg=&p->job->config;int ret;
+    if(!p->output){ret=avformat_alloc_output_context2(&p->output,NULL,cfg->output_format,cfg->output);if(ret<0)return ret;
+        if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;}
+    p->video=avformat_new_stream(p->output,NULL);
+    if (!p->video) return AVERROR(ENOMEM);
+    ret=avcodec_parameters_from_context(p->video->codecpar,p->encoder);
+    if (ret<0) return ret;
+    p->video->time_base=p->encoder->time_base; p->video->avg_frame_rate=p->output_rate.value;
+    p->output->flags|=AVFMT_FLAG_FLUSH_PACKETS;
+    p->output->max_delay=0; p->output->max_interleave_delta=0;
+    p->output->interrupt_callback=(AVIOInterruptCB){pipeline_interrupted,&p->write_interrupt};
+    p->stage="output open/header";
+    atomic_store(&p->write_interrupt.deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
+    if (!strstr(cfg->output,"://") && !strchr(cfg->output,':')) {
+        p->custom_output_fd=open(cfg->output,O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0644);
+        if (p->custom_output_fd<0) return AVERROR(errno);
+        unsigned char *buffer=av_malloc(32768);
+        if (!buffer) return AVERROR(ENOMEM);
+        p->output->pb=avio_alloc_context(buffer,32768,1,p,NULL,local_write,local_seek);
+        if (!p->output->pb) {av_free(buffer); return AVERROR(ENOMEM);}
+        p->output->flags|=AVFMT_FLAG_CUSTOM_IO;
+    } else {
+        AVDictionary *io_options=NULL;
+        if(cfg->rtmp_tcp_nodelay&&!strncmp(cfg->output,"rtmp://",7))av_dict_set(&io_options,"tcp_nodelay","1",0);
+        ret=avio_open2(&p->output->pb,cfg->output,AVIO_FLAG_WRITE,&p->output->interrupt_callback,&io_options);
+        if(ret>=0&&av_dict_count(io_options))ret=AVERROR_OPTION_NOT_FOUND;
+        av_dict_free(&io_options);
+        if (ret<0) return ret;
+    }
+    ret=avformat_write_header(p->output,NULL);
+    atomic_store(&p->write_interrupt.deadline,0);
+    if (ret<0) return ret;
+    p->header_written=1;
+    if(strcmp(cfg->output_format,"mp4")) {
+        ret=avformat_live_mux_init(p->output,(int64_t)cfg->mux_wait_ms*1000,(p->destination_owner||p->job->remote_rendition==2)?4:256,4*1024*1024);
+        if(ret<0)return ret;
+        p->live_mux=1;
+    }
+    return 0;
 }

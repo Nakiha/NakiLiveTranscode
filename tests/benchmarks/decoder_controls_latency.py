@@ -13,8 +13,8 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / 'tests/integration'))
-from decoder_controls_integration import ControlsHarness, require, traces, wait_admission
+sys.path.insert(0, str(ROOT / 'tests'))
+from integration.decoder_controls_integration import ControlsHarness, require, traces, wait_admission
 from support.service_harness import CACHE
 
 
