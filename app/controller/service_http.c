@@ -29,33 +29,33 @@ void service_error_reply(struct evhttp_request *req,int code,const char *message
 
 void service_operation_unavailable(Service *s,const char *reason) {
     if(!s->operation_request)return;
-    yyjson_mut_doc *cached=s->operation_creation?naki_operation_cache_get(s->operation_creation->operations,s->operation_id):NULL;
+    yyjson_mut_doc *cached=s->operation_creation&&s->operation_is_query!=2?naki_operation_cache_get(s->operation_creation->operations,s->operation_id):NULL;
     if(cached)service_reply(s->operation_request,s->operation_is_query?200:503,cached);
     else service_error_reply(s->operation_request,503,reason);
     s->operation_request=NULL;s->operation_creation=NULL;
 }
 
-static int operation_rpc(Service *s,struct evhttp_request *req,Creation *record,const char *operation,yyjson_val *update,int64_t received) {
+static int operation_rpc(Service *s,struct evhttp_request *req,Creation *record,const char *operation,yyjson_val *update,int64_t received,const char *output) {
     if(s->operation_request) {service_error_reply(req,429,"operation_query_or_update_budget_exhausted");return -1;}
     Worker *w=s->active;
     if(!w||strcmp(record->job_id,s->job_id)||w->fd<0||w->needs_info||w->incompatible||!w->updates_api) {
         service_error_reply(req,503,"worker_operation_unavailable_or_recovering");return -1;
     }
-    yyjson_mut_doc *message=ipc_message(update?"update":"operation_get");json_str(message,"job_id",record->job_id);
-    json_str(message,"worker_instance_id",w->instance_id);json_str(message,"operation_id",operation);
+    yyjson_mut_doc *message=ipc_message(output?"rendition_get":update?"update":"operation_get");json_str(message,"job_id",record->job_id);
+    json_str(message,"worker_instance_id",w->instance_id);json_str(message,"operation_id",operation?operation:"");if(output)json_str(message,"output_id",output);
     s->operation_token=FFMAX(s->operation_token+1,(uint64_t)received);json_int(message,"token",(int64_t)s->operation_token);
     const char *origin=evhttp_find_header(evhttp_request_get_output_headers(req),"X-Request-ID");json_str(message,"origin_request_id",origin);
     if(update)yyjson_mut_obj_add_val(message,yyjson_mut_doc_get_root(message),"update",yyjson_val_mut_copy(message,update));
     if(update) {
         yyjson_mut_doc *event=new_event("update_received",NULL);json_str(event,"job_id",record->job_id);json_str(event,"operation_id",operation);
         json_str(event,"request_id",origin);json_str(event,"create_request_id",record->origin_request_id);
-        yyjson_val *target=yyjson_obj_get(update,"target");json_str(event,"output_id",yyjson_get_str(yyjson_obj_get(target,"output_id")));json_str(event,"component","watermark");
+        yyjson_val *target=yyjson_obj_get(update,"target");json_str(event,"output_id",yyjson_get_str(yyjson_obj_get(target,"output_id")));json_str(event,"component",yyjson_get_str(yyjson_obj_get(target,"component")));
         logger_submit(s->logger,NULL,event);
     }
     int ret=ipc_send(w->fd,message);yyjson_mut_doc_free(message);
     if(ret) {service_error_reply(req,503,"worker_operation_not_queued");return -1;}
     evhttp_request_own(req);s->operation_request=req;s->operation_creation=record;s->operation_request_us=received;
-    strcpy(s->operation_id,operation);s->operation_is_query=update==NULL;return 0;
+    snprintf(s->operation_id,sizeof(s->operation_id),"%s",operation?operation:"");s->operation_is_query=output?2:update==NULL;return 0;
 }
 
 static yyjson_doc *read_body(struct evhttp_request *req,size_t maximum) {
@@ -120,6 +120,9 @@ void service_handle_request(struct evhttp_request *req,void *opaque) {
         json_int(doc,"watermark_api",1);
         json_int(doc,"component_updates_api",1);json_int(doc,"operation_query_api",1);
         json_int(doc,"operation_result_version_api",1);
+        json_int(doc,"rendition_runtime_api",1);json_int(doc,"shared_frame_wire_version",2);
+        json_str(doc,"rendition_default_backend","legacy");json_int(doc,"rendition_process_srt",0);
+        json_str(doc,"rendition_reuse_contract","libx264_immutable_sps_pps_verified_idr_without_live_intra_or_constrained_crf");
         json_int(doc,"max_outputs",4);json_str(doc,"dynamic_video","fixed_output_filter_rebuild");
         json_int(doc,"media_hooks_api",NAKI_MEDIA_HOOK_API);
         json_int(doc,"watermark_codecs",avcodec_find_decoder(AV_CODEC_ID_PNG)&&avcodec_find_decoder(AV_CODEC_ID_MJPEG)&&
@@ -143,6 +146,11 @@ void service_handle_request(struct evhttp_request *req,void *opaque) {
             Creation *r=&s->records.items[i];
             if(!strcmp(r->job_id,id)&&r->snapshot) {service_reply(req,200,yyjson_doc_mut_copy(r->snapshot,NULL));return;}
         }
+        if(separator&&!strncmp(separator,"/renditions/",12)&&naki_id_valid(separator+12,32)) {
+            Creation *r=service_records_find_job(&s->records,id);
+            if(r){operation_rpc(s,req,r,NULL,NULL,received,separator+12);return;}
+            service_error_reply(req,404,"job_not_found");return;
+        }
         if(separator&&!strncmp(separator,"/operations/",12)&&naki_id_valid(separator+12,128)) {
             Creation *r=service_records_find_creation(&s->records,separator+12);
             if(r&&!strcmp(r->job_id,id)) {service_reply(req,200,service_creation_status(r));return;}
@@ -150,7 +158,7 @@ void service_handle_request(struct evhttp_request *req,void *opaque) {
             if(r&&*r->stop_operation_id&&!strcmp(r->stop_operation_id,separator+12)) {service_reply(req,200,service_stop_status(r));return;}
             if(r) {
                 if(s->active&&r==s->creation&&!s->active->needs_info&&s->active->fd>=0) {
-                    operation_rpc(s,req,r,separator+12,NULL,received);return;
+                    operation_rpc(s,req,r,separator+12,NULL,received,NULL);return;
                 }
                 yyjson_mut_doc *cached=naki_operation_cache_get(r->operations,separator+12);
                 if(cached) {service_reply(req,200,cached);return;}
@@ -186,7 +194,7 @@ void service_handle_request(struct evhttp_request *req,void *opaque) {
             }
             naki_operation_cache_unreserve(record->operations,update.operation_id);service_error_reply(req,409,"job_closing_or_terminal");return;
         }
-        if(operation_rpc(s,req,record,update.operation_id,yyjson_doc_get_root(body),received)&&reservation==1)naki_operation_cache_unreserve(record->operations,update.operation_id);
+        if(operation_rpc(s,req,record,update.operation_id,yyjson_doc_get_root(body),received,NULL)&&reservation==1)naki_operation_cache_unreserve(record->operations,update.operation_id);
         yyjson_doc_free(body);return;
     }
     if(!strcmp(uri,"/v1/job") && method==EVHTTP_REQ_GET) {service_reply(req,200,service_status(s)); return;}

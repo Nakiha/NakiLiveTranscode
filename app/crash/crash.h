@@ -10,7 +10,7 @@
 #define CRASH_MAX_MODULES 96
 #define CRASH_MAX_REPORT (2*1024*1024)
 enum {CRASH_ARCH_X86_64=1,CRASH_ARCH_AARCH64=2};
-enum {CRASH_EVENT=1,CRASH_JOB=2};
+enum {CRASH_EVENT=1,CRASH_JOB=2,CRASH_RENDITION=3};
 /* No pointers, strings requiring formatting, or allocator-owned objects in fatal context. */
 typedef struct CrashRecord {
     uint32_t magic,version,kind,architecture;
@@ -35,6 +35,8 @@ int crash_client_start(const CrashOptions *options,const char *role);
 void crash_set_instance(const char *instance_id);
 int crash_thread_init(void);
 void crash_set_job(const char *id);
+/* Normal-context metadata; fixed fatal handler record remains unchanged. */
+int crash_set_rendition(const char *session,const char *output,uint64_t generation);
 int crash_collector_pid(void);
 int crash_client_enabled(void);
 int crash_ptracer_registered(void);

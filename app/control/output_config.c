@@ -16,9 +16,10 @@ void naki_output_config(Config *out,const Config *common,int index) {
 }
 int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
     yyjson_val *list=yyjson_obj_get(root,"outputs");if(!list)return 0;
-    if(yyjson_is_true(yyjson_obj_get(root,"codec_trace")))return bad(e,n,"codec_trace requires a direct output");
-    if(yyjson_is_true(yyjson_obj_get(root,"decoder_pump")))return bad(e,n,"decoder_pump requires a direct output");
-    if(yyjson_is_true(yyjson_obj_get(root,"source_rate_limit"))||yyjson_obj_get(root,"crf")||(yyjson_is_str(yyjson_obj_get(root,"rate_control"))&&!strcmp(yyjson_get_str(yyjson_obj_get(root,"rate_control")),"constrained_crf")))return bad(e,n,"constrained_crf currently requires a direct output");
+    int isolated=yyjson_obj_get(root,"rendition_backend")!=NULL;
+    if(!isolated&&yyjson_is_true(yyjson_obj_get(root,"codec_trace")))return bad(e,n,"codec_trace requires a direct output");
+    if(!isolated&&yyjson_is_true(yyjson_obj_get(root,"decoder_pump")))return bad(e,n,"decoder_pump requires a direct output");
+    if(!isolated&&(yyjson_is_true(yyjson_obj_get(root,"source_rate_limit"))||yyjson_obj_get(root,"crf")||(yyjson_is_str(yyjson_obj_get(root,"rate_control"))&&!strcmp(yyjson_get_str(yyjson_obj_get(root,"rate_control")),"constrained_crf"))))return bad(e,n,"constrained_crf currently requires a direct output");
     if(!yyjson_is_arr(list)||yyjson_arr_size(list)<1||yyjson_arr_size(list)>4)return bad(e,n,"must contain 1..4 fixed outputs");
     if(yyjson_obj_get(root,"output")||yyjson_obj_get(root,"watermark"))return bad(e,n,"output and watermark belong inside each branch");
     OutputConfig outputs[4]={0};Config first={0};unsigned count=0;int encoder_threads=0;
@@ -56,7 +57,7 @@ int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
                 if(!yyjson_is_uint(value)||yyjson_get_uint(value)<low||yyjson_get_uint(value)>high) {fail=1;break;}
                 if(integer)*integer=(int)yyjson_get_uint(value);else *wide=yyjson_get_uint(value);continue;
             }
-            const char *allowed[]={"output","output_format","encoder","encoder_preset","encoder_profile","encoder_bit_depth","encoder_input_bit_depth","width","height","bitrate","encoder_threads","audio_copy","mux_wait_ms","watermark","sei","output_fps","rate_control","qp","maxrate"};
+            const char *allowed[]={"output","output_format","encoder","encoder_preset","encoder_profile","encoder_bit_depth","encoder_input_bit_depth","encoder_native8_reference","width","height","bitrate","encoder_threads","audio_copy","mux_wait_ms","watermark","sei","output_fps","rate_control","qp","maxrate"};
             int allowed_key=0;for(unsigned k=0;k<sizeof(allowed)/sizeof(*allowed);k++)if(!strcmp(allowed[k],name))allowed_key=1;
             if(!allowed_key) {fail=1;break;}
             yyjson_mut_obj_remove_key(merged,name);
@@ -74,11 +75,11 @@ int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
         strcpy(o->encoder_profile,sub.encoder_profile);strcpy(o->encoder_preset,sub.encoder_preset);
         o->width=sub.width;o->height=sub.height;o->bitrate=sub.bitrate;o->encoder_threads=sub.encoder_threads;
         o->audio_copy=sub.audio_copy;o->mux_wait_ms=sub.mux_wait_ms;o->watermark=sub.watermark;o->sei=sub.sei;
-        o->output_fps=sub.output_fps;o->cqf=sub.cqf;o->qp=sub.qp;o->maxrate=sub.maxrate;o->encoder_bit_depth=sub.encoder_bit_depth;o->encoder_input_bit_depth=sub.encoder_input_bit_depth;
+        o->output_fps=sub.output_fps;o->cqf=sub.cqf;o->qp=sub.qp;o->maxrate=sub.maxrate;o->encoder_bit_depth=sub.encoder_bit_depth;o->encoder_input_bit_depth=sub.encoder_input_bit_depth;o->encoder_native8_reference=sub.encoder_native8_reference;
         encoder_threads+=o->encoder_threads;count++;
     }
     if(encoder_threads>16)return bad(e,n,"sum of encoder_threads must not exceed 16");
-    *out=first;out->output_count=count==1?0:(int)count;memcpy(out->outputs,outputs,sizeof(outputs));
+    *out=first;out->output_count=count==1&&!isolated?0:(int)count;memcpy(out->outputs,outputs,sizeof(outputs));
     if(count==1) {strcpy(out->single_output_id,outputs[0].id);return 1;}
     memset(&out->watermark,0,sizeof(out->watermark));
     out->sei=(NakiSeiConfig){0};

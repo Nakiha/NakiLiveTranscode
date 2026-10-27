@@ -1,5 +1,7 @@
 # 有界组件更新与操作查询
 
+显式 process/thread rendition 后端还支持拓扑操作及 generation CAS，见 [动态运行时](rendition-runtime.md#动态操作)。watermark 的组件 revision 与会话 topology revision 分开；新后端的 watermark 更新必须携带 `expected_generation`。
+
 实验性 Linux 服务支持 watermark 的 typed patch；编码器、输出 URL、尺寸、封装、输入和 outputs 集合不可热改。每个逻辑输出独立维护 desired/effective 配置及 revision，初始为 1；单路默认 ID 为 main，仍走原直接媒体路径。
 
 ## 请求与重试

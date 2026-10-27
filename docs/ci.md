@@ -13,6 +13,8 @@
 
 FFmpeg/VVenC SDK 保存为公共仓库的 prerelease `ffmpeg-linux-amd64-<recipe-key>`。SDK 的安装前缀固定为 `/opt/naki-build/install`，包括共享库、头文件、pkg-config、FFmpeg/VVenC 独立调试符号、configure/CMake 配置和构建包版本。应用的 Docker build 使用 `FFMPEG_STAGE=ffmpeg-prebuilt`，不会执行本地依赖构建阶段。没有匹配 SDK 的 PR 会要求维护者在可信分支手动运行依赖 workflow；不从 PR 发布依赖。
 
+运行镜像的 Compose smoke 设置 `NAKI_SMOKE_TOOLS_IMAGE=naki-live-transcode:test`，复用同轮已构建 test 镜像中的发行版 FFmpeg/ffprobe、Python 和 binutils。工具容器以调用者 UID/GID 将工作区挂载到相同绝对路径；Compose、容器控制和实际被测运行镜像仍由宿主机 Docker 驱动，不使用 Docker-in-Docker。这样不必在完成 full/sanitizer 后，再从 runner 的包镜像安装一套 FFmpeg 依赖。未设置该变量时，独立本地 smoke 继续使用宿主机已有工具。
+
 依赖 release 发布后复用原文件。键标识源码和构建配方；Ubuntu 镜像标签和 apt 仓库本身会更新，因此**不声称位级可重现**。更新工具链时应修改依赖 Dockerfile（建议固定所需镜像 digest/包版本），产生新键。`packages.txt` 记录实际使用的包版本；排查时以 ELF Build ID 为准。
 
 ## 每次 main 构建的发布材料

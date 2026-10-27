@@ -3,7 +3,7 @@
   "info": {
     "title": "NakiLiveTranscode experimental control API",
     "version": "0.9.0",
-    "description": "Current implemented API only. Linux, one active job. No authentication. This static document is not served by the application. URI matching is exact (query strings and trailing slashes are not supported). Media errors after acceptance appear in job state=failed, not in a later HTTP response. Unknown and duplicate configuration keys are rejected. Request limit 16384 bytes, header limit 8192 bytes, HTTP timeout 10s. Libevent framing/limit errors and allocation failures can return HTML instead of the application JSON error envelope. Future pipeline-design.md fields are not accepted. One H.264/HEVC input, 1..4 fixed logical outputs, H.264/VVC encoding; bounded AAC/MP3 copy with append-only late audio in FLV/TS, video-only MP4. Only watermark supports runtime component updates. No arbitrary output rebuild, audio transcoding, SCTE-35, HDR/ROI, timestamp repair or /v2/jobs. Current local source-bound evidence and unverified external gates: docs/validation-core-refactor.md. This document is a contract, not proof of deployment."
+    "description": "Current implemented API only. Linux, one active job. No authentication. This static document is not served by the application. URI matching is exact (query strings and trailing slashes are not supported). Media errors after acceptance appear in job state=failed, not in a later HTTP response. Unknown and duplicate configuration keys are rejected. Request limit 16384 bytes, header limit 8192 bytes, HTTP timeout 10s. Libevent framing/limit errors and allocation failures can return HTML instead of the application JSON error envelope. Future pipeline-design.md fields are not accepted. One H.264/HEVC input, 1..4 fixed logical outputs, H.264/VVC encoding; bounded AAC/MP3 copy with append-only late audio in FLV/TS, video-only MP4. Watermark updates are available on the legacy path. Opt-in rendition_backend process/thread additionally supports dynamic add/remove/restart, configurable idle lifetime, destination reuse and verified random-access requests within the advertised capabilities; see docs/rendition-runtime.md. Legacy fixed outputs remain the default. No arbitrary output rebuild, audio transcoding, SCTE-35, HDR/ROI, timestamp repair or /v2/jobs. Current local source-bound evidence and unverified external gates: docs/validation-core-refactor.md. This document is a contract, not proof of deployment."
   },
   "servers": [
     {
@@ -363,6 +363,9 @@
           },
           "413": {
             "$ref": "#/components/responses/Error"
+          },
+          "422": {
+            "description": "Rendition/destination capability unsupported; no silent downgrade"
           }
         }
       }
@@ -839,6 +842,44 @@
           }
         }
       }
+    },
+    "/v1/jobs/{job_id}/renditions/{output_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/JobId"
+        },
+        {
+          "name": "output_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,32}$"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Read full current rendition state from the actual worker",
+        "description": "Includes generation, actual destination topology, component state and startup details. Available only while the owning input worker is retained; root outputs are bounded summaries.",
+        "responses": {
+          "200": {
+            "description": "Full rendition snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutputStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Rendition missing or worker no longer available"
+          },
+          "503": {
+            "description": "Worker control unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -887,46 +928,14 @@
         "pattern": "^[A-Za-z0-9_-]+$"
       },
       "ComponentUpdate": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "operation_id",
-          "target",
-          "expected_revision",
-          "patch"
-        ],
-        "properties": {
-          "operation_id": {
-            "$ref": "#/components/schemas/ControlId"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WatermarkComponentUpdate"
           },
-          "target": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "output_id",
-              "component"
-            ],
-            "properties": {
-              "output_id": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 32,
-                "pattern": "^[A-Za-z0-9_-]+$"
-              },
-              "component": {
-                "const": "watermark"
-              }
-            }
-          },
-          "expected_revision": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9223372036854775806
-          },
-          "patch": {
-            "$ref": "#/components/schemas/WatermarkPatch"
+          {
+            "$ref": "#/components/schemas/TopologyUpdate"
           }
-        }
+        ]
       },
       "WatermarkPatch": {
         "type": "object",
@@ -1072,7 +1081,8 @@
             "enum": [
               "create",
               "update",
-              "stop"
+              "stop",
+              "topology"
             ]
           },
           "origin_request_id": {
@@ -1147,7 +1157,8 @@
                   "not_ready",
                   "pending",
                   "first_written",
-                  "not_written"
+                  "not_written",
+                  "uncertain"
                 ]
               },
               "inflight_frame_leases": {
@@ -1177,6 +1188,19 @@
           },
           "job_url": {
             "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "description": "attached/applied does not imply actual write; consult delivery.first_written."
+          },
+          "target": {
+            "type": "object"
+          },
+          "expected_revision": {
+            "type": "integer"
           }
         }
       },
@@ -1488,7 +1512,7 @@
                 }
               }
             ],
-            "description": "One logical output retains the direct execution path and defaults id to main; arrays with two to four entries require explicit unique ids. Status omits outputs for a single logical output. Runtime destinations, encoders, dimensions and output membership are immutable."
+            "description": "One to four initial logical renditions. Explicit process/thread backend enables dynamic membership; omitted backend preserves the fixed execution path. All new backend sessions decode input once."
           },
           "crf": {
             "type": "integer",
@@ -1554,6 +1578,36 @@
             "type": "boolean",
             "default": true,
             "description": "Async-only pressure-based dispatch/budget control. false keeps fixed max_threads for controlled comparisons. Ignored when decoder_async=false; no async budget is created there. Omission preserves the existing automatic async default."
+          },
+          "rendition_backend": {
+            "enum": [
+              "process",
+              "thread"
+            ],
+            "description": "Initialization-only opt-in shared-input rendition engine. Omitted retains legacy fixed-output runtime. thread has no native fault isolation."
+          },
+          "idle_timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647,
+            "default": 60000,
+            "description": "New runtime only. Zero disables keepalive; timer starts on removal of last logical rendition, only actual attach cancels it."
+          },
+          "rendition_auto_restart": {
+            "type": "boolean",
+            "default": false
+          },
+          "rendition_restart_limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3
+          },
+          "rendition_restart_backoff_ms": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 60000,
+            "default": 1000
           }
         },
         "allOf": [
@@ -1638,7 +1692,7 @@
         "required": [
           "output"
         ],
-        "description": "Fixed startup branch. Unique ASCII id and destination. Other media fields inherit top-level defaults; top-level output/watermark are forbidden with outputs. Width/height pair and area <=4096*2160; zero uses first decoded canvas then freezes it. Encoder threads across branches sum <=16. Decoder is shared. Temporary queue fullness uses one shared 100ms pressure window after offering to all healthy branches; later healthy items can wait during that window. Only a timely drain strictly below all half-water marks resets it (capacity 1/2 must empty). Sustained pressure or I/O deadline fails only this branch; no destination reopen or compressed-packet dropping. Producer retains at most one pending item per branch outside queue metrics, each within single-item byte/media limits; video_items (alias queue_items) and audio_packets independently bound one FIFO; queue plus pending conservatively <=video_items+audio_packets+1, 2*queue_bytes and 2*queue_media_ms. queue_media_ms charges nominal video work duration, not PTS gaps. inflight_bytes reserves retained source plus encoder-input buffers through actual mux, max 128 frames; not an RSS bound. Codec internals, watermark assets/canvases and bounded mux/deferred audio have separate caps. Branch FIFO/lag/inflight controls apply to two-to-four owners; a single logical output remains on the direct path. Its io_timeout_ms still controls output I/O.",
+        "description": "Logical rendition specification. Startup legacy outputs retain their existing shared 100ms pressure window and direct-only capability limits. Opt-in process/thread uses independently bounded nonblocking offers for 1..4 owners, including a single output; explicit encoder threads sum <=16. New owners inherit common media defaults and reserve fixed raw credits, queue/inflight budgets and a private encoder/mux. Startup ids may be omitted for one output; add_rendition requires an id matching target.output_id. Width/height must be paired and canvas area <=4096*2160; zero chooses the initial canvas. queue_media_ms charges nominal video work, not PTS gaps. inflight_bytes is a retained-frame reservation, not an RSS/cgroup limit. Source format changes rebuild fixed-output filters; preparation rechecks source_format_generation. See docs/rendition-runtime.md for raw-slot, holder-exit and delivery boundaries.",
         "properties": {
           "id": {
             "type": "string",
@@ -2109,6 +2163,56 @@
           },
           "write_in_progress_ms": {
             "type": "number"
+          },
+          "rendition_pid": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "rendition_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "raw_video_retained": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "raw_audio_retained": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "automatic_restart_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "automatic_restart_at_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "destinations": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "$ref": "#/components/schemas/DestinationStatus"
+            }
+          },
+          "detail_scope": {
+            "enum": [
+              "summary",
+              "full"
+            ]
+          },
+          "actual_output": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery_statistics_scope": {
+            "type": "string",
+            "enum": [
+              "primary_destination"
+            ],
+            "description": "Holder legacy packet/latency counters describe its original primary destination. Per-destination counters remain authoritative after primary removal."
           }
         },
         "additionalProperties": true
@@ -2899,6 +3003,21 @@
           },
           "json_library": {
             "type": "string"
+          },
+          "rendition_runtime_api": {
+            "const": 1
+          },
+          "shared_frame_wire_version": {
+            "const": 2
+          },
+          "rendition_default_backend": {
+            "const": "legacy"
+          },
+          "rendition_process_srt": {
+            "const": 0
+          },
+          "rendition_reuse_contract": {
+            "type": "string"
           }
         },
         "additionalProperties": true
@@ -3309,6 +3428,37 @@
                 }
               }
             }
+          },
+          "topology_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "effective_topology_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_format_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "idle_deadline_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "shared_pool_occupied_slots": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "shared_pool_reserved_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "delivery_statistics_scope": {
+            "type": "string",
+            "enum": [
+              "primary_destination"
+            ],
+            "description": "Holder legacy packet/latency counters describe its original primary destination. Per-destination counters remain authoritative after primary removal."
           }
         },
         "additionalProperties": true
@@ -3671,6 +3821,317 @@
           "accepted",
           "error"
         ]
+      },
+      "WatermarkComponentUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "target",
+          "expected_revision",
+          "patch"
+        ],
+        "properties": {
+          "operation_id": {
+            "$ref": "#/components/schemas/ControlId"
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "output_id",
+              "component"
+            ],
+            "properties": {
+              "output_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "component": {
+                "const": "watermark"
+              }
+            }
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775806
+          },
+          "patch": {
+            "$ref": "#/components/schemas/WatermarkPatch"
+          },
+          "expected_generation": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Required when rendition_backend is process/thread; scopes this component update to a holder generation."
+          }
+        }
+      },
+      "TopologyUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id",
+          "action",
+          "target",
+          "expected_revision"
+        ],
+        "properties": {
+          "operation_id": {
+            "$ref": "#/components/schemas/ControlId"
+          },
+          "action": {
+            "enum": [
+              "add_rendition",
+              "remove_rendition",
+              "restart_rendition",
+              "add_destination",
+              "remove_destination",
+              "request_random_access"
+            ]
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "component",
+              "output_id"
+            ],
+            "properties": {
+              "component": {
+                "enum": [
+                  "rendition",
+                  "destination"
+                ]
+              },
+              "output_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "destination_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              }
+            }
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775806,
+            "description": "Global input-session desired topology revision, including failed accepted transitions."
+          },
+          "expected_generation": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Required for destination/RAP actions; optional CAS for remove/restart. Watermark revision is separate."
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OutputConfig"
+              },
+              {
+                "$ref": "#/components/schemas/DestinationSpec"
+              }
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "add_rendition",
+                    "add_destination"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "spec"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "spec"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": [
+                    "add_destination",
+                    "remove_destination"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "expected_generation"
+              ],
+              "properties": {
+                "target": {
+                  "required": [
+                    "destination_id"
+                  ],
+                  "properties": {
+                    "component": {
+                      "const": "destination"
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "target": {
+                  "properties": {
+                    "component": {
+                      "const": "rendition"
+                    }
+                  },
+                  "not": {
+                    "required": [
+                      "destination_id"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "request_random_access"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "expected_generation"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "add_destination"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "spec": {
+                  "$ref": "#/components/schemas/DestinationSpec"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "add_rendition"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "spec": {
+                  "$ref": "#/components/schemas/OutputConfig",
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "DestinationSpec": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "output",
+          "output_format"
+        ],
+        "properties": {
+          "output": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4095
+          },
+          "output_format": {
+            "enum": [
+              "mp4",
+              "mpegts",
+              "flv"
+            ]
+          }
+        },
+        "description": "Reuse requires a verified AVC IDR/SPS/PPS contract; unsupported encoders/policies fail explicitly. MP4 video-only. No SRT in holder v1."
+      },
+      "DestinationStatus": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "destination_id": {
+            "type": "string"
+          },
+          "destination_generation": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "preparing",
+              "waiting_for_rap",
+              "active",
+              "failed",
+              "removed",
+              "completed"
+            ]
+          },
+          "packets_written": {
+            "type": "integer",
+            "description": "Video packets successfully written and flushed; primary includes history before fanout activation."
+          },
+          "bytes_written": {
+            "type": "integer",
+            "description": "AVIO cumulative bytes transferred, including container headers/audio/trailer and seeks; may exceed file length."
+          },
+          "queue_packets": {
+            "type": "integer",
+            "maximum": 16
+          },
+          "queue_bytes": {
+            "type": "integer",
+            "maximum": 8388608
+          },
+          "first_written_us": {
+            "type": "integer"
+          },
+          "last_written_us": {
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "integer"
+          },
+          "audio_packets_written": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
       }
     },
     "headers": {

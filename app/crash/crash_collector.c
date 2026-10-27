@@ -406,7 +406,7 @@ int main(int argc,char **argv) {
     struct sigaction action={.sa_handler=collector_fault}; sigfillset(&action.sa_mask);
     for(unsigned i=0;i<sizeof(fatal)/sizeof(fatal[0]);i++)sigaction(fatal[i],&action,NULL);
     if(send(3,"R",1,MSG_DONTWAIT|MSG_NOSIGNAL)!=1)return 1;
-    char job[64]="";
+    char job[64]="",rendition[33]="",session[33]="";uint64_t rendition_generation=0;
     for(;;) {
         struct pollfd fd={.fd=3,.events=POLLIN};
         int ready=poll(&fd,1,-1);
@@ -418,6 +418,7 @@ int main(int argc,char **argv) {
         if(n<0 && (errno==EAGAIN || errno==EINTR))continue;
         if(n!=(ssize_t)sizeof(record) || record.magic!=CRASH_MAGIC || record.version!=CRASH_VERSION || record.pid!=target)return 2;
         if(record.kind==CRASH_JOB) {memcpy(job,record.job_id,sizeof(job)); job[sizeof(job)-1]=0; continue;}
+        if(record.kind==CRASH_RENDITION){memcpy(rendition,record.job_id,32);rendition[32]=0;memcpy(session,&record.registers[1],32);session[32]=0;rendition_generation=record.registers[0];continue;}
         if(record.kind!=CRASH_EVENT)return 2;
         Capture *result=calloc(1,sizeof(*result)); if(!result)return 1;
         char reason[64]; struct pollfd alive={.fd=process,.events=POLLIN};
@@ -428,6 +429,7 @@ int main(int argc,char **argv) {
             yyjson_mut_doc *doc=make_report(&record,argv[2],job,&options,result,reason,frames,frames==0);
             if(doc) {
                 yyjson_mut_val *root=yyjson_mut_doc_get_root(doc);
+                if(rendition_generation){yyjson_mut_obj_add_strcpy(doc,root,"input_session_instance",session);yyjson_mut_obj_add_strcpy(doc,root,"rendition_id",rendition);yyjson_mut_obj_add_uint(doc,root,"rendition_generation",rendition_generation);}
                 yyjson_mut_obj_add_bool(doc,root,"instance_id_available",argc==4&&strlen(argv[3])==32);
                 if(argc==4&&strlen(argv[3])==32)yyjson_mut_obj_add_strcpy(doc,root,"instance_id",argv[3]);
             }

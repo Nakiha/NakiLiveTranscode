@@ -21,6 +21,8 @@ typedef struct LoggerStats {
     unsigned queued, high_water, capacity;
     uint64_t event_sequence;
 } LoggerStats;
+/* Immutable while the logger is alive; empty means stdout-only. */
+const char *logger_event_prefix(const Logger *logger);
 Logger *logger_start(const LoggerOptions *options);
 void logger_stop(Logger *logger);
 TraceSink *logger_trace_open(Logger *logger, const char *prefix);

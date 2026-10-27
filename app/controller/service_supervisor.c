@@ -231,6 +231,13 @@ static void read_worker(Service *s,Worker *w) {
                 naki_operation_cache_close(&s->creation->operations);s->creation->operations=s->creation->sync_operations;s->creation->sync_operations=NULL;
                 w->needs_info=0;
             }
+        } else if(ipc_kind(doc,"rendition_reply")) {
+            yyjson_val *root=yyjson_doc_get_root(doc),*record=yyjson_obj_get(root,"rendition");
+            const char *job=yyjson_get_str(yyjson_obj_get(root,"job_id")),*requester=yyjson_get_str(yyjson_obj_get(root,"requester_instance_id"));
+            int valid=w==s->active&&job&&!strcmp(job,s->job_id)&&requester&&!strcmp(requester,naki_process_id())&&s->operation_request&&s->operation_is_query==2&&yyjson_get_uint(yyjson_obj_get(root,"token"))==s->operation_token;
+            if(valid){if(record){yyjson_mut_doc *answer=yyjson_mut_doc_new(NULL);if(answer){yyjson_mut_doc_set_root(answer,yyjson_val_mut_copy(answer,record));service_reply(s->operation_request,200,answer);}else service_error_reply(s->operation_request,503,"allocation_failure");}
+                else service_error_reply(s->operation_request,yyjson_get_int(yyjson_obj_get(root,"http_status")),"rendition_not_found_or_unavailable");
+                s->operation_request=NULL;s->operation_creation=NULL;}
         } else if(ipc_kind(doc,"operation_reply")) {
             yyjson_val *root=yyjson_doc_get_root(doc),*record=yyjson_obj_get(root,"operation");
             const char *job=yyjson_get_str(yyjson_obj_get(root,"job_id")),*requester=yyjson_get_str(yyjson_obj_get(root,"requester_instance_id"));
@@ -238,7 +245,7 @@ static void read_worker(Service *s,Worker *w) {
             int valid=w==s->active&&creation==s->creation&&creation&&requester&&!strcmp(requester,naki_process_id());
             if(valid&&record) {
                 const char *kind=yyjson_get_str(yyjson_obj_get(record,"kind"));
-                if(kind&&!strcmp(kind,"update")&&(service_records_ensure_operation_cache(creation)||naki_operation_cache_put(creation->operations,record,now_us())))valid=0;
+                if(kind&&(!strcmp(kind,"update")||!strcmp(kind,"topology"))&&(service_records_ensure_operation_cache(creation)||naki_operation_cache_put(creation->operations,record,now_us())))valid=0;
             }
             if(valid&&s->operation_request&&creation==s->operation_creation&&yyjson_get_uint(yyjson_obj_get(root,"token"))==s->operation_token) {
                 if(record) {

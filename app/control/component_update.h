@@ -7,9 +7,13 @@ enum NakiWatermarkPresence {
     NAKI_PATCH_ANCHOR=1U<<7,NAKI_PATCH_FIT=1U<<8,NAKI_PATCH_OPACITY=1U<<9
 };
 typedef struct NakiWatermarkPatch {unsigned present;NakiWatermarkConfig values;} NakiWatermarkPatch;
+enum {NAKI_RENDITION_ADD=1,NAKI_RENDITION_REMOVE,NAKI_RENDITION_RESTART,NAKI_DESTINATION_ADD,NAKI_DESTINATION_REMOVE,NAKI_RANDOM_ACCESS};
 typedef struct NakiUpdateRequest {
     char operation_id[129],output_id[33],fingerprint[65];
-    uint64_t expected_revision;
+    uint64_t expected_revision,expected_generation;
+    int action; /* 0=watermark update; otherwise topology action. */
+    char destination_id[33];
+    yyjson_val *spec; /* Borrowed only until submission copies the request. */
     NakiWatermarkPatch patch;
 } NakiUpdateRequest;
 int naki_update_parse(yyjson_val *request,const char *job_id,NakiUpdateRequest *out,char *error,size_t capacity);

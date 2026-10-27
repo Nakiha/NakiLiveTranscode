@@ -14,7 +14,20 @@ static void reject(const char *patch) {
     yyjson_doc *doc=yyjson_read(request,strlen(request),0);assert(doc);NakiUpdateRequest result;
     assert(naki_update_parse(yyjson_doc_get_root(doc),"job-A",&result,error,sizeof(error))<0);yyjson_doc_free(doc);
 }
+static void topology_requests(void){
+    const char *requests[]={
+      "{\"operation_id\":\"op\",\"target\":{\"component\":\"rendition\",\"output_id\":\"new\"},\"action\":\"add_rendition\",\"expected_revision\":1,\"spec\":{\"id\":\"new\",\"output\":\"new.mp4\"}}",
+      "{\"operation_id\":\"op\",\"target\":{\"component\":\"destination\",\"output_id\":\"new\",\"destination_id\":\"mirror\"},\"action\":\"add_destination\",\"expected_revision\":2,\"expected_generation\":7,\"spec\":{\"output\":\"mirror.mp4\",\"output_format\":\"mp4\"}}",
+      "{\"operation_id\":\"op\",\"target\":{\"component\":\"rendition\",\"output_id\":\"new\"},\"action\":\"request_random_access\",\"expected_revision\":3,\"expected_generation\":7}"
+    };
+    char fingerprints[3][65];char error[256];
+    for(unsigned i=0;i<3;i++){yyjson_doc *doc=yyjson_read(requests[i],strlen(requests[i]),0);assert(doc);NakiUpdateRequest request;assert(!naki_update_parse(yyjson_doc_get_root(doc),"job-A",&request,error,sizeof(error)));assert(request.action==(i==0?NAKI_RENDITION_ADD:i==1?NAKI_DESTINATION_ADD:NAKI_RANDOM_ACCESS));strcpy(fingerprints[i],request.fingerprint);yyjson_doc_free(doc);}
+    assert(strcmp(fingerprints[0],fingerprints[1])&&strcmp(fingerprints[1],fingerprints[2]));
+    const char *invalid="{\"operation_id\":\"op\",\"target\":{\"component\":\"watermark\",\"output_id\":\"new\"},\"action\":\"remove_rendition\",\"expected_revision\":1}";
+    yyjson_doc *doc=yyjson_read(invalid,strlen(invalid),0);assert(doc);NakiUpdateRequest request;assert(naki_update_parse(yyjson_doc_get_root(doc),"job-A",&request,error,sizeof(error))<0);yyjson_doc_free(doc);
+}
 int main(void) {
+    topology_requests();
     const char *initial="{\"enabled\":true,\"resource\":{\"uri\":\"original.png\",\"load_timeout_ms\":4000},\"placement\":{\"anchor\":\"top_left\",\"offset\":{\"x\":17,\"y\":23},\"size\":{\"width\":192,\"height\":64},\"opacity\":0.8}}";
     yyjson_doc *doc=yyjson_read(initial,strlen(initial),0);assert(doc);char error[256];NakiWatermarkConfig desired,merged;
     assert(!naki_watermark_config(yyjson_doc_get_root(doc),&desired,error,sizeof(error)));yyjson_doc_free(doc);

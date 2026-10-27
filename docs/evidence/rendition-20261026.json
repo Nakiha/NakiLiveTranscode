@@ -1,0 +1,4467 @@
+{
+  "schema_version": 1,
+  "issue": "https://github.com/Nakiha/NakiLiveTranscode/issues/4",
+  "experimental": true,
+  "production_accepted": false,
+  "boundary": "service packet ingress to actual mux write/flush; same-host monotonic clock; QEMU development observations, not source-to-screen or native capacity",
+  "gates": {
+    "normal": {
+      "run": "rendition-acceptance-20261026-04",
+      "status": "failed",
+      "source_sha256": "f585d283995762a18f4dc3a344781e89ab60859ce58c766d07c7c66761146989",
+      "source_unchanged": true,
+      "binaries_unchanged": true,
+      "native_tests": 27,
+      "sdk": {
+        "manifest_sha256": "31f9df804e52f91323fd76374c3de454baa66688377f9b8e7877b58716cf8818",
+        "identity": "0147f7987263e5fec809390662f1e2db0f404970142db5ae373f154436374b65"
+      },
+      "started_utc": "2026-10-26T11:52:04.967054+00:00",
+      "steps": [
+        {
+          "id": "sdk-consumer",
+          "exit_code": 0,
+          "elapsed_s": 44.60769900000014
+        },
+        {
+          "id": "native",
+          "exit_code": 0,
+          "elapsed_s": 20.204454000002443
+        },
+        {
+          "id": "renditions",
+          "exit_code": 0,
+          "elapsed_s": 566.6636380000018
+        },
+        {
+          "id": "updates",
+          "exit_code": 0,
+          "elapsed_s": 57.31930000000284
+        },
+        {
+          "id": "lifecycle-media",
+          "exit_code": 0,
+          "elapsed_s": 99.56724700000268
+        },
+        {
+          "id": "audio-signatures",
+          "exit_code": 1,
+          "elapsed_s": 72.24173599999995
+        }
+      ],
+      "failure_reason": "External HE-AAC fixture TLS handshake timeout; remaining suites rerun with existing exact-size/SHA256-verified standard fixture."
+    },
+    "sanitizer": {
+      "run": "rendition-sanitize-20261026-04",
+      "status": "passed",
+      "source_sha256": "f585d283995762a18f4dc3a344781e89ab60859ce58c766d07c7c66761146989",
+      "source_unchanged": true,
+      "binaries_unchanged": true,
+      "native_tests": 27,
+      "sdk": {
+        "manifest_sha256": "31f9df804e52f91323fd76374c3de454baa66688377f9b8e7877b58716cf8818",
+        "identity": "0147f7987263e5fec809390662f1e2db0f404970142db5ae373f154436374b65"
+      },
+      "started_utc": "2026-10-26T11:45:32.015841+00:00",
+      "steps": [
+        {
+          "id": "sdk-consumer",
+          "exit_code": 0,
+          "elapsed_s": 43.1510159999998
+        },
+        {
+          "id": "native",
+          "exit_code": 0,
+          "elapsed_s": 36.623137000002316
+        },
+        {
+          "id": "renditions-sanitize",
+          "exit_code": 0,
+          "elapsed_s": 294.48535600000105
+        }
+      ]
+    },
+    "completion": {
+      "run": "rendition-completion-20261026-01",
+      "status": "passed",
+      "source_sha256": "f585d283995762a18f4dc3a344781e89ab60859ce58c766d07c7c66761146989",
+      "source_unchanged": true,
+      "binaries_unchanged": true,
+      "native_tests": null,
+      "sdk": {
+        "manifest_sha256": "31f9df804e52f91323fd76374c3de454baa66688377f9b8e7877b58716cf8818",
+        "identity": "0147f7987263e5fec809390662f1e2db0f404970142db5ae373f154436374b65"
+      },
+      "started_utc": "2026-10-26T12:08:14.033760+00:00",
+      "steps": [
+        {
+          "id": "sdk-consumer",
+          "exit_code": 0,
+          "elapsed_s": 43.58417499999996
+        },
+        {
+          "id": "audio-signatures",
+          "exit_code": 0,
+          "elapsed_s": 61.939579000001686
+        },
+        {
+          "id": "video-rate",
+          "exit_code": 0,
+          "elapsed_s": 12.149231000003056
+        },
+        {
+          "id": "control-lifecycle",
+          "exit_code": 0,
+          "elapsed_s": 16.268959999997605
+        }
+      ]
+    },
+    "historical_legacy_capacity_failure": {
+      "run": "rendition-acceptance-20261026-03",
+      "status": "failed",
+      "failed_step": "multi-output",
+      "source_sha256": "6de1049409cec9cd49c194fa19cd8fc806648d0c90c195f6e3a19fa351e287e9",
+      "note": "Old CPU/PSS resource samples were invalid and are excluded. Only the capacity failure and unchanged application binary binding are retained."
+    }
+  },
+  "binaries": {
+    "normal": {
+      "naki-live": {
+        "sha256": "c5792458737c4eff22d5df043c5d18374b358d55345b23bb883e7a5d463af5a3",
+        "build_id": "01de4225ded8925eda99925298246e72f3c37699"
+      },
+      "naki-live-worker": {
+        "sha256": "02ebf3cfc74491a423254a7bc8d28a0b5240ef29d10c4d41ff8f73ddff3028f8",
+        "build_id": "b6a42dab6208dfbb01609cf2c2649e71f2ec91d7"
+      },
+      "rendition-faults/naki-live-worker": {
+        "sha256": "68f4cabcdc1849fa964ad73d49c6a094d55e7eda4a2fda58257ff61f846c16ef",
+        "build_id": "1dde3091a199fc77ebc3475859c829beb7137771"
+      },
+      "naki-rendition-attach-test": {
+        "sha256": "6aec390adeb605285abdae54f06334d1dad6fbdc40f07ece73fb0d08cb7f8e27",
+        "build_id": "0a04e4e3a72c08e17139939467dd4d7d2876ba00"
+      },
+      "naki-audio-wire-test": {
+        "sha256": "e176321cdcb189e771c99d29e0ccf5d4257e7ec833b8a5c58aec2998331a63c7",
+        "build_id": "e396b7f18aa0175c1874f3fefb48d4c05f81c32d"
+      }
+    },
+    "sanitizer": {
+      "naki-live": {
+        "sha256": "40e74f64d2663e59d4f8d171e0adf52604ba9be2c1568cbf5071cc631f7cad10",
+        "build_id": "4514b08cad47878caa53ab031148e7ac1671926d"
+      },
+      "naki-live-worker": {
+        "sha256": "edb31b010fec09a200edc1a109d492263f85be255ab70dd9bfca70d5f2c5be02",
+        "build_id": "b8b324af851f72c6c0c4d6f0e0b0d87784f6609e"
+      },
+      "rendition-faults/naki-live-worker": {
+        "sha256": "55ce62e3c9bc3e302634b181ebca7d7c731ef3b6b20fa2e68a118eb7b5ab73c3",
+        "build_id": "cad5d4a8cb6247ebe0096ab7c2c4bcc2c9a6c2bb"
+      },
+      "naki-rendition-attach-test": {
+        "sha256": "d8e4eb04b200805c5284af23b321df72a3e6d745edfe56194a01833a73005285",
+        "build_id": "53096cf791eb49d82cfe4306f8151674c6063caa"
+      },
+      "naki-audio-wire-test": {
+        "sha256": "153bb161c55dc83d6b1e6eb6d47705cb30931e5e487a4af4c149346437c5dab2",
+        "build_id": "98bbb9344a0f57ec323e60a34c8e3fc530d15b3e"
+      }
+    }
+  },
+  "matrix": [
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b3.ts",
+      "fixture_sha256": "3dc410d6ead0293861ac1f2996ad4071c02c10a957d9707ab646bf57f6c8865b",
+      "backend": "thread",
+      "async_decode": false,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.25675400000182,
+      "steady": null,
+      "cpu_ms_per_source_frame": 16.933333333333334,
+      "cgroup_cpu_ms_per_source_frame": 43.84672,
+      "peak_processes": 6,
+      "peak_threads": 24,
+      "peak_fds": 82,
+      "peak_pss_kib": 36940,
+      "peak_private_kib": 23724,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 241.259,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 121.477,
+            "p95_ms": 244.299,
+            "p99_ms": 246.366,
+            "count": 75,
+            "max_ms": 246.584
+          },
+          "decoded_sequence_sha256": "b0bec9c841fbb9a0afa76cd01dcd067b15ec57300db7ecad346c4c177869d5dd",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 121.058,
+            "p95_ms": 244.093,
+            "p99_ms": 245.804,
+            "count": 75,
+            "max_ms": 246.263
+          },
+          "decoded_sequence_sha256": "cc3f169af58c4a57de8b85c5ea91d368e246d00e32310dc9c2640cd6afb335ec",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b3.ts",
+      "fixture_sha256": "3dc410d6ead0293861ac1f2996ad4071c02c10a957d9707ab646bf57f6c8865b",
+      "backend": "thread",
+      "async_decode": false,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 75,
+        "suppressed_duplicates": 54,
+        "last_worker_decision": "eligible",
+        "selected_frames": 75,
+        "early_selected_frames": 54,
+        "selected_by_mode": {
+          "ordinary": 21,
+          "h264_hrd": 54,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 6,
+          "presentation_gap": 33,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 36
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.2971330000000307,
+      "steady": null,
+      "cpu_ms_per_source_frame": 17.066666666666666,
+      "cgroup_cpu_ms_per_source_frame": 44.097,
+      "peak_processes": 6,
+      "peak_threads": 24,
+      "peak_fds": 82,
+      "peak_pss_kib": 36984,
+      "peak_private_kib": 23752,
+      "max_queued_frames": 4,
+      "max_queue_bytes": 129536,
+      "max_raw_retained": 4,
+      "max_delivery_frames": 2,
+      "max_observed_oldest_video_inflight_age_ms": 42.163,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 83.289,
+            "p95_ms": 164.88,
+            "p99_ms": 165.257,
+            "count": 75,
+            "max_ms": 168.319
+          },
+          "decoded_sequence_sha256": "b0bec9c841fbb9a0afa76cd01dcd067b15ec57300db7ecad346c4c177869d5dd",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 82.505,
+            "p95_ms": 164.258,
+            "p99_ms": 164.65,
+            "count": 75,
+            "max_ms": 168.014
+          },
+          "decoded_sequence_sha256": "cc3f169af58c4a57de8b85c5ea91d368e246d00e32310dc9c2640cd6afb335ec",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b3.ts",
+      "fixture_sha256": "3dc410d6ead0293861ac1f2996ad4071c02c10a957d9707ab646bf57f6c8865b",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.305856999999378,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.133333333333333,
+      "cgroup_cpu_ms_per_source_frame": 45.154066666666665,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 36958,
+      "peak_private_kib": 23216,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 82.67,
+            "p95_ms": 204.671,
+            "p99_ms": 205.957,
+            "count": 75,
+            "max_ms": 207.256
+          },
+          "decoded_sequence_sha256": "b0bec9c841fbb9a0afa76cd01dcd067b15ec57300db7ecad346c4c177869d5dd",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 82.236,
+            "p95_ms": 204.217,
+            "p99_ms": 205.514,
+            "count": 75,
+            "max_ms": 206.848
+          },
+          "decoded_sequence_sha256": "cc3f169af58c4a57de8b85c5ea91d368e246d00e32310dc9c2640cd6afb335ec",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b3.ts",
+      "fixture_sha256": "3dc410d6ead0293861ac1f2996ad4071c02c10a957d9707ab646bf57f6c8865b",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 75,
+        "suppressed_duplicates": 54,
+        "last_worker_decision": "eligible",
+        "selected_frames": 75,
+        "early_selected_frames": 54,
+        "selected_by_mode": {
+          "ordinary": 21,
+          "h264_hrd": 54,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 6,
+          "presentation_gap": 33,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 36
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.285990000000311,
+      "steady": null,
+      "cpu_ms_per_source_frame": 16.8,
+      "cgroup_cpu_ms_per_source_frame": 43.80885333333334,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 37032,
+      "peak_private_kib": 23160,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 44.427,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 44.458,
+            "p95_ms": 125.861,
+            "p99_ms": 127.286,
+            "count": 75,
+            "max_ms": 130.114
+          },
+          "decoded_sequence_sha256": "b0bec9c841fbb9a0afa76cd01dcd067b15ec57300db7ecad346c4c177869d5dd",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 43.491,
+            "p95_ms": 125.122,
+            "p99_ms": 126.55,
+            "count": 75,
+            "max_ms": 129.523
+          },
+          "decoded_sequence_sha256": "cc3f169af58c4a57de8b85c5ea91d368e246d00e32310dc9c2640cd6afb335ec",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b3.ts",
+      "fixture_sha256": "3dc410d6ead0293861ac1f2996ad4071c02c10a957d9707ab646bf57f6c8865b",
+      "backend": "process",
+      "async_decode": false,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3344209999995655,
+      "steady": null,
+      "cpu_ms_per_source_frame": 19.866666666666667,
+      "cgroup_cpu_ms_per_source_frame": 49.06670666666667,
+      "peak_processes": 10,
+      "peak_threads": 26,
+      "peak_fds": 108,
+      "peak_pss_kib": 42370,
+      "peak_private_kib": 25212,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 121.616,
+            "p95_ms": 243.783,
+            "p99_ms": 244.613,
+            "count": 75,
+            "max_ms": 246.313
+          },
+          "decoded_sequence_sha256": "b0bec9c841fbb9a0afa76cd01dcd067b15ec57300db7ecad346c4c177869d5dd",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 121.142,
+            "p95_ms": 243.387,
+            "p99_ms": 244.304,
+            "count": 75,
+            "max_ms": 245.92
+          },
+          "decoded_sequence_sha256": "cc3f169af58c4a57de8b85c5ea91d368e246d00e32310dc9c2640cd6afb335ec",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b3.ts",
+      "fixture_sha256": "3dc410d6ead0293861ac1f2996ad4071c02c10a957d9707ab646bf57f6c8865b",
+      "backend": "process",
+      "async_decode": false,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 75,
+        "suppressed_duplicates": 54,
+        "last_worker_decision": "eligible",
+        "selected_frames": 75,
+        "early_selected_frames": 54,
+        "selected_by_mode": {
+          "ordinary": 21,
+          "h264_hrd": 54,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 6,
+          "presentation_gap": 33,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 36
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3509809999995923,
+      "steady": null,
+      "cpu_ms_per_source_frame": 19.6,
+      "cgroup_cpu_ms_per_source_frame": 48.94968,
+      "peak_processes": 10,
+      "peak_threads": 26,
+      "peak_fds": 108,
+      "peak_pss_kib": 45361,
+      "peak_private_kib": 26736,
+      "max_queued_frames": 3,
+      "max_queue_bytes": 97152,
+      "max_raw_retained": 4,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 84.155,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 83.956,
+            "p95_ms": 164.814,
+            "p99_ms": 165.606,
+            "count": 75,
+            "max_ms": 165.905
+          },
+          "decoded_sequence_sha256": "b0bec9c841fbb9a0afa76cd01dcd067b15ec57300db7ecad346c4c177869d5dd",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 82.891,
+            "p95_ms": 164.443,
+            "p99_ms": 165.148,
+            "count": 75,
+            "max_ms": 165.529
+          },
+          "decoded_sequence_sha256": "cc3f169af58c4a57de8b85c5ea91d368e246d00e32310dc9c2640cd6afb335ec",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b3.ts",
+      "fixture_sha256": "3dc410d6ead0293861ac1f2996ad4071c02c10a957d9707ab646bf57f6c8865b",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3402600000008533,
+      "steady": null,
+      "cpu_ms_per_source_frame": 20.266666666666666,
+      "cgroup_cpu_ms_per_source_frame": 49.74537333333333,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 42194,
+      "peak_private_kib": 24960,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 82.375,
+            "p95_ms": 204.187,
+            "p99_ms": 204.496,
+            "count": 75,
+            "max_ms": 204.733
+          },
+          "decoded_sequence_sha256": "b0bec9c841fbb9a0afa76cd01dcd067b15ec57300db7ecad346c4c177869d5dd",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 81.809,
+            "p95_ms": 203.764,
+            "p99_ms": 204.002,
+            "count": 75,
+            "max_ms": 204.309
+          },
+          "decoded_sequence_sha256": "cc3f169af58c4a57de8b85c5ea91d368e246d00e32310dc9c2640cd6afb335ec",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b3.ts",
+      "fixture_sha256": "3dc410d6ead0293861ac1f2996ad4071c02c10a957d9707ab646bf57f6c8865b",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 75,
+        "suppressed_duplicates": 54,
+        "last_worker_decision": "eligible",
+        "selected_frames": 75,
+        "early_selected_frames": 54,
+        "selected_by_mode": {
+          "ordinary": 21,
+          "h264_hrd": 54,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 6,
+          "presentation_gap": 33,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 36
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.291932000000088,
+      "steady": null,
+      "cpu_ms_per_source_frame": 20.0,
+      "cgroup_cpu_ms_per_source_frame": 49.049213333333334,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 42384,
+      "peak_private_kib": 24964,
+      "max_queued_frames": 4,
+      "max_queue_bytes": 129536,
+      "max_raw_retained": 4,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 44.825,
+            "p95_ms": 126.296,
+            "p99_ms": 127.716,
+            "count": 75,
+            "max_ms": 127.951
+          },
+          "decoded_sequence_sha256": "b0bec9c841fbb9a0afa76cd01dcd067b15ec57300db7ecad346c4c177869d5dd",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 43.851,
+            "p95_ms": 125.364,
+            "p99_ms": 127.041,
+            "count": 75,
+            "max_ms": 127.588
+          },
+          "decoded_sequence_sha256": "cc3f169af58c4a57de8b85c5ea91d368e246d00e32310dc9c2640cd6afb335ec",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "6d32ff3396612823df1081a80c26b7dc99ee9b58e60e7c7f8d3359e81b96bf01",
+      "backend": "thread",
+      "async_decode": false,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.2830730000023323,
+      "steady": null,
+      "cpu_ms_per_source_frame": 16.933333333333334,
+      "cgroup_cpu_ms_per_source_frame": 43.820346666666666,
+      "peak_processes": 6,
+      "peak_threads": 24,
+      "peak_fds": 82,
+      "peak_pss_kib": 36865,
+      "peak_private_kib": 23712,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 82.159,
+            "p95_ms": 403.22,
+            "p99_ms": 405.079,
+            "count": 75,
+            "max_ms": 405.542
+          },
+          "decoded_sequence_sha256": "06f0a10d1e5a6186cdf4983403d09e0da0b0516761dc35b380b7f61d3a212f91",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 81.646,
+            "p95_ms": 402.88,
+            "p99_ms": 404.663,
+            "count": 75,
+            "max_ms": 405.149
+          },
+          "decoded_sequence_sha256": "9b2aa12478e96097c057b898a6f5c06aadd3e115e99314f5f9a88863cc0d04f5",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "6d32ff3396612823df1081a80c26b7dc99ee9b58e60e7c7f8d3359e81b96bf01",
+      "backend": "thread",
+      "async_decode": false,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 75,
+        "suppressed_duplicates": 45,
+        "last_worker_decision": "eligible",
+        "selected_frames": 75,
+        "early_selected_frames": 45,
+        "selected_by_mode": {
+          "ordinary": 30,
+          "h264_hrd": 45,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 6,
+          "presentation_gap": 33,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 36
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.2564339999989897,
+      "steady": null,
+      "cpu_ms_per_source_frame": 16.8,
+      "cgroup_cpu_ms_per_source_frame": 43.74284,
+      "peak_processes": 6,
+      "peak_threads": 24,
+      "peak_fds": 82,
+      "peak_pss_kib": 36920,
+      "peak_private_kib": 23200,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 43.528,
+            "p95_ms": 323.987,
+            "p99_ms": 325.605,
+            "count": 75,
+            "max_ms": 326.561
+          },
+          "decoded_sequence_sha256": "06f0a10d1e5a6186cdf4983403d09e0da0b0516761dc35b380b7f61d3a212f91",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 43.058,
+            "p95_ms": 323.49,
+            "p99_ms": 324.861,
+            "count": 75,
+            "max_ms": 326.052
+          },
+          "decoded_sequence_sha256": "9b2aa12478e96097c057b898a6f5c06aadd3e115e99314f5f9a88863cc0d04f5",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "6d32ff3396612823df1081a80c26b7dc99ee9b58e60e7c7f8d3359e81b96bf01",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.236097000000882,
+      "steady": null,
+      "cpu_ms_per_source_frame": 17.066666666666666,
+      "cgroup_cpu_ms_per_source_frame": 43.771746666666665,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 36951,
+      "peak_private_kib": 23168,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 43.257,
+            "p95_ms": 362.957,
+            "p99_ms": 363.97,
+            "count": 75,
+            "max_ms": 364.362
+          },
+          "decoded_sequence_sha256": "06f0a10d1e5a6186cdf4983403d09e0da0b0516761dc35b380b7f61d3a212f91",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 42.748,
+            "p95_ms": 362.595,
+            "p99_ms": 363.423,
+            "count": 75,
+            "max_ms": 363.774
+          },
+          "decoded_sequence_sha256": "9b2aa12478e96097c057b898a6f5c06aadd3e115e99314f5f9a88863cc0d04f5",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "6d32ff3396612823df1081a80c26b7dc99ee9b58e60e7c7f8d3359e81b96bf01",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 75,
+        "suppressed_duplicates": 45,
+        "last_worker_decision": "eligible",
+        "selected_frames": 75,
+        "early_selected_frames": 45,
+        "selected_by_mode": {
+          "ordinary": 30,
+          "h264_hrd": 45,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 6,
+          "presentation_gap": 33,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 36
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.2517379999990226,
+      "steady": null,
+      "cpu_ms_per_source_frame": 17.2,
+      "cgroup_cpu_ms_per_source_frame": 44.192173333333336,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 37066,
+      "peak_private_kib": 23304,
+      "max_queued_frames": 4,
+      "max_queue_bytes": 129536,
+      "max_raw_retained": 4,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 3.751,
+            "p95_ms": 285.137,
+            "p99_ms": 285.959,
+            "count": 75,
+            "max_ms": 288.041
+          },
+          "decoded_sequence_sha256": "06f0a10d1e5a6186cdf4983403d09e0da0b0516761dc35b380b7f61d3a212f91",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 3.336,
+            "p95_ms": 284.438,
+            "p99_ms": 285.143,
+            "count": 75,
+            "max_ms": 286.656
+          },
+          "decoded_sequence_sha256": "9b2aa12478e96097c057b898a6f5c06aadd3e115e99314f5f9a88863cc0d04f5",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "6d32ff3396612823df1081a80c26b7dc99ee9b58e60e7c7f8d3359e81b96bf01",
+      "backend": "process",
+      "async_decode": false,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.332078999999794,
+      "steady": null,
+      "cpu_ms_per_source_frame": 19.733333333333334,
+      "cgroup_cpu_ms_per_source_frame": 49.07201333333333,
+      "peak_processes": 10,
+      "peak_threads": 26,
+      "peak_fds": 108,
+      "peak_pss_kib": 42301,
+      "peak_private_kib": 24940,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 67840,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 82.679,
+            "p95_ms": 403.006,
+            "p99_ms": 403.191,
+            "count": 75,
+            "max_ms": 404.372
+          },
+          "decoded_sequence_sha256": "06f0a10d1e5a6186cdf4983403d09e0da0b0516761dc35b380b7f61d3a212f91",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 82.243,
+            "p95_ms": 402.337,
+            "p99_ms": 402.79,
+            "count": 75,
+            "max_ms": 403.883
+          },
+          "decoded_sequence_sha256": "9b2aa12478e96097c057b898a6f5c06aadd3e115e99314f5f9a88863cc0d04f5",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "6d32ff3396612823df1081a80c26b7dc99ee9b58e60e7c7f8d3359e81b96bf01",
+      "backend": "process",
+      "async_decode": false,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 75,
+        "suppressed_duplicates": 45,
+        "last_worker_decision": "eligible",
+        "selected_frames": 75,
+        "early_selected_frames": 45,
+        "selected_by_mode": {
+          "ordinary": 30,
+          "h264_hrd": 45,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 6,
+          "presentation_gap": 33,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 36
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.288304000001517,
+      "steady": null,
+      "cpu_ms_per_source_frame": 19.866666666666667,
+      "cgroup_cpu_ms_per_source_frame": 49.03705333333333,
+      "peak_processes": 10,
+      "peak_threads": 26,
+      "peak_fds": 108,
+      "peak_pss_kib": 42481,
+      "peak_private_kib": 25096,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 67840,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 43.469,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 43.359,
+            "p95_ms": 324.355,
+            "p99_ms": 324.72,
+            "count": 75,
+            "max_ms": 325.829
+          },
+          "decoded_sequence_sha256": "06f0a10d1e5a6186cdf4983403d09e0da0b0516761dc35b380b7f61d3a212f91",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 42.805,
+            "p95_ms": 323.572,
+            "p99_ms": 324.253,
+            "count": 75,
+            "max_ms": 324.907
+          },
+          "decoded_sequence_sha256": "9b2aa12478e96097c057b898a6f5c06aadd3e115e99314f5f9a88863cc0d04f5",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "6d32ff3396612823df1081a80c26b7dc99ee9b58e60e7c7f8d3359e81b96bf01",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.289347000001726,
+      "steady": null,
+      "cpu_ms_per_source_frame": 20.533333333333335,
+      "cgroup_cpu_ms_per_source_frame": 49.59156,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 42450,
+      "peak_private_kib": 25104,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 43.293,
+            "p95_ms": 363.798,
+            "p99_ms": 366.878,
+            "count": 75,
+            "max_ms": 367.552
+          },
+          "decoded_sequence_sha256": "06f0a10d1e5a6186cdf4983403d09e0da0b0516761dc35b380b7f61d3a212f91",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 42.92,
+            "p95_ms": 363.309,
+            "p99_ms": 366.466,
+            "count": 75,
+            "max_ms": 367.087
+          },
+          "decoded_sequence_sha256": "9b2aa12478e96097c057b898a6f5c06aadd3e115e99314f5f9a88863cc0d04f5",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "6d32ff3396612823df1081a80c26b7dc99ee9b58e60e7c7f8d3359e81b96bf01",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 75,
+        "suppressed_duplicates": 45,
+        "last_worker_decision": "eligible",
+        "selected_frames": 75,
+        "early_selected_frames": 45,
+        "selected_by_mode": {
+          "ordinary": 30,
+          "h264_hrd": 45,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 6,
+          "presentation_gap": 33,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 36
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3184629999996105,
+      "steady": null,
+      "cpu_ms_per_source_frame": 20.533333333333335,
+      "cgroup_cpu_ms_per_source_frame": 49.83621333333333,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 42534,
+      "peak_private_kib": 25176,
+      "max_queued_frames": 0,
+      "max_queue_bytes": 0,
+      "max_raw_retained": 0,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 3.8,
+            "p95_ms": 285.465,
+            "p99_ms": 287.193,
+            "count": 75,
+            "max_ms": 289.553
+          },
+          "decoded_sequence_sha256": "06f0a10d1e5a6186cdf4983403d09e0da0b0516761dc35b380b7f61d3a212f91",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 3.433,
+            "p95_ms": 284.495,
+            "p99_ms": 286.814,
+            "count": 75,
+            "max_ms": 288.885
+          },
+          "decoded_sequence_sha256": "9b2aa12478e96097c057b898a6f5c06aadd3e115e99314f5f9a88863cc0d04f5",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "thread",
+      "async_decode": false,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.26085299999977,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.4,
+      "cgroup_cpu_ms_per_source_frame": 45.477106666666664,
+      "peak_processes": 6,
+      "peak_threads": 24,
+      "peak_fds": 82,
+      "peak_pss_kib": 35454,
+      "peak_private_kib": 21760,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 121.506,
+            "p95_ms": 243.449,
+            "p99_ms": 245.77,
+            "count": 75,
+            "max_ms": 246.287
+          },
+          "decoded_sequence_sha256": "42e860a281a1cbbfd46f121414c88499d9839f4b55c3cb22704a3ea3e42cc7cc",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 120.722,
+            "p95_ms": 242.71,
+            "p99_ms": 245.616,
+            "count": 75,
+            "max_ms": 245.984
+          },
+          "decoded_sequence_sha256": "035e64b5d9b861a45d48f033894b6ae4ed629bdcab10870dc61e3de4771a55ca",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "thread",
+      "async_decode": false,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 19,
+        "selected_by_mode": {
+          "ordinary": 56,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 18
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.254359000002296,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.133333333333333,
+      "cgroup_cpu_ms_per_source_frame": 44.807413333333336,
+      "peak_processes": 6,
+      "peak_threads": 24,
+      "peak_fds": 82,
+      "peak_pss_kib": 35340,
+      "peak_private_kib": 21500,
+      "max_queued_frames": 0,
+      "max_queue_bytes": 0,
+      "max_raw_retained": 0,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 85.15,
+            "p95_ms": 242.763,
+            "p99_ms": 243.252,
+            "count": 75,
+            "max_ms": 243.429
+          },
+          "decoded_sequence_sha256": "42e860a281a1cbbfd46f121414c88499d9839f4b55c3cb22704a3ea3e42cc7cc",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 83.99,
+            "p95_ms": 242.135,
+            "p99_ms": 242.509,
+            "count": 75,
+            "max_ms": 242.637
+          },
+          "decoded_sequence_sha256": "035e64b5d9b861a45d48f033894b6ae4ed629bdcab10870dc61e3de4771a55ca",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.2675749999980326,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.133333333333333,
+      "cgroup_cpu_ms_per_source_frame": 44.84213333333333,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 35556,
+      "peak_private_kib": 21808,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 83.143,
+            "p95_ms": 205.902,
+            "p99_ms": 206.461,
+            "count": 75,
+            "max_ms": 206.539
+          },
+          "decoded_sequence_sha256": "42e860a281a1cbbfd46f121414c88499d9839f4b55c3cb22704a3ea3e42cc7cc",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 82.376,
+            "p95_ms": 205.115,
+            "p99_ms": 205.647,
+            "count": 75,
+            "max_ms": 205.713
+          },
+          "decoded_sequence_sha256": "035e64b5d9b861a45d48f033894b6ae4ed629bdcab10870dc61e3de4771a55ca",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 19,
+        "selected_by_mode": {
+          "ordinary": 56,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 18
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.289651999999478,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.666666666666668,
+      "cgroup_cpu_ms_per_source_frame": 45.97041333333333,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 35470,
+      "peak_private_kib": 21740,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 46.235,
+            "p95_ms": 205.126,
+            "p99_ms": 208.16,
+            "count": 75,
+            "max_ms": 210.308
+          },
+          "decoded_sequence_sha256": "42e860a281a1cbbfd46f121414c88499d9839f4b55c3cb22704a3ea3e42cc7cc",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 44.786,
+            "p95_ms": 204.375,
+            "p99_ms": 207.421,
+            "count": 75,
+            "max_ms": 209.342
+          },
+          "decoded_sequence_sha256": "035e64b5d9b861a45d48f033894b6ae4ed629bdcab10870dc61e3de4771a55ca",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "process",
+      "async_decode": false,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3583269999980985,
+      "steady": null,
+      "cpu_ms_per_source_frame": 20.933333333333334,
+      "cgroup_cpu_ms_per_source_frame": 50.64830666666667,
+      "peak_processes": 10,
+      "peak_threads": 26,
+      "peak_fds": 108,
+      "peak_pss_kib": 41101,
+      "peak_private_kib": 23756,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 121.657,
+            "p95_ms": 243.565,
+            "p99_ms": 243.972,
+            "count": 75,
+            "max_ms": 244.142
+          },
+          "decoded_sequence_sha256": "42e860a281a1cbbfd46f121414c88499d9839f4b55c3cb22704a3ea3e42cc7cc",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 120.952,
+            "p95_ms": 242.694,
+            "p99_ms": 243.094,
+            "count": 75,
+            "max_ms": 243.456
+          },
+          "decoded_sequence_sha256": "035e64b5d9b861a45d48f033894b6ae4ed629bdcab10870dc61e3de4771a55ca",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "process",
+      "async_decode": false,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 19,
+        "selected_by_mode": {
+          "ordinary": 56,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 18
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.321364999999787,
+      "steady": null,
+      "cpu_ms_per_source_frame": 20.8,
+      "cgroup_cpu_ms_per_source_frame": 50.12066666666667,
+      "peak_processes": 10,
+      "peak_threads": 26,
+      "peak_fds": 108,
+      "peak_pss_kib": 41011,
+      "peak_private_kib": 23708,
+      "max_queued_frames": 4,
+      "max_queue_bytes": 129536,
+      "max_raw_retained": 4,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 81.146,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 84.497,
+            "p95_ms": 242.988,
+            "p99_ms": 245.253,
+            "count": 75,
+            "max_ms": 245.625
+          },
+          "decoded_sequence_sha256": "42e860a281a1cbbfd46f121414c88499d9839f4b55c3cb22704a3ea3e42cc7cc",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 83.704,
+            "p95_ms": 242.264,
+            "p99_ms": 244.534,
+            "count": 75,
+            "max_ms": 244.719
+          },
+          "decoded_sequence_sha256": "035e64b5d9b861a45d48f033894b6ae4ed629bdcab10870dc61e3de4771a55ca",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3607540000011795,
+      "steady": null,
+      "cpu_ms_per_source_frame": 20.8,
+      "cgroup_cpu_ms_per_source_frame": 50.600093333333334,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 41384,
+      "peak_private_kib": 23852,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 64768,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 83.438,
+            "p95_ms": 204.445,
+            "p99_ms": 204.665,
+            "count": 75,
+            "max_ms": 206.193
+          },
+          "decoded_sequence_sha256": "42e860a281a1cbbfd46f121414c88499d9839f4b55c3cb22704a3ea3e42cc7cc",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 82.849,
+            "p95_ms": 203.762,
+            "p99_ms": 203.921,
+            "count": 75,
+            "max_ms": 205.428
+          },
+          "decoded_sequence_sha256": "035e64b5d9b861a45d48f033894b6ae4ed629bdcab10870dc61e3de4771a55ca",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 19,
+        "selected_by_mode": {
+          "ordinary": 56,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 18
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3576370000009774,
+      "steady": null,
+      "cpu_ms_per_source_frame": 20.933333333333334,
+      "cgroup_cpu_ms_per_source_frame": 50.67532,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 41234,
+      "peak_private_kib": 23912,
+      "max_queued_frames": 4,
+      "max_queue_bytes": 129536,
+      "max_raw_retained": 4,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 45.869,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 47.242,
+            "p95_ms": 206.914,
+            "p99_ms": 207.551,
+            "count": 75,
+            "max_ms": 207.609
+          },
+          "decoded_sequence_sha256": "42e860a281a1cbbfd46f121414c88499d9839f4b55c3cb22704a3ea3e42cc7cc",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 45.62,
+            "p95_ms": 206.234,
+            "p99_ms": 206.683,
+            "count": 75,
+            "max_ms": 206.921
+          },
+          "decoded_sequence_sha256": "035e64b5d9b861a45d48f033894b6ae4ed629bdcab10870dc61e3de4771a55ca",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b7.ts",
+      "fixture_sha256": "f7febe881a6347acec566affcfe662e5bd0b02de721aa396bcfd3b4d16331932",
+      "backend": "thread",
+      "async_decode": false,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3171540000003006,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.533333333333335,
+      "cgroup_cpu_ms_per_source_frame": 45.81468,
+      "peak_processes": 6,
+      "peak_threads": 24,
+      "peak_fds": 82,
+      "peak_pss_kib": 37262,
+      "peak_private_kib": 23368,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 101632,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 83.224,
+            "p95_ms": 403.518,
+            "p99_ms": 404.279,
+            "count": 75,
+            "max_ms": 406.715
+          },
+          "decoded_sequence_sha256": "dc55e50f469224c6ee60ba02a9e3265adccfbe8c16b3422bf6220adc21bfab94",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 82.086,
+            "p95_ms": 402.426,
+            "p99_ms": 402.952,
+            "count": 75,
+            "max_ms": 405.703
+          },
+          "decoded_sequence_sha256": "50da4f1c79631866fd32bbb221e8f4784e1af119eea97271cbf28ac818a9bac1",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b7.ts",
+      "fixture_sha256": "f7febe881a6347acec566affcfe662e5bd0b02de721aa396bcfd3b4d16331932",
+      "backend": "thread",
+      "async_decode": false,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 16,
+        "selected_by_mode": {
+          "ordinary": 59,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 15
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.224978000002011,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.133333333333333,
+      "cgroup_cpu_ms_per_source_frame": 44.705573333333334,
+      "peak_processes": 6,
+      "peak_threads": 24,
+      "peak_fds": 82,
+      "peak_pss_kib": 37258,
+      "peak_private_kib": 23492,
+      "max_queued_frames": 0,
+      "max_queue_bytes": 0,
+      "max_raw_retained": 0,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 82.773,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 46.547,
+            "p95_ms": 402.674,
+            "p99_ms": 405.461,
+            "count": 75,
+            "max_ms": 405.69
+          },
+          "decoded_sequence_sha256": "dc55e50f469224c6ee60ba02a9e3265adccfbe8c16b3422bf6220adc21bfab94",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 46.101,
+            "p95_ms": 401.575,
+            "p99_ms": 404.4,
+            "count": 75,
+            "max_ms": 404.636
+          },
+          "decoded_sequence_sha256": "50da4f1c79631866fd32bbb221e8f4784e1af119eea97271cbf28ac818a9bac1",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b7.ts",
+      "fixture_sha256": "f7febe881a6347acec566affcfe662e5bd0b02de721aa396bcfd3b4d16331932",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.238528000001679,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.666666666666668,
+      "cgroup_cpu_ms_per_source_frame": 45.3332,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 37462,
+      "peak_private_kib": 23520,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 101632,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 44.446,
+            "p95_ms": 365.091,
+            "p99_ms": 365.947,
+            "count": 75,
+            "max_ms": 367.209
+          },
+          "decoded_sequence_sha256": "dc55e50f469224c6ee60ba02a9e3265adccfbe8c16b3422bf6220adc21bfab94",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 43.299,
+            "p95_ms": 364.084,
+            "p99_ms": 364.945,
+            "count": 75,
+            "max_ms": 366.132
+          },
+          "decoded_sequence_sha256": "50da4f1c79631866fd32bbb221e8f4784e1af119eea97271cbf28ac818a9bac1",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b7.ts",
+      "fixture_sha256": "f7febe881a6347acec566affcfe662e5bd0b02de721aa396bcfd3b4d16331932",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 16,
+        "selected_by_mode": {
+          "ordinary": 59,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 15
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.241706000000704,
+      "steady": null,
+      "cpu_ms_per_source_frame": 18.933333333333334,
+      "cgroup_cpu_ms_per_source_frame": 45.68613333333333,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 37288,
+      "peak_private_kib": 22020,
+      "max_queued_frames": 0,
+      "max_queue_bytes": 0,
+      "max_raw_retained": 0,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 284.463,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 10.161,
+            "p95_ms": 364.007,
+            "p99_ms": 366.931,
+            "count": 75,
+            "max_ms": 368.568
+          },
+          "decoded_sequence_sha256": "dc55e50f469224c6ee60ba02a9e3265adccfbe8c16b3422bf6220adc21bfab94",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 8.633,
+            "p95_ms": 362.896,
+            "p99_ms": 365.913,
+            "count": 75,
+            "max_ms": 367.672
+          },
+          "decoded_sequence_sha256": "50da4f1c79631866fd32bbb221e8f4784e1af119eea97271cbf28ac818a9bac1",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b7.ts",
+      "fixture_sha256": "f7febe881a6347acec566affcfe662e5bd0b02de721aa396bcfd3b4d16331932",
+      "backend": "process",
+      "async_decode": false,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.35805099999925,
+      "steady": null,
+      "cpu_ms_per_source_frame": 21.733333333333334,
+      "cgroup_cpu_ms_per_source_frame": 51.30336,
+      "peak_processes": 10,
+      "peak_threads": 26,
+      "peak_fds": 108,
+      "peak_pss_kib": 42984,
+      "peak_private_kib": 24028,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 101632,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 82.056,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 83.322,
+            "p95_ms": 404.164,
+            "p99_ms": 404.719,
+            "count": 75,
+            "max_ms": 404.995
+          },
+          "decoded_sequence_sha256": "dc55e50f469224c6ee60ba02a9e3265adccfbe8c16b3422bf6220adc21bfab94",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 82.244,
+            "p95_ms": 403.066,
+            "p99_ms": 403.771,
+            "count": 75,
+            "max_ms": 403.816
+          },
+          "decoded_sequence_sha256": "50da4f1c79631866fd32bbb221e8f4784e1af119eea97271cbf28ac818a9bac1",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b7.ts",
+      "fixture_sha256": "f7febe881a6347acec566affcfe662e5bd0b02de721aa396bcfd3b4d16331932",
+      "backend": "process",
+      "async_decode": false,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 16,
+        "selected_by_mode": {
+          "ordinary": 59,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 15
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3267220000016096,
+      "steady": null,
+      "cpu_ms_per_source_frame": 22.666666666666668,
+      "cgroup_cpu_ms_per_source_frame": 52.092666666666666,
+      "peak_processes": 10,
+      "peak_threads": 26,
+      "peak_fds": 108,
+      "peak_pss_kib": 42816,
+      "peak_private_kib": 24044,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 101632,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 1,
+      "max_observed_oldest_video_inflight_age_ms": 83.767,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 47.675,
+            "p95_ms": 403.471,
+            "p99_ms": 404.791,
+            "count": 75,
+            "max_ms": 405.015
+          },
+          "decoded_sequence_sha256": "dc55e50f469224c6ee60ba02a9e3265adccfbe8c16b3422bf6220adc21bfab94",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 46.402,
+            "p95_ms": 402.462,
+            "p99_ms": 404.032,
+            "count": 75,
+            "max_ms": 404.557
+          },
+          "decoded_sequence_sha256": "50da4f1c79631866fd32bbb221e8f4784e1af119eea97271cbf28ac818a9bac1",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b7.ts",
+      "fixture_sha256": "f7febe881a6347acec566affcfe662e5bd0b02de721aa396bcfd3b4d16331932",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": false,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 0,
+        "requested_idr": 0,
+        "pictures": 75,
+        "candidate_pictures": 0,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "disabled",
+        "selected_frames": 75,
+        "early_selected_frames": 0,
+        "selected_by_mode": {
+          "ordinary": 75,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 75,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 0,
+          "presentation_gap": 0,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 0
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.294075999998313,
+      "steady": null,
+      "cpu_ms_per_source_frame": 22.0,
+      "cgroup_cpu_ms_per_source_frame": 51.214906666666664,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 42889,
+      "peak_private_kib": 23892,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 101632,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 44.759,
+            "p95_ms": 365.439,
+            "p99_ms": 366.943,
+            "count": 75,
+            "max_ms": 367.54
+          },
+          "decoded_sequence_sha256": "dc55e50f469224c6ee60ba02a9e3265adccfbe8c16b3422bf6220adc21bfab94",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 43.662,
+            "p95_ms": 364.465,
+            "p99_ms": 365.37,
+            "count": 75,
+            "max_ms": 365.721
+          },
+          "decoded_sequence_sha256": "50da4f1c79631866fd32bbb221e8f4784e1af119eea97271cbf28ac818a9bac1",
+          "decoded_count": 75
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "fixture": "hevc-b7.ts",
+      "fixture_sha256": "f7febe881a6347acec566affcfe662e5bd0b02de721aa396bcfd3b4d16331932",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 16,
+        "selected_by_mode": {
+          "ordinary": 59,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 15
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 3.3671940000022005,
+      "steady": null,
+      "cpu_ms_per_source_frame": 21.733333333333334,
+      "cgroup_cpu_ms_per_source_frame": 51.37698666666667,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 43053,
+      "peak_private_kib": 24076,
+      "max_queued_frames": 2,
+      "max_queue_bytes": 101632,
+      "max_raw_retained": 2,
+      "max_delivery_frames": 0,
+      "max_observed_oldest_video_inflight_age_ms": null,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 10.599,
+            "p95_ms": 364.869,
+            "p99_ms": 365.787,
+            "count": 75,
+            "max_ms": 365.895
+          },
+          "decoded_sequence_sha256": "dc55e50f469224c6ee60ba02a9e3265adccfbe8c16b3422bf6220adc21bfab94",
+          "decoded_count": 75
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 9.708,
+            "p95_ms": 363.71,
+            "p99_ms": 364.675,
+            "count": 75,
+            "max_ms": 364.753
+          },
+          "decoded_sequence_sha256": "50da4f1c79631866fd32bbb221e8f4784e1af119eea97271cbf28ac818a9bac1",
+          "decoded_count": 75
+        }
+      ]
+    }
+  ],
+  "advanced": [
+    {
+      "run": "rendition-matrix-fwlo0hlf",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 19,
+        "selected_by_mode": {
+          "ordinary": 56,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 18
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 4.178745000001072,
+      "steady": null,
+      "cpu_ms_per_source_frame": 142.93333333333334,
+      "cgroup_cpu_ms_per_source_frame": 177.15649333333332,
+      "peak_processes": 6,
+      "peak_threads": 42,
+      "peak_fds": 84,
+      "peak_pss_kib": 117420,
+      "peak_private_kib": 103680,
+      "max_queued_frames": 10,
+      "max_queue_bytes": 329792,
+      "max_raw_retained": 11,
+      "max_delivery_frames": 6,
+      "max_observed_oldest_video_inflight_age_ms": 961.788,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 729.383,
+            "p95_ms": 989.943,
+            "p99_ms": 1001.722,
+            "count": 15,
+            "max_ms": 1001.722
+          },
+          "decoded_sequence_sha256": "d4b095747fc52ea1522940db5bb34c4d963f63ecdc4dc493a9be1a461a09c4e0",
+          "decoded_count": 15
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 404.033,
+            "p95_ms": 745.338,
+            "p99_ms": 770.599,
+            "count": 15,
+            "max_ms": 770.599
+          },
+          "decoded_sequence_sha256": "14e030e86644332a11365366b72d8a3d011b56f75dd83c098c15e0db41796309",
+          "decoded_count": 15
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-fwlo0hlf",
+      "fixture": "hevc-b3.ts",
+      "fixture_sha256": "35ddcdd73f270f76fd43efe418604d32f24ca0000d692f1fa60231be1ffa8626",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 1,
+        "pictures": 75,
+        "candidate_pictures": 25,
+        "suppressed_duplicates": 0,
+        "last_worker_decision": "awaiting_anchor",
+        "selected_frames": 75,
+        "early_selected_frames": 19,
+        "selected_by_mode": {
+          "ordinary": 56,
+          "h264_hrd": 0,
+          "h264_verified": 0,
+          "hevc_idr": 1,
+          "hevc_prefix": 18
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 50,
+          "presentation_gap": 12,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 13
+        }
+      },
+      "source_frames": 75,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 4.251953000002686,
+      "steady": null,
+      "cpu_ms_per_source_frame": 146.53333333333333,
+      "cgroup_cpu_ms_per_source_frame": 181.50662666666665,
+      "peak_processes": 10,
+      "peak_threads": 44,
+      "peak_fds": 110,
+      "peak_pss_kib": 122840,
+      "peak_private_kib": 104908,
+      "max_queued_frames": 9,
+      "max_queue_bytes": 297280,
+      "max_raw_retained": 10,
+      "max_delivery_frames": 8,
+      "max_observed_oldest_video_inflight_age_ms": 900.235,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 677.983,
+            "p95_ms": 956.115,
+            "p99_ms": 960.014,
+            "count": 15,
+            "max_ms": 960.014
+          },
+          "decoded_sequence_sha256": "d4b095747fc52ea1522940db5bb34c4d963f63ecdc4dc493a9be1a461a09c4e0",
+          "decoded_count": 15
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 385.863,
+            "p95_ms": 722.494,
+            "p99_ms": 731.941,
+            "count": 15,
+            "max_ms": 731.941
+          },
+          "decoded_sequence_sha256": "14e030e86644332a11365366b72d8a3d011b56f75dd83c098c15e0db41796309",
+          "decoded_count": 15
+        }
+      ]
+    }
+  ],
+  "sustain": [
+    {
+      "run": "rendition-matrix-tppxmv_3",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "627a37d6cc178c8dbea66791d20432109d444d430cda8aa5f50cdd2dbe7b72eb",
+      "backend": "thread",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 750,
+        "candidate_pictures": 750,
+        "suppressed_duplicates": 450,
+        "last_worker_decision": "eligible",
+        "selected_frames": 750,
+        "early_selected_frames": 450,
+        "selected_by_mode": {
+          "ordinary": 300,
+          "h264_hrd": 450,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 60,
+          "presentation_gap": 330,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 360
+        }
+      },
+      "source_frames": 750,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 30.283307000001514,
+      "steady": {
+        "target_fps": 25,
+        "minimum_observed_fps": 24,
+        "steady_fps": 25.05086480203716,
+        "queue_mean_growth_frames": -0.17307692307692307
+      },
+      "cpu_ms_per_source_frame": 27.573333333333334,
+      "cgroup_cpu_ms_per_source_frame": 54.603136,
+      "peak_processes": 6,
+      "peak_threads": 25,
+      "peak_fds": 82,
+      "peak_pss_kib": 86109,
+      "peak_private_kib": 69880,
+      "max_queued_frames": 4,
+      "max_queue_bytes": 1389312,
+      "max_raw_retained": 4,
+      "max_delivery_frames": 2,
+      "max_observed_oldest_video_inflight_age_ms": 142.699,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 14.299,
+            "p95_ms": 301.897,
+            "p99_ms": 304.973,
+            "count": 750,
+            "max_ms": 310.247
+          },
+          "decoded_sequence_sha256": "b03570dde2f23adf414d2aeda01332ce89ee59d35229fef77755acb404c0cc27",
+          "decoded_count": 750
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 11.539,
+            "p95_ms": 296.441,
+            "p99_ms": 299.741,
+            "count": 750,
+            "max_ms": 305.301
+          },
+          "decoded_sequence_sha256": "83b73b7246a083c2419b6be6a46ac5229c9fb648db9c7af98a0c93361bf10fd1",
+          "decoded_count": 750
+        }
+      ]
+    },
+    {
+      "run": "rendition-matrix-tppxmv_3",
+      "fixture": "h264-b7.ts",
+      "fixture_sha256": "627a37d6cc178c8dbea66791d20432109d444d430cda8aa5f50cdd2dbe7b72eb",
+      "backend": "process",
+      "async_decode": true,
+      "early_output": true,
+      "decoder_early_observation": {
+        "available": true,
+        "scope": "codec_selected_lifetime_not_muxed;flush_cancel_may_discard",
+        "api_version": 1,
+        "requested_poc": 1,
+        "requested_idr": 0,
+        "pictures": 750,
+        "candidate_pictures": 750,
+        "suppressed_duplicates": 450,
+        "last_worker_decision": "eligible",
+        "selected_frames": 750,
+        "early_selected_frames": 450,
+        "selected_by_mode": {
+          "ordinary": 300,
+          "h264_hrd": 450,
+          "h264_verified": 0,
+          "hevc_idr": 0,
+          "hevc_prefix": 0
+        },
+        "picture_decisions": {
+          "disabled": 0,
+          "unsupported_picture": 0,
+          "missing_hrd_cfr_timing": 0,
+          "invalid_access_unit": 0,
+          "parameter_change": 0,
+          "awaiting_anchor": 60,
+          "presentation_gap": 330,
+          "output_allocation": 0,
+          "bounded_capacity": 0,
+          "eligible": 360
+        }
+      },
+      "source_frames": 750,
+      "final_state": "completed",
+      "pool_occupied": 0,
+      "elapsed_s": 30.38177600000199,
+      "steady": {
+        "target_fps": 25,
+        "minimum_observed_fps": 24,
+        "steady_fps": 25.120214040298187,
+        "queue_mean_growth_frames": 0.0
+      },
+      "cpu_ms_per_source_frame": 30.066666666666666,
+      "cgroup_cpu_ms_per_source_frame": 58.74772266666667,
+      "peak_processes": 10,
+      "peak_threads": 27,
+      "peak_fds": 108,
+      "peak_pss_kib": 91506,
+      "peak_private_kib": 63296,
+      "max_queued_frames": 4,
+      "max_queue_bytes": 1389312,
+      "max_raw_retained": 4,
+      "max_delivery_frames": 2,
+      "max_observed_oldest_video_inflight_age_ms": 301.642,
+      "outputs": [
+        {
+          "id": "out0",
+          "latency": {
+            "p50_ms": 14.761,
+            "p95_ms": 303.197,
+            "p99_ms": 305.526,
+            "count": 750,
+            "max_ms": 312.528
+          },
+          "decoded_sequence_sha256": "b03570dde2f23adf414d2aeda01332ce89ee59d35229fef77755acb404c0cc27",
+          "decoded_count": 750
+        },
+        {
+          "id": "out1",
+          "latency": {
+            "p50_ms": 12.126,
+            "p95_ms": 297.7,
+            "p99_ms": 301.254,
+            "count": 750,
+            "max_ms": 306.396
+          },
+          "decoded_sequence_sha256": "83b73b7246a083c2419b6be6a46ac5229c9fb648db9c7af98a0c93361bf10fd1",
+          "decoded_count": 750
+        }
+      ]
+    }
+  ],
+  "faults": [
+    {
+      "fault": "sigsegv",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 18,
+        "p50_ms": 43.413,
+        "p95_ms": 203.605,
+        "p99_ms": 204.203
+      },
+      "healthy_latency_after_detection": {
+        "count": 132,
+        "p50_ms": 82.413,
+        "p95_ms": 203.741,
+        "p99_ms": 205.749
+      }
+    },
+    {
+      "fault": "sigabrt",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 10,
+        "p50_ms": 44.284,
+        "p95_ms": 203.748,
+        "p99_ms": 203.748
+      },
+      "healthy_latency_after_detection": {
+        "count": 140,
+        "p50_ms": 82.338,
+        "p95_ms": 204.097,
+        "p99_ms": 204.438
+      }
+    },
+    {
+      "fault": "sigkill",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 10,
+        "p50_ms": 43.51,
+        "p95_ms": 203.989,
+        "p99_ms": 203.989
+      },
+      "healthy_latency_after_detection": {
+        "count": 140,
+        "p50_ms": 82.439,
+        "p95_ms": 203.832,
+        "p99_ms": 204.711
+      }
+    },
+    {
+      "fault": "sigstop",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 32,
+        "p50_ms": 83.368,
+        "p95_ms": 203.932,
+        "p99_ms": 205.138
+      },
+      "healthy_latency_after_detection": {
+        "count": 118,
+        "p50_ms": 82.378,
+        "p95_ms": 203.987,
+        "p99_ms": 205.804
+      }
+    },
+    {
+      "fault": "busy",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 21,
+        "p50_ms": 80.921,
+        "p95_ms": 204.945,
+        "p99_ms": 205.346
+      },
+      "healthy_latency_after_detection": {
+        "count": 129,
+        "p50_ms": 82.326,
+        "p95_ms": 204.586,
+        "p99_ms": 206.311
+      }
+    },
+    {
+      "fault": "deadlock",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 21,
+        "p50_ms": 83.146,
+        "p95_ms": 204.127,
+        "p99_ms": 204.434
+      },
+      "healthy_latency_after_detection": {
+        "count": 129,
+        "p50_ms": 82.594,
+        "p95_ms": 204.248,
+        "p99_ms": 205.719
+      }
+    },
+    {
+      "fault": "hold_raw",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 32,
+        "p50_ms": 83.595,
+        "p95_ms": 204.346,
+        "p99_ms": 206.773
+      },
+      "healthy_latency_after_detection": {
+        "count": 118,
+        "p50_ms": 82.129,
+        "p95_ms": 204.327,
+        "p99_ms": 205.561
+      }
+    },
+    {
+      "fault": "stop_release",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 32,
+        "p50_ms": 82.973,
+        "p95_ms": 203.834,
+        "p99_ms": 205.709
+      },
+      "healthy_latency_after_detection": {
+        "count": 118,
+        "p50_ms": 82.092,
+        "p95_ms": 204.097,
+        "p99_ms": 204.657
+      }
+    },
+    {
+      "fault": "write_shared",
+      "healthy_expected_frames": 150,
+      "final_state": "completed_partial",
+      "shared_frames": 150,
+      "pool_occupied": 0,
+      "healthy_latency_before_detection": {
+        "count": 2,
+        "p50_ms": 4.887,
+        "p95_ms": 87.277,
+        "p99_ms": 87.277
+      },
+      "healthy_latency_after_detection": {
+        "count": 148,
+        "p50_ms": 82.427,
+        "p95_ms": 203.977,
+        "p99_ms": 205.461
+      }
+    }
+  ],
+  "coverage": [
+    {
+      "run": "rendition-audio-sei-ou30od0d",
+      "passed": true,
+      "summary_sha256": "dc7ec4adce7dd6d476fdc14649ec788f681babd1ff21bfc7985b2363fe7b1b69"
+    },
+    {
+      "run": "rendition-churn-_ibgih2o",
+      "passed": true,
+      "summary_sha256": "95eef06024e38a7dffd05641e60d2dcd419dc88f47bb71a7977bf5f8389c82a9"
+    },
+    {
+      "run": "rendition-destinations-qhsch271",
+      "passed": true,
+      "summary_sha256": "53393fc844e922839fdbdd6a79cfd96e647c9d88451f9fdba130ae5fd7bbeadd"
+    },
+    {
+      "run": "rendition-lifetime-k7066kxt",
+      "passed": true,
+      "summary_sha256": "664f186e005b5a7c413157f52a3845305a602304ad42fb2d3d04127025a22d91"
+    },
+    {
+      "run": "rendition-matrix-7xnq7mbz",
+      "passed": true,
+      "summary_sha256": "e8d0e2544e0e29420934051c162b58bf18ca9c01c0d0fb2e62369f37661d8c92"
+    },
+    {
+      "run": "rendition-matrix-fwlo0hlf",
+      "passed": true,
+      "summary_sha256": "c58347bede8ae44741f57d667b93f7d41e28a678ee7303e1e1ec86e94136d662"
+    },
+    {
+      "run": "rendition-matrix-tppxmv_3",
+      "passed": true,
+      "summary_sha256": "4dce4470ea4eb076201971c919efc897d380cdbb970e12d6839e9f990302aa55"
+    },
+    {
+      "run": "rendition-process-4hm60a9c",
+      "passed": true,
+      "summary_sha256": "1bc80a9a39af94f4a79b1d91bf48591db1c1cb196e33e14c8b1ff5f23a0267cc"
+    },
+    {
+      "run": "rendition-process-7yt5uvz_",
+      "passed": true,
+      "summary_sha256": "6d73f7d587e9e96e502e757dd4c6921025835520b6946290bdfbaaab57ff3e7d"
+    },
+    {
+      "run": "rendition-process-ft0k_f00",
+      "passed": true,
+      "summary_sha256": "1a35596f3c06da1568ce12f3384b740cdcd704befae2fdba6173715f7754331d"
+    },
+    {
+      "run": "rendition-process-rxl0hxal",
+      "passed": true,
+      "summary_sha256": "ac5766da719b542bacf589dbbed6bdc0bc481de48aec405489c184ec0f4ea2cf"
+    },
+    {
+      "run": "rendition-races-oy_elujp",
+      "passed": true,
+      "summary_sha256": "8419ca594c35b921537a638dc5d07382e5af147db70197db9b2c4c470ce63f0a"
+    },
+    {
+      "run": "rendition-reconnect-hhe7o5my",
+      "passed": true,
+      "summary_sha256": "db2f8257c05b9ce35a8ea43802a6f4f5fa8cf3caae49a8cf9f4ce82f6a9f2116"
+    },
+    {
+      "run": "rendition-recovery-ub03pnny",
+      "passed": true,
+      "summary_sha256": "86ad8d764e989a098707ed497413e594c98d5ed817db2aa62efcd2f899d870f5"
+    }
+  ],
+  "churn": {
+    "process": {
+      "cycles": 20,
+      "source_frames": 1000,
+      "fd_baseline": 23,
+      "root_fd_samples": [
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23
+      ],
+      "thread_baseline": 16,
+      "thread_samples": [
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16
+      ],
+      "pss_samples_kib": [
+        24211,
+        24779,
+        25927,
+        26903,
+        27895,
+        28243,
+        28255,
+        28263,
+        28267,
+        28319,
+        28336,
+        28488,
+        28492,
+        28496,
+        28500,
+        28504,
+        28512,
+        28516,
+        28560,
+        28576
+      ],
+      "pool_occupied": 0
+    },
+    "thread": {
+      "cycles": 20,
+      "source_frames": 1000,
+      "fd_baseline": 29,
+      "root_fd_samples": [
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29
+      ],
+      "thread_baseline": 15,
+      "thread_samples": [
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15
+      ],
+      "pss_samples_kib": [
+        22201,
+        23597,
+        23333,
+        24229,
+        24965,
+        25385,
+        25565,
+        25581,
+        25597,
+        25597,
+        25602,
+        25746,
+        25750,
+        25754,
+        25782,
+        25790,
+        25790,
+        25794,
+        25798,
+        25802
+      ],
+      "pool_occupied": 0
+    }
+  },
+  "tested_source_files_sha256": {
+    "app/README.md": "8b3bcf1eb3b3e9e6625735dc11373df5110c644664f7c45f92c4894acaaa867e",
+    "app/cli/client.c": "5ae242b5fcc9b486be45345e98e2b886e6b6520bb6dad26d3ed474f6a1a098eb",
+    "app/control/component_update.c": "a221230668b2eb9ba014fd98efc96dbe919860cff31818d05eb2306e443b9217",
+    "app/control/component_update.h": "7725a59c4991615ebb52bcfb00586eb63faa68cadc2615a655d72b839a10ff90",
+    "app/control/config.c": "0d215ae9dde4b2968633295461cb289d0633c9d19f1955e94eccff58b4f7c206",
+    "app/control/config.h": "3f099a405df92f78568888ef6386b6317773ebaec12e6adda5afc882c935285f",
+    "app/control/control_spec.c": "5470b34da26bb6b44a20ec6076d0e87d23c3950fc11ef10b8a6c57d07d1fbc05",
+    "app/control/frame_policy.c": "979f8f59b2189e5c3c9bcc5e631f578543adedd8a64e712299db4055b951cd8d",
+    "app/control/frame_policy.h": "e40ba321ac78ba60089e83584d8362af326703ca908d7e68d11bd8cfe46a256f",
+    "app/control/frame_policy_config.c": "0adf261e87965d01bbe14c6c8a90576db3557f84f4e7738041077c67b0073e08",
+    "app/control/frame_policy_config.h": "fdaed35fbcb636376f6b9a5c9810774de095f99e820275c2a774bbd97e480e0c",
+    "app/control/identity.c": "fa20956147db96e909a7dfe8c7cef5ec6737ba2504af88b62ffdbaf3f1786aac",
+    "app/control/identity.h": "f8d0349c25747456da8a7d087e6da3bb75c69a3f285a2fe02ef750133923949e",
+    "app/control/intent.c": "5a40880772eb529584b4932ff5a1212eecd56e9566cf00edda54f8f123df0b94",
+    "app/control/intent.h": "77ba07ae1283bc662d49460f3f409562d5f257b2af62130b0d523384c9364916",
+    "app/control/operation_cache.c": "903dd7fda6bc53983f2faaedde2fbf44957263bce9a8f9e3f499431e55045041",
+    "app/control/operation_cache.h": "ac1f7d3414bf942243dbfd2861baf937c11885c949c3bb07cda738e485b27557",
+    "app/control/operation_store.c": "855276b8a983b00fbee9a9b1b403cf63244a661101d8acdeee23891aef7aca19",
+    "app/control/operation_store.h": "d375a0826ba866c62817bc0544abb6b2221d1893cc8586859ccbaedd22fe47f1",
+    "app/control/output_config.c": "1d9314db59ad9dfb75bc7b7fd338cc8cba0fe7be93a53372f86200177ff49cc7",
+    "app/control/rendition_config.c": "75fcd362a6e6725ab9f93ec9ad927adf46146a84bcad94208ec1171385099e04",
+    "app/control/resource_limits.h": "470eb9f38f48bded8dc18ae8d82c0f6726968b96f9beb8312b15accc4bdf7a56",
+    "app/control/sei_config.c": "c5e0bcbeb684f30e96120b14595df74a3540e3b8e5934dfef7f89c8643c0aad8",
+    "app/control/sei_config.h": "678826679e341477bdfbdb303c838684a2a7b8cd7e890710df32ba40f107e60e",
+    "app/control/watermark_config.c": "7f2f73773b5c9910f70787840039f2dc7e288089865f0ac450a6a5cd944ec364",
+    "app/control/watermark_config.h": "15a60093fc573e90c0a591d93b072b52e4d9df322b499bc22e1703e87c70f2df",
+    "app/controller/service.c": "18c00781dae224a66380080af921975cb01894f7cb643c139fdbcc6bdb11a335",
+    "app/controller/service_http.c": "15c5ddee4665818b93e6fdb429b38dd286080e38ecfe9ae8161f66f9c9989f37",
+    "app/controller/service_internal.h": "467d448b0894705f63ffd01bf5ad5fd42905144c8cf9dd93c4ba33a940d989bb",
+    "app/controller/service_projection.c": "04195caf61b496e7fa8ef5f1377dd9de59260889bddb02cb8c4e46d0943412af",
+    "app/controller/service_records.c": "230c949affd16dc56017609a8d3d3736d42f0e43447b2f657ea0f1c882d554be",
+    "app/controller/service_records.h": "0b1acbbf9477d676bd7dc0dbedd5484baadb27b94c32a6dd671c363455bf5064",
+    "app/controller/service_supervisor.c": "677f8eb2c541d92edbb35517892c21d3e9dfbe670ee8507bf7ebebcf3f186581",
+    "app/crash/crash.h": "6f1ac1635d2409f9e89f3062587aed30640546666e145f618b45a41ed52aa95d",
+    "app/crash/crash_client.c": "fad79f9801649b5567726943fbf33f9115e39ff24f3225b4b081c9cab90085ec",
+    "app/crash/crash_collector.c": "41fdd9ba7c1cac92345f0b20807f2ed64acae4d2fc1280d6a92d310a0270cbeb",
+    "app/media/audio_signature.c": "c5df58da3fd52995a257a39cdec238372ff4f1d1af849803209b3e12229c25ee",
+    "app/media/audio_signature.h": "82c65a1ac4a7bf727274a8fe47b4977a257b426f57049da213738551e1757a81",
+    "app/media/audio_wire.c": "fa8f05449c3ceeb2a22399b4fbccf9471899b38848dcbe0e894bf28ca1841a2d",
+    "app/media/audio_wire.h": "ee4241ea5679900ab769f8965d7ba0aa9102476c81fd47b50dd13bbbfa130128",
+    "app/media/branch_queue.c": "0bbf578872a39f6a378d6af8b6a4ff536091efd897f9e4854010b2d11e1831af",
+    "app/media/branch_queue.h": "a190b2229aea6626da90fc728bdbfa733cffa9f89fdf866e814eb21729d412b3",
+    "app/media/codec_trace.h": "17ef47284545a3dcdf6ac004a99094768d106ca143abab251169c9bd37319d90",
+    "app/media/decode_backend.h": "0c694df39156406bc6a0c3a1ff8de50f27286242187a0d5abe2bb498b43c7288",
+    "app/media/decode_output_policy.h": "4601de6ad434ec688342f7f4284892f50c7d838cd53b8cf7d41fd11248e3d828",
+    "app/media/destination_runtime.c": "137bf641484b579f0acb348c3b08b5e1b431935cf171ac9468345b5591123e58",
+    "app/media/destination_runtime.h": "b56668247ab0bcb544ff974cf198245eb413505e78e024f2d11ebc97549c79c3",
+    "app/media/frame_wire.c": "dc66f394c2914cab0b336afaeb5cb2048801abfb62ee605b556266bddc16ac6a",
+    "app/media/frame_wire.h": "94a32c5a03aa6ecb2a02a75d4b81ce2df3c5843b493046ac86f55587b5af76f9",
+    "app/media/input_probe.c": "a8dc8a7fb6da35358d72870a5672abe8f1fa8c5a53ed9eb6f990437c35be5fc3",
+    "app/media/input_probe.h": "e5134fadebb9834e27eda8e8c2b20be28187cf98832471516af410aa8136fdae",
+    "app/media/live_rate.h": "bd9c3deceac288b8f5b2c1096a53d369f90d6fca5cbf5820cf05a0d118400d9d",
+    "app/media/media_hooks.h": "da7d70153648d70d65235b24aefaea703fa2542d0c66006c9caa9d9d914596a5",
+    "app/media/media_hooks_default.c": "52520fa869c325ff94624f4542274611f3fd899a00e3daef5b6ac1d2d736838d",
+    "app/media/pipeline.c": "2782858e86db0eaab053b896a7123e3836e9e02cbb02cb2fae63be0c9bec76d8",
+    "app/media/pipeline.h": "c3294a5c5314ef4defe72f120538e274cb14bb2524dbd95105cb18d55ee55738",
+    "app/media/pipeline_decode.c": "6e7811aa138a040918cdadef0ca19c3229ed748105fd4d3a9d1377e9a8a3f036",
+    "app/media/pipeline_decode_queue.c": "fd3ae52c434a2a09ed2f8eebcb79eff4690532d2ab2539f85926df63fbec242e",
+    "app/media/pipeline_encode.c": "b9a8d2f21293f6f2be34de6aa3fd5b98212121fe00ca9a91b4409200f268a895",
+    "app/media/pipeline_internal.h": "a8e8dd652f4fc6cd61fcd2b260bbc5e0631623eba249b810ed8885217372c0a4",
+    "app/media/pipeline_mux.c": "6c95fe3586e2fb9082e342760d9b21d9d46bb05b2a1f5e6c016c7a30fde2b2ca",
+    "app/media/pipeline_output.c": "20cbbd01a1694b8e510f032d7e953fe60f52dceda676f96d421e2f9d4fe9c945",
+    "app/media/pipeline_reader.c": "a34c5aec6ca595c8ffe8a42669970afc3ef43a41836f68234458a764d778c1d1",
+    "app/media/pipeline_reader.h": "0e3d2a1299f96a13b33a033bb26e077a7ee588e0f6203b75606fa46772c6adc2",
+    "app/media/rendition_child.c": "a704f4338ec44813e68816308e187ac029ef8257a4d915a0bc0c4135fa20e17f",
+    "app/media/rendition_control.c": "ee5876f803df63d3987737f69a1530339e0df0b80c6bf8dbb16f702308064507",
+    "app/media/rendition_media.c": "f9dcc91a664eaa845b4ef9502b6ad83092efe3802ac4b3d33199e6558d647b1a",
+    "app/media/rendition_media.h": "6cb5feddb714746d5c8658292846d7daff3673007d406687d5e9a38963592807",
+    "app/media/rendition_message.c": "c3d4bbffb8a0d05112314af59fee0a7bae7b6d6f630cebc720ee2664bf23a8c0",
+    "app/media/rendition_message.h": "2ddae2f866f066d2528b699d0318699d794b93d46a1468e00e51369996928ff1",
+    "app/media/rendition_runtime.c": "0c10d94042ebf9545e18da33af1fbb8040b7440b8ab00f7796296c40f9af7303",
+    "app/media/rendition_runtime.h": "4f324778daf3751a03fcaca97eeb33923375e9200b830de3e78de13724369677",
+    "app/media/rendition_runtime_internal.h": "790054722786261368e057078a878d583a58d42d97d0e9b1cd3a929cf42c77ba",
+    "app/media/sei.c": "3ae52beb13d50729150dec3e8d2f4be45c59ced0af1280646f109928cc74969a",
+    "app/media/sei.h": "1ac21c9ca14b4dea2ab830da79306a91270a587598167f0707f7143646fbfc27",
+    "app/media/session_idle.c": "15a2b03796aa15459a0dfa0b613f58e4e8926d657a86efd832ef4b2721a7e3af",
+    "app/media/session_idle.h": "9af9fc9e07d5fd306eed452210d9f82082a46e4fdb4bcc6ed41f2a3c98e409bd",
+    "app/media/shared_frame_pool.c": "c701c7c3aacd695d889c86943cc0f70dc3d0297e529081ec137cdb8e1dfac024",
+    "app/media/shared_frame_pool.h": "4641321e709c6420c357118c488bd581f17bcb042971fe90f88c5a8d8b02c6f0",
+    "app/media/video_filter.c": "130f9da7632103ef9b57abf20ba3441400d4197b1c0236acabd941afa74fc871",
+    "app/media/video_filter.h": "38bc15a25970912da80567a5245e42df904f93940ae1159a7201fff1bf66c2b8",
+    "app/media/video_rate.h": "8e081596f9a625e753e9a9e2e4834f6d2b8a0b1da8707cb75e6a0ea03b8cc060",
+    "app/media/watermark.c": "7d330e3680fcd7f43d3234380dc4163961d89e932a9b04a344e826a32f91b397",
+    "app/media/watermark.h": "665e8cf89a393ff80379a0223a2d348c5337b15be2256b63ea667648ac13c23e",
+    "app/media_hooks.h": "b5082cb03d5cf725c3754a1136429f2ec503403f7a61a323cb236f9977b124f5",
+    "app/observability/logger.c": "e82c01c4aa152b2d1ab40583f55ff395b4233ef6606fcf710a8302008047351a",
+    "app/observability/logger.h": "8bdfbcd35a6628bf115ac36ea34f73d1678a3d74e21e19daf0bc8dcc2d7462ad",
+    "app/observability/metrics.c": "c843f3ede6a930bf46b12d09ab9537e03f11c35fbf46b3a49566f818979368b5",
+    "app/observability/metrics.h": "0bccc9e06b11f67898865e64f94af9e8070980592b774b7b7441d557fb7416cc",
+    "app/observability/netstats.c": "0109931072593373264158226e535f0315004b3d9a49c8d8d6519a04a8c36308",
+    "app/observability/netstats.h": "407f018a98e47144e3cc28f796ff890539fd1269d61ff9d13bb1729e4f5d9b50",
+    "app/platform/ipc.c": "a04e7cca5000ca8527e7986f5f37a8e967c17877cb4ddd27c2cdb29c79224b82",
+    "app/platform/ipc.h": "0e23a23060527e726e878b8d33772ff30ad7772ff433ebb260bc75b5a58c2df3",
+    "app/platform/rendition_guard.c": "37c3a9bacfd5475813ad381c47d088aad6f6a8e17c8ec3869dc9d2bbe779c50c",
+    "app/platform/rendition_guard.h": "319924428332a808dba78ea02b0b5e8e81435c25e651a4f8ed8c245bb71b519c",
+    "app/platform/runtime.c": "9533a0afa4563c32f22aa0364ed49efc0df49963a2e4d732a8722364ed84ae03",
+    "app/platform/runtime.h": "d80056b9299fe391910c21295d263848def91ba103dd26a581ee24ed7c47ee2a",
+    "app/platform/wakeup.h": "3f364833f7b38b678610f2093cf19d436c53cf1db949e3d7305752b074e2c675",
+    "app/worker/frame_policy_runtime.c": "ef0931121b17db28896bb0401c5e4e08b0a005822ff6b38d700738feaea297f3",
+    "app/worker/frame_policy_runtime.h": "6718609acd0a78b974319d0bfc7635b39f0415ebead6235ff6940c99682f7079",
+    "app/worker/job.c": "f54e6f20a1d40fe61efb3a08f6b737921f41ad222c6d3686ad658fb5ad031e3a",
+    "app/worker/job.h": "df3de9cc102c963cf666d91c1d8ae3d38bd3b3739dd52b694affc99e25b7eef3",
+    "app/worker/job_api.h": "2cab7111f279b3da5ae585ff357717096f65ea4a47623bfa2bdd687d6d577a13",
+    "app/worker/job_report.c": "7789a8a5cd2cc2c10b961d4dba2ea816c7e8e14a77c46acb2a35f9ad3383f0d7",
+    "app/worker/job_state.h": "7ad7ed857489f636c3aafab437271d6ad0566496d701981257e096d29be88dd4",
+    "app/worker/worker.c": "b1318f50236db1fe52d2164c4db8b4f4d1e3e2ab569e43a6148d8c4806517029",
+    "scripts/archive-symbols.py": "a855bd3569d1f46157fde13aeb8a59eebb481d917938c90ed4d43f3f21ffcd87",
+    "scripts/audit-codec-phases.py": "295a3057001f28695bad0ec30a6f1221b00319db66402cc2e2e80bb3c8649e5d",
+    "scripts/audit-live-budget.py": "01b9377455c0eac5b2309f6ce3d111f03678d6f97394f7f64aa68d0b6f5b885a",
+    "scripts/bench-logger.py": "74c4b95e3a307a212d7de2dea678d0b530a74ff7e10d29c336d3425b9add3827",
+    "scripts/bench-service.py": "75ab62228b696fe93a4283854b65a5083e02775c34740610982e5d43160846ba",
+    "scripts/bench-service.sh": "377ac4d1272c9e81e41186ad4563624f7fbb334e7596c98f19953a941e4af442",
+    "scripts/build-decoder.sh": "c7243c8c532a31a991be7550f040a14de740ff6ef49aafd2ed87a5bfbbe03fc9",
+    "scripts/build-ffmpeg.sh": "ce2c00e945253540f5b272db2f79c0bedbaade96e2cb14b811cf85ecf943ecbe",
+    "scripts/build-service.sh": "fa295d57bd654fd03f2736588ce2fefd29a61accd73f386d943fe0b67edec48d",
+    "scripts/build-vvenc.sh": "2a54031b8260a3269fda1d18eb88c6247b0ff7e4ce29b8158b4ec89bb0cdfb12",
+    "scripts/check-video-quality.py": "998bea9c7a1239c3fbbdd5a43852ed09b9ad16d05d27a363552114922cc2b04e",
+    "scripts/ci-test.sh": "d7d2fa4473651876d3bd476a80b43c53682e0a79fda7c9e56fcd64cd8f34ffeb",
+    "scripts/collect-test-evidence.py": "0fb4c5212deb8e81be7b7c0ecc6a90b1def5aa88e8504714f963e56415c28770",
+    "scripts/ffmpeg-key.sh": "69e7343dbbab666e2c3c30b07792cb279f10a1e50ea3f3241ed71afc13f578a4",
+    "scripts/maintain-logs.py": "2497a16a7b1f1196dce6341d8c2e56b57b20dce895d432233a9b86b26a72538d",
+    "scripts/release-manifest.py": "98310b0d88ff234b156546c82c3a4221b71bfd796a1b1bf9e74a6299e303addc",
+    "scripts/sdk-expected.py": "394385559bd4485990c92d573410d748b3a7a74857d9882273269d8ca9c805ee",
+    "scripts/sdk-identity.py": "013ea701cf930bd4325f340747473c1b4093fdf520f6117016bef441ffa142ae",
+    "scripts/service-launcher.py": "05789a1bdc42f9de09ca17ac9fe3c5422403304c2d57a870b1e91d4f4f8f8682",
+    "scripts/symbolize-crash.py": "fda84af8967dfdf35d6687afa14e7b0ba02f893627b8bb2868edfaac51e8394e",
+    "scripts/test-decoder.sh": "1e2ffc05e824225ccafc48e68e4a256d2ae9c98d871d96cea5a1b94a81801007",
+    "scripts/test-sanitizers.sh": "07a3b136a4d562bab6f0be2e4d27b47a31dbb5d765ed5b4589615aade7bf3489",
+    "scripts/test-service.py": "c2e405497e90d473108f0b692906ce5c694bb12aadc33963e2fa4d2a41b2cd0e",
+    "scripts/test-service.sh": "166055688d9b6bb90a6a2f2bb538da9b9d33b111b386687e20d0ac600f9c3401",
+    "tests/README.md": "8ca3b059f061037a56046cf263fc5aaf212db3a50338c4c2800015982089726d",
+    "tests/benchmarks/decoder_codec_throughput.py": "39e39c8cdbdb5681243a2b2e050d0bb097f5fab30db57d8a10adbb1083ff5b9a",
+    "tests/benchmarks/decoder_controls_latency.py": "6d0e885fee5460fcc74af1572e4cb2a7d288a75dbcd2bdd5fc508fe16ee4d84a",
+    "tests/benchmarks/logger_submit_bench.c": "0a2b0649810a38891b0496b85dbbdb3b5741c78c4da153ee137286670e6d1e9f",
+    "tests/benchmarks/rtmp_capacity.py": "7c9846f9cc8327cdd2f535b2c42a8b5eaa5105d2b62364c9723b58514506ea7d",
+    "tests/benchmarks/service_capacity.py": "ceb62c4b1dfaf123e8c0f386fc6b8d21226363c66a2716c6bbb6fc50bbc4586c",
+    "tests/benchmarks/vvenc_latency.py": "2dbaa19c9f2df0c35743fb03e6617b89f2b03fc1e3e28c5158ace1156b0a27f1",
+    "tests/checks/codec_phase_tools_test.py": "c7c8ec60f5adc43aba140a6008bc2283297c49d52e9f595d9341914436126437",
+    "tests/checks/event_maintenance_test.py": "1cb5b756b0ea133d69ab8ee4c9594f80a1ca77b0fa748486dc1b97459b93e451",
+    "tests/checks/infrastructure_test.py": "3ed249ff8293aecb4f4cee79f5dcf0124bc3a553f90cd1ac914748fa640c5685",
+    "tests/checks/live_budget_test.py": "33c0db136279d13a34f7ec85e3ef41fe03e7b0d3216d836fa210e92ec85aef33",
+    "tests/checks/organization_test.py": "41da17f80a07541d8ec147b42bbaab8fa302030ad3dfa779983ffe3936482cc4",
+    "tests/checks/quality_tools_test.py": "df2e27710a947d0d8e8bc6a78ae46bd9f5a8affbe659d83b284564eadde25425",
+    "tests/checks/release_manifest_test.py": "dcdf14a95f0f14cb8adcdc0e6ed7123d89b08eea3c3fca21a5bbc3843e8e4752",
+    "tests/checks/sdk_expected_test.py": "f17d5931075910cec6e20014f7642b59652934ae2ecb38222299836de35bbc28",
+    "tests/checks/sdk_identity_test.py": "9da7755b089c99b512bc1043cd68966420058c0923bb136004d3ba120a43587e",
+    "tests/checks/test_entrypoints_test.py": "7a462ab8b05b775bfbed3d20486a8b8c3b5c1c081d606202cc4b892644ab1d61",
+    "tests/checks/workflow_publication_test.py": "b37c81b2f4f349959cec426354415d6c9f7aa6cf4768f2a3f62afb245ef22e3b",
+    "tests/fixtures/audio_change_fixture.c": "f74fb035c27683508fd2ab5290b0580d82e17421abb07be960c757fb1c08f7d2",
+    "tests/fixtures/control_connect_fault.c": "4f659d52ff38fa0ec69fbba93794d34be8806e90f4ffa64219dfabac76aede16",
+    "tests/fixtures/crash_fixture.c": "3949da668721abea8f0d749755ba28e84a4fec535b84449fd38d72641b56e47e",
+    "tests/fixtures/crash_unwind_stall.c": "2e6ba911deb696399f9127a5a07dd0913acda7f85b4ce1b1f1d847926416723f",
+    "tests/fixtures/decoder_backend_probe.c": "af955205a080736bf3a1565ecd2fc20d0ed8e28c23215d97671e4623330416fa",
+    "tests/fixtures/event_write_fault.c": "422c0ad0f9e08e78b7312a47d6ae1fd969442acf965885c9599263cc2a0e8851",
+    "tests/fixtures/live_transport_fixture.c": "d16927e9a032bd14f6f063a9ee5b5ec41dd3fd3c47125e8dee673f5ad6b4b3fa",
+    "tests/fixtures/media_hooks_fixture.c": "c2168350826e7b4aa0f936ca59ad7a297c7f11ee19b0003a7be7885ca301a5e4",
+    "tests/fixtures/network_probe.c": "b7a6e283ef2e4365d31315ce28e23d9c61934e5ff045425c783f0433bdcb82c6",
+    "tests/fixtures/operation_send_order.c": "9b45bc39687c0b3915c079d5ecb1dd8e25a6a8427ca6ba424835d02c2a164c2a",
+    "tests/fixtures/output_finalize_barrier.c": "0fda41d883cf8e5e4930f2c2b3f235b56faded2d1f6ebb4622aec692c02b2e43",
+    "tests/fixtures/output_video_probe.c": "195c79ca18771715d404b41141b2977ca475913ad8196cd15627b8e7c1a2c04e",
+    "tests/fixtures/pipeline_lifecycle_fixture.c": "dc6b5a690ee0fb56772755ecd8f1d8c30c4d510989815237d9da7cc9fdde16cf",
+    "tests/fixtures/pipeline_lifecycle_fixture.h": "a31a6963ca39acaada3987d391f735da3a87b8d57adc4a8d985e7a4ce6bdf9ec",
+    "tests/fixtures/quality_video_export.c": "e7f7af4ff4097496ba515153573370bad6ae7b98d145c144ac563f78ea809401",
+    "tests/fixtures/read_origin_probe.c": "4fce4192b83ead52ba454195061286ef2a550a2621b87f1982e77335a2817be8",
+    "tests/fixtures/rendition_fault_hooks.c": "8447e67a26e01069729ef358da672ae39b79bfe12a446d287d5969ff1381c4fa",
+    "tests/fixtures/sei_decode_probe.c": "7b072e6eab0e6d59a5800ffcae37deb9f6900e3f656ee7b90af7ab4e1f543bbd",
+    "tests/fixtures/sei_fixture.c": "d5cb61e85236d8ba94c4a26b3a23a4747faa210f6b16bc986cd4d4bafa4812ff",
+    "tests/fixtures/video_rate_guess.c": "d295b0fa8adfa46039057155f926cca293e4a6dbc7caabaaf6cf4ec7b741f6a0",
+    "tests/fixtures/vvenc_input8_test.c": "82ecf3df0de21aa6fb634e7d79cf9f7f8668f7a9ab858cce8fa62be21632069b",
+    "tests/integration/audio_signature_integration.py": "e9ed1f9ba17ea187628a694ea17ac77bfbf886a58159374c6c8fc5f959c11d5c",
+    "tests/integration/codec_phases_integration.py": "7380dc536c6396f86d9e1d9837e27473b83d9ddffc2626bdcc5757269f4977c7",
+    "tests/integration/control_lifecycle_integration.py": "1abef4f7403cee53e2c9b358f5cd19f8fe4c31b8ccf05300f94d9544f001e038",
+    "tests/integration/cqf_rate_integration.py": "22e4c8713b86e4898cc144d88c34f6657478a61e2ada390cc3d4fb7ebb0e657d",
+    "tests/integration/crash_integration.py": "f05d99d4a9f4202561f7efe295482e48bd80fd3e403b28111c4e3de7f4b30f2b",
+    "tests/integration/decoder_controls_integration.py": "f4c5d0d1d14a8ed88e19f8d4ba52e44e22b368b4977a650667618a9de193c475",
+    "tests/integration/decoder_integration.py": "93610ed8f49207a89a311fba4cd15efbf168d3011c2632f32974f26d8b390c2a",
+    "tests/integration/docker_smoke.py": "76b08c290a50d034b7f852fe281f94fad3ed742cf8a23506c4edfad6b04f1709",
+    "tests/integration/frame_policy_integration.py": "4b056bcfb13c470b0e763a1768814a6ab863031cdb265e7a857e1d165744a309",
+    "tests/integration/health_progress_integration.py": "3de87b2caa5947038a999a3590e09295758aa42ba87cf89002dd8a48d5a121c1",
+    "tests/integration/live_input_poll_integration.py": "17e08c60f727063588e81862db044b6d0fc4fb595d0d4757c8d9cc1e3cba7e28",
+    "tests/integration/live_input_service_integration.py": "581e3995110d06a4c880d395818b7bb18ff7752701bcc78f9f7a82ca1bcc550e",
+    "tests/integration/live_input_stability_integration.py": "04a22a4dcd4771ecc976588200d153c0355a169b4b53cbefb63bab52cc3181e3",
+    "tests/integration/live_mux_integration.py": "504be5fd57484db440db3f16771a4ec449ccfe203afa77747f486692702ece37",
+    "tests/integration/media_hooks_integration.py": "bd6949a6a68ef9eaf810ec6dd26a154134ac33f5d9de860eb8c0adb6f909c276",
+    "tests/integration/mixed_queue_integration.py": "7c05cd161d83d5c8c6029913b6b3876c76703320d52276a5155029382a42d582",
+    "tests/integration/multi_output_integration.py": "f8a4da0fa93170672f3e5be5428f76304b9f67a6a55dcbcbbf68d7dde46ed32b",
+    "tests/integration/observability_integration.py": "cb9c9cd49f492e300d74f477584eaaeeab31fb54b821762aa1cc34a5db2a0cc9",
+    "tests/integration/output_finalize_integration.py": "fd5baafe71dc847b684e58e1477d63053ca5e1f69790bde5fa228a2e37b53f99",
+    "tests/integration/pipeline_lifecycle_integration.py": "3ee137bb29c669c9e54dabc2bb9d53c9a88c8a112ca4c1c2d55984a8d9be6592",
+    "tests/integration/probe_integration.py": "e7ddef7abc6d7d3c6957a1427f5036015531afb71028d7efc11f3f082a93800c",
+    "tests/integration/process_integration.py": "d9d4e294f793e715a4954e2386ad2af295657ecb93eb0693abcb6f68d4154c1e",
+    "tests/integration/read_origin_integration.py": "e28c20a4388d10b5a2edfdfec262b3640061b0a4151d898557b88770c80d95f5",
+    "tests/integration/rendition_audio_sei.py": "f0529457133a4ef39b90be95c994225cd80404f62497e2ab15a084d8f514e61b",
+    "tests/integration/rendition_churn.py": "b623ea03dbec4dcafda63a89fabfab456d0eeb24bcc1719d1782598c2bf4357b",
+    "tests/integration/rendition_destinations.py": "b7bdc7cf763e14dd12fe76854b0bb7bc218b99974cd01fcaf999ec1da21b5f3e",
+    "tests/integration/rendition_format_race.py": "c017c3ed3097a5ad5cd18cec4cf0dfd4f7296698bac085053e076d9bde3cea3a",
+    "tests/integration/rendition_integration.py": "9d184c96982569d113de8404a569ef5a9f3b9ecded2470818365159b2e6c3339",
+    "tests/integration/rendition_lifetime.py": "7ecd096561d9345347006be81207ccc7b5090fd73b71aa5202e12f8a6612bfd4",
+    "tests/integration/rendition_matrix.py": "7ad8a2288b4629d64446bef60d46170199c83f1da1812e0c20da50ce74ee60e2",
+    "tests/integration/rendition_network_restart.py": "a9a7690fc936d08ad0a6fd8420fde3afa67df79467de593c51863ccabed66f66",
+    "tests/integration/rendition_process_integration.py": "4079b8a07348ab1266bbdc11a017d9c16feebd16b5b80da5b77b0bcc0134184d",
+    "tests/integration/rendition_recovery.py": "7945a5cd06164e6599dfa6affcaac7fa1a544889774c0e93401cdfec214f2c14",
+    "tests/integration/sdk_build_integration.py": "8c03c07451c9c01e09d93895f0049184640d64aa213b6cecc7cdee710c495370",
+    "tests/integration/sei_integration.py": "6bd612e7e0d502c354dba05e9444e03376d2b2af29e9eb907bd7ddc9f8acef1a",
+    "tests/integration/service_integration.py": "6d557571ad05e1611c9f5ad51a25b34636ac264b2ad11febd2824371f6ff46cc",
+    "tests/integration/symbols_integration.py": "f17efcf7a6e77afc9cda11693ce39a290b49c898dd08ba52ec7a5a30a1528c6a",
+    "tests/integration/update_api_integration.py": "442e7181f26e9e0544c86d9a308388dbaba63f560883ae7c48136340d1d1f433",
+    "tests/integration/video_rate_integration.py": "d2c703d62287272ca07afa094b30089d71ec02c07aac3ee5b1545e6947bfd0c7",
+    "tests/integration/vvenc_integration.py": "9eb7642063663c5d1b92c791efb26e50517865c4fa70eea39453e547d421bc58",
+    "tests/integration/vvenc_pts_integration.py": "afd2b03fe36640499e545fd190cd3adced5fca1bd3c7bc31f8c01302cfc7aaa0",
+    "tests/integration/watermark_integration.py": "bde81fa926b29309c5ccfea87fa8b330d3dbe0bf44f6cd7b75a32e2f1a471d83",
+    "tests/integration/watermark_review_integration.py": "f58f50888de36fd893d7cc9ecdee74385f3ebd74e92550d911e22541d5369bfe",
+    "tests/service_suites.json": "6621fed75806526d28239046536ef100d95c9092dbcbb4caac8aed30037500b9",
+    "tests/support/__init__.py": "4bcb60715496dda37c090f066fb588bd9e5a247e105c0be3adfe5b5845265086",
+    "tests/support/control_server.py": "57ef94474dbdcaf8214436b46011ae4b78394d72ec4c86ab14a9620e95227e58",
+    "tests/support/event_logs.py": "518dc56344d7ad5119a86032ba0254b61ae08563415379f7eea5600ba0f74c40",
+    "tests/support/flv_capture.py": "15cc908d79484fd7e5175b5340f0171359b2f7674d5b2249d131b0be2c1a135b",
+    "tests/support/images.py": "36d242c3e14066589193d64aaae2ef6da59cf866de3f44e226a411ff04557ea1",
+    "tests/support/input_reorder_matrix.py": "d1edd4820fbc9ce50d75b656765b618109168e11893bd78c5c134bb5c74e2def",
+    "tests/support/live_stream_fixtures.py": "ebf9736bb9286d7d661287fa9022b6701f8daf937613af106d02eb059e6d1e20",
+    "tests/support/media_probe.py": "af6bd2c632d364dc868fd8e1bed741adf05cf7055a98d745924114649dd82f36",
+    "tests/support/probe_budget_integration.py": "f3afd8847e1460576c061c609a46e9af2f9dd09c54bc69508719e3ef32f596a4",
+    "tests/support/processes.py": "87b44190bd8ce2b038905428f7c4aadd7c5823c1a111d396ac24817ed465e67b",
+    "tests/support/run_native_test.py": "e647290d6b90ac478285c1e5e4db47281ee33000b3d5ace03740c2e660a9e387",
+    "tests/support/service_harness.py": "8b8f92cbfd9df34f09caaa2e614501c14edf757da974dac1bceeccaa7cbf3133",
+    "tests/support/update_server.py": "494217d94a7c03ab02eb3979cad7d7717d4db2dbf7be39796706aa8a48e96bf7",
+    "tests/support/vvc_structure.py": "d170ca107442e18f37cd5a08fdec686aa25688ba55be29b78020ac7fe5596983",
+    "tests/unit/audio_signature_test.c": "eea30c05b116fae5a42e6e152518dd3809106ce98a5a8a04b900db3e5addfa9c",
+    "tests/unit/audio_wire_test.c": "1f902926248df8799e8f4be13b87fc792b1638d0aabfb53155c5f4de54454292",
+    "tests/unit/branch_queue_test.c": "6e2d256ce8ce999d5def2bb1cb0deb9f3146a4804fe79b205f5009e7edc3058e",
+    "tests/unit/component_update_test.c": "c481a9e489641ef83ed75bcd586d1ac4147ab396deed40ae9ec6b4e43f5edf9e",
+    "tests/unit/control_spec_test.c": "152b94502ca566712bbcbc6137f28c6ce59f5f2365cca72e9289d45a59ab0835",
+    "tests/unit/decode_dispatch_test.c": "c26f29a78449f004eccb6e04db0bdfbb3a4c61e3d46b80a599dbd95b40a70512",
+    "tests/unit/decoder_controls_test.c": "67e1747e291074cc4f8da610f3524fe8b6f1c3d00496ca90fe7386e033c3aadc",
+    "tests/unit/event_logger_test.c": "8fdb385f47299c1af9b1595fad7bb540f91295dc8f19b4c2db120943b19142fd",
+    "tests/unit/frame_policy_config_test.c": "fb34bb1283979d1fe58e5dab84a218cfcf19e1d09850fde9c50cc686f28eba12",
+    "tests/unit/frame_policy_test.c": "8c4ad418fb5e8934733d8748fd1c5fef573e97dc2db9d951a38f31708d756bed",
+    "tests/unit/frame_wire_test.c": "22ea0e9146b35b2286683be5687839a76112fa8a7b03f1706e209227a1469af6",
+    "tests/unit/identity_intent_test.c": "8629e242d9d02f136f5bc1cbc4b3921361c97da7900b51d6d22a5f9918ec170f",
+    "tests/unit/live_input_poll_test.c": "3d9d3243edab1f500269caee953aca05beded6f8322a34ce506ea8522ef726d2",
+    "tests/unit/live_mux_test.c": "ddbe21c8e3890455b3765aa46cd1160b0f2f9c564dcf7b7b6952a6b63b8fd2d3",
+    "tests/unit/live_rate_test.c": "cf1841714706978c879a897338c3003cd1251e156465e04baa4e77bc8fa12db6",
+    "tests/unit/logger_submit_test.c": "2cebd4a37aaa6a80584b77812a731c27879a5c7bcde4af4d9ffd993d5653d01f",
+    "tests/unit/logger_test.c": "1d2c620ff853e9b91cb311821c90bc893af188687c99ec9e199e4db48465f895",
+    "tests/unit/native8_test.cpp": "990125b974608e9b9fff8040803aa0ac84d342ed8361fa5c4484e24f9570a1e4",
+    "tests/unit/operation_cache_test.c": "531a1cfbb3a53c632c8d991f8ab06240757f100913c0318784330dca1e8b9c31",
+    "tests/unit/operation_store_test.c": "690d12dc5e820b5be6f003f6619fc844bf6022d02a7ed64fa34e557e6247d4e3",
+    "tests/unit/probe_budget_test.c": "955e3cbcb1f1543a1f2e3164e9a9faab444b9c44d7b54cd5cbe0f012fe36a008",
+    "tests/unit/probe_test.c": "18f63d4a76c0c757afb81d86c202897032609602a759826b72d804ff924c7dd2",
+    "tests/unit/rendition_attach_test.c": "83eac815045b4a92cf75d96450791947e2d2424bf9709be0b8d7537690e4f3de",
+    "tests/unit/rendition_guard_test.c": "4c5583d2b48822900b81355f7b7c92f77436cd93e687cad4ee8e495ada1a2554",
+    "tests/unit/sei_test.c": "187dc1a94d97fc9efa118752ebe4dd9928baeb5dc9b5b9e977bc0c55bd661c91",
+    "tests/unit/session_config_test.c": "394ec50849757807b677c9993a6c0e3f6b96b66281ca6508b6fcc74e7af7e8dc",
+    "tests/unit/session_idle_test.c": "99bded02684d8e6a289c58a6caece03d0bd80bc5fd7b8d4601cb5f95b5f87606",
+    "tests/unit/shared_frame_pool_test.c": "f73745be6f105bacaa79131d0b800ca1a822c177c2f46d34cca1917627a778a7",
+    "tests/unit/video_filter_test.c": "254d68725b87e6226a294f0411902588de7d7b92ceb14e791bca49b9e143a474",
+    "tests/unit/video_rate_test.c": "f50a0fc2902b41598e88c4b9c782695820437620cb19d8f232d30f3011783b16",
+    "tests/unit/watermark_config_test.c": "9ce4df7cb6a64cc507a6e082012b33189610271d3977d51f83fe089e3678a223",
+    "tests/unit/watermark_operation_test.c": "ac11187c5fe53ccc919c9eaf55ab735f3fc58155b666ac00afbbbfc1fa304346",
+    "tests/unit/watermark_render_test.c": "d77817efdc96e052a2f3f1a18c592886220ce9a0be9e17efae36e62634ad17da",
+    "tests/unit/watermark_state_test.c": "ea6e2f9df6f5cf2aedbb041c59243c6c4454db080e9252699fa28309ba317b78",
+    ".github/workflows/ffmpeg.yml": "0f9641616a25e1a61317be36a8eca46a37ed543014e9f8eab22d340cc5834252",
+    ".github/workflows/service.yml": "7ddd925840b620024e068f6130ec458c8aeae24745a3bd5721ad1943190acf32",
+    "third_party/yyjson/src/yyjson.c": "d2d58ef0a3b2267862dc363832c4f3185fd375aea933d5d3419d1a940d6ece2e",
+    "third_party/yyjson/src/yyjson.h": "ef803cda5c06b8962face6dfa39c3284b3bcf3e73f4d7317664690cc779679ca",
+    "CMakeLists.txt": "5121ab0510bfc10c08f848cef0cfd9df9580de4ee9e97707051215699741e93e",
+    "Dockerfile": "a2aee757e62cf9638aee18b5dcc7ac930ce192e0381481cef1ef8964a86c42f6",
+    "Dockerfile.ffmpeg": "481688d1f2260f1aeb7a3bc233c3ab2f4904a387f297eda461476c0bded940e1",
+    "compose.yaml": "69ee41903448d207f49447fbbdc3152f1a15648d9a1aae8d3543627e9a4e4008"
+  },
+  "legacy_capacity_comparison": {
+    "run": "legacy-capacity-baseline-j1jvunn1",
+    "summary_sha256": "3554fc948051db5d00aaff96e45b0416740ab4110a9d0196cebfd53df2c3c4fc",
+    "baseline_commit": "318100a912c305fe826c995c9a68c95422612368",
+    "source_sha256": "a92022414e51ca1aaab8cf705054828c8aaf0c58b482b1bdc683af4adc6187d4",
+    "predeclared_cycles_per_build": 3,
+    "expected_source_frames": 125,
+    "cases": [
+      {
+        "build": "baseline",
+        "cycle": 0,
+        "state": "completed_partial",
+        "source_frames": 125,
+        "outputs": [
+          {
+            "output_id": "four-red",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "1340d5936c2bd74a2f993443506b4f61b574bc65ad414fdbd952b9707e68f9ea"
+          },
+          {
+            "output_id": "four-blue",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "6a455911e34047e5798c46d54ba80cdc1e44e49dafbdd7cb67a1374cb0f1962d"
+          },
+          {
+            "output_id": "four-bare",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "c30ed2b38d736ac5a389abdf77d954b14d3078296d11c81acccbd2739dcd2c61"
+          },
+          {
+            "output_id": "four-vvc",
+            "state": "failed",
+            "error": "branch bounded admission window (video_count): Connection timed out",
+            "packets_out": 8,
+            "frames_filtered": 16,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null
+          }
+        ]
+      },
+      {
+        "build": "current",
+        "cycle": 0,
+        "state": "completed_partial",
+        "source_frames": 125,
+        "outputs": [
+          {
+            "output_id": "four-red",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "1340d5936c2bd74a2f993443506b4f61b574bc65ad414fdbd952b9707e68f9ea"
+          },
+          {
+            "output_id": "four-blue",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "6a455911e34047e5798c46d54ba80cdc1e44e49dafbdd7cb67a1374cb0f1962d"
+          },
+          {
+            "output_id": "four-bare",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "c30ed2b38d736ac5a389abdf77d954b14d3078296d11c81acccbd2739dcd2c61"
+          },
+          {
+            "output_id": "four-vvc",
+            "state": "failed",
+            "error": "branch bounded admission window (video_count): Connection timed out",
+            "packets_out": 9,
+            "frames_filtered": 18,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null
+          }
+        ]
+      },
+      {
+        "build": "baseline",
+        "cycle": 1,
+        "state": "completed_partial",
+        "source_frames": 125,
+        "outputs": [
+          {
+            "output_id": "four-red",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "1340d5936c2bd74a2f993443506b4f61b574bc65ad414fdbd952b9707e68f9ea"
+          },
+          {
+            "output_id": "four-blue",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "6a455911e34047e5798c46d54ba80cdc1e44e49dafbdd7cb67a1374cb0f1962d"
+          },
+          {
+            "output_id": "four-bare",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "c30ed2b38d736ac5a389abdf77d954b14d3078296d11c81acccbd2739dcd2c61"
+          },
+          {
+            "output_id": "four-vvc",
+            "state": "failed",
+            "error": "branch bounded admission window (video_count): Connection timed out",
+            "packets_out": 9,
+            "frames_filtered": 18,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null
+          }
+        ]
+      },
+      {
+        "build": "current",
+        "cycle": 1,
+        "state": "completed_partial",
+        "source_frames": 125,
+        "outputs": [
+          {
+            "output_id": "four-red",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "1340d5936c2bd74a2f993443506b4f61b574bc65ad414fdbd952b9707e68f9ea"
+          },
+          {
+            "output_id": "four-blue",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "6a455911e34047e5798c46d54ba80cdc1e44e49dafbdd7cb67a1374cb0f1962d"
+          },
+          {
+            "output_id": "four-bare",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "c30ed2b38d736ac5a389abdf77d954b14d3078296d11c81acccbd2739dcd2c61"
+          },
+          {
+            "output_id": "four-vvc",
+            "state": "failed",
+            "error": "branch bounded admission window (video_count): Connection timed out",
+            "packets_out": 9,
+            "frames_filtered": 18,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null
+          }
+        ]
+      },
+      {
+        "build": "baseline",
+        "cycle": 2,
+        "state": "completed_partial",
+        "source_frames": 125,
+        "outputs": [
+          {
+            "output_id": "four-red",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "1340d5936c2bd74a2f993443506b4f61b574bc65ad414fdbd952b9707e68f9ea"
+          },
+          {
+            "output_id": "four-blue",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "6a455911e34047e5798c46d54ba80cdc1e44e49dafbdd7cb67a1374cb0f1962d"
+          },
+          {
+            "output_id": "four-bare",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "c30ed2b38d736ac5a389abdf77d954b14d3078296d11c81acccbd2739dcd2c61"
+          },
+          {
+            "output_id": "four-vvc",
+            "state": "failed",
+            "error": "branch bounded admission window (video_count): Connection timed out",
+            "packets_out": 9,
+            "frames_filtered": 18,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null
+          }
+        ]
+      },
+      {
+        "build": "current",
+        "cycle": 2,
+        "state": "completed_partial",
+        "source_frames": 125,
+        "outputs": [
+          {
+            "output_id": "four-red",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "1340d5936c2bd74a2f993443506b4f61b574bc65ad414fdbd952b9707e68f9ea"
+          },
+          {
+            "output_id": "four-blue",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "6a455911e34047e5798c46d54ba80cdc1e44e49dafbdd7cb67a1374cb0f1962d"
+          },
+          {
+            "output_id": "four-bare",
+            "state": "completed",
+            "error": "",
+            "packets_out": 125,
+            "frames_filtered": 125,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null,
+            "decoded_sequence_sha256": "c30ed2b38d736ac5a389abdf77d954b14d3078296d11c81acccbd2739dcd2c61"
+          },
+          {
+            "output_id": "four-vvc",
+            "state": "failed",
+            "error": "branch bounded admission window (video_count): Connection timed out",
+            "packets_out": 9,
+            "frames_filtered": 18,
+            "branch_rejection_reason": null,
+            "queue_pressure_failures": null
+          }
+        ]
+      }
+    ],
+    "baseline_reproduced_overload": true,
+    "current_reproduced_overload": true,
+    "comparison_completed": true,
+    "same_final_application_binary": true
+  },
+  "baseline_binaries": {
+    "naki-live": {
+      "sha256": "a1ff1e2051a026995ac626c706319d1383877069d7537700976131ed6521c7e7",
+      "build_id": "ac8f26a182c4c20d74e206c33e8823116b3b7731"
+    },
+    "naki-live-worker": {
+      "sha256": "35cd8c55e9cb9bf63ee74c29cf241d64297bbf592349c4395aac247e699e8991",
+      "build_id": "260673046a303c79f2f81f4575554e5a66b5670a"
+    }
+  },
+  "audio": {
+    "hot_expected_frames": 283,
+    "hot_add": {
+      "action": "add_rendition",
+      "state": "applied",
+      "delivery_state": "first_written",
+      "attach_frame_id": 18,
+      "first_written_frame_id": 18,
+      "accepted_to_first_written_ms": 360.631,
+      "attached_to_first_written_ms": 5.881
+    },
+    "aac_first_audio_s": 0.683,
+    "aac_first_video_s": 0.68,
+    "aac_last_audio_s": 11.989,
+    "aac_last_video_s": 11.96,
+    "restart": {
+      "action": "restart_rendition",
+      "state": "applied",
+      "delivery_state": "first_written",
+      "attach_frame_id": 44,
+      "first_written_frame_id": 44,
+      "accepted_to_first_written_ms": 96.894,
+      "attached_to_first_written_ms": 5.149
+    },
+    "restart_expected_frames": 257,
+    "mp3": [
+      {
+        "format": "mpegts",
+        "audio": {
+          "codec_name": "mp3",
+          "codec_type": "audio",
+          "sample_rate": "44100",
+          "channels": 1,
+          "disposition": {
+            "default": 0,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          }
+        },
+        "expected_audio_frames": 116,
+        "audio_written": 115,
+        "audio_dropped_late": 1,
+        "first_audio_s": 0.081067,
+        "first_video_s": 0.08,
+        "last_audio_s": 3.059022,
+        "last_video_s": 3.04
+      },
+      {
+        "format": "flv",
+        "audio": {
+          "codec_name": "mp3",
+          "codec_type": "audio",
+          "sample_rate": "44100",
+          "channels": 1,
+          "disposition": {
+            "default": 0,
+            "dub": 0,
+            "original": 0,
+            "comment": 0,
+            "lyrics": 0,
+            "karaoke": 0,
+            "forced": 0,
+            "hearing_impaired": 0,
+            "visual_impaired": 0,
+            "clean_effects": 0,
+            "attached_pic": 0,
+            "timed_thumbnails": 0,
+            "non_diegetic": 0,
+            "captions": 0,
+            "descriptions": 0,
+            "metadata": 0,
+            "dependent": 0,
+            "still_image": 0,
+            "multilayer": 0
+          }
+        },
+        "expected_audio_frames": 116,
+        "audio_written": 115,
+        "audio_dropped_late": 1,
+        "first_audio_s": 0.081,
+        "first_video_s": 0.08,
+        "last_audio_s": 3.059,
+        "last_video_s": 3.04
+      }
+    ]
+  },
+  "destinations": {
+    "reuse": {
+      "action": "add_destination",
+      "state": "applied",
+      "delivery_state": "first_written",
+      "attach_frame_id": 18,
+      "first_written_frame_id": 18,
+      "accepted_to_first_written_ms": 346.238,
+      "attached_to_first_written_ms": 2.182
+    },
+    "rap": {
+      "action": "request_random_access",
+      "state": "applied",
+      "delivery_state": "first_written",
+      "attach_frame_id": 18,
+      "first_written_frame_id": 18,
+      "accepted_to_first_written_ms": 39.578,
+      "attached_to_first_written_ms": 0.701
+    },
+    "second_suffix": 233,
+    "survivor_watermark": {
+      "action": null,
+      "state": "applied",
+      "delivery_state": "first_written",
+      "attach_frame_id": 58,
+      "first_written_frame_id": 58,
+      "accepted_to_first_written_ms": 73.994,
+      "attached_to_first_written_ms": 1.774
+    },
+    "survivor_expected_frames": 250,
+    "slow_target_failure_isolated": true
+  },
+  "network_reconnect": {
+    "cycles": 3,
+    "connections": 4,
+    "last_expected_suffix": 309,
+    "root_fd_baseline": 29,
+    "operations": [
+      {
+        "action": "restart_rendition",
+        "state": "applied",
+        "delivery_state": "first_written",
+        "attach_frame_id": 31,
+        "first_written_frame_id": 31,
+        "accepted_to_first_written_ms": 107.444,
+        "attached_to_first_written_ms": 7.53
+      },
+      {
+        "action": "restart_rendition",
+        "state": "applied",
+        "delivery_state": "first_written",
+        "attach_frame_id": 62,
+        "first_written_frame_id": 62,
+        "accepted_to_first_written_ms": 115.02,
+        "attached_to_first_written_ms": 5.263
+      },
+      {
+        "action": "restart_rendition",
+        "state": "applied",
+        "delivery_state": "first_written",
+        "attach_frame_id": 92,
+        "first_written_frame_id": 92,
+        "accepted_to_first_written_ms": 100.677,
+        "attached_to_first_written_ms": 5.241
+      }
+    ]
+  },
+  "he_aac_fixture": {
+    "url": "https://fate-suite.ffmpeg.org/aac/al_sbr_cm_48_2.mp4",
+    "sha256": "7e7c0390c950eda21775d1a193e05ee703257bed85602884e7d30a8b3c65be90",
+    "bytes": 199678
+  },
+  "churn_sanitizer": {
+    "process": {
+      "cycles": 20,
+      "fd_baseline": 23,
+      "thread_baseline": 16,
+      "root_fd_samples": [
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23,
+        23
+      ],
+      "thread_samples": [
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16
+      ],
+      "pss_samples_kib": [
+        147890,
+        160038,
+        164634,
+        166982,
+        169714,
+        171298,
+        173370,
+        175126,
+        178606,
+        179990,
+        180521,
+        181813,
+        183069,
+        183781,
+        183853,
+        183909,
+        184829,
+        185129,
+        185973,
+        186005
+      ],
+      "pool_occupied": 0
+    },
+    "thread": {
+      "cycles": 20,
+      "fd_baseline": 29,
+      "thread_baseline": 15,
+      "root_fd_samples": [
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29,
+        29
+      ],
+      "thread_samples": [
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15
+      ],
+      "pss_samples_kib": [
+        102900,
+        110062,
+        115314,
+        120114,
+        120538,
+        123354,
+        125298,
+        127362,
+        128842,
+        129578,
+        132839,
+        135011,
+        136651,
+        137727,
+        135903,
+        136707,
+        138803,
+        139827,
+        140463,
+        138683
+      ],
+      "pool_occupied": 0
+    }
+  }
+}

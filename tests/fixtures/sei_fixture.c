@@ -5,6 +5,7 @@
 #include <string.h>
 #include <libavformat/avformat.h>
 #include <libavutil/intreadwrite.h>
+static int custom_only;
 static uint8_t raw[100000],nal[160000];static size_t used;
 static void variable(unsigned value) {while(value>=255) {raw[used++]=255;value-=255;}raw[used++]=(uint8_t)value;}
 static void msg(unsigned type,const uint8_t *data,unsigned size) {variable(type);variable(size);memcpy(raw+used,data,size);used+=size;}
@@ -15,7 +16,7 @@ static size_t sei(enum AVCodecID codec,int suffix,int64_t pts,int overflow) {
     else {
         msg(100,value,16);msg(100,value,16); /* Deliberate duplicate, not deduplicated. */
         if(codec==AV_CODEC_ID_H264)msg(101,(const uint8_t *)"end",3);
-        msg(5,(const uint8_t *)"Q",1); /* Intentionally not a UUID. */
+        if(!custom_only)msg(5,(const uint8_t *)"Q",1); /* Intentionally not a UUID. */
         uint8_t long_data[300];for(unsigned i=0;i<sizeof(long_data);i++)long_data[i]=(uint8_t)(i%7);
         msg(300,long_data,sizeof(long_data));msg(102,(const uint8_t *)"ignore",6);
         if(overflow)for(unsigned i=0;i<65;i++)msg(100,(const uint8_t *)"x",1);
@@ -31,6 +32,7 @@ static size_t sei(enum AVCodecID codec,int suffix,int64_t pts,int overflow) {
 }
 int main(int argc,char **argv) {
     if(argc!=4)return 2;
+    custom_only=!strcmp(argv[3],"dynamic");
     AVFormatContext *in=NULL,*out=NULL;AVPacket *p=av_packet_alloc();int ret=avformat_open_input(&in,argv[1],NULL,NULL);
     if(ret<0||avformat_find_stream_info(in,NULL)<0)return 3;
     int idx=av_find_best_stream(in,AVMEDIA_TYPE_VIDEO,-1,-1,NULL,0);if(idx<0)return 4;
@@ -45,7 +47,7 @@ int main(int argc,char **argv) {
     while(av_read_frame(in,p)>=0) {
         if(p->stream_index!=idx) {av_packet_unref(p);continue;}
         int64_t frame=av_rescale_q(p->pts,src->time_base,(AVRational){1,25});
-        int chosen=!strcmp(argv[3],"all")||!strcmp(argv[3],"overflow")||frame%3==1;
+        int chosen=custom_only||!strcmp(argv[3],"all")||!strcmp(argv[3],"overflow")||frame%3==1;
         if(chosen) {
             size_t pos=0,at=SIZE_MAX;
             while(pos+4<=(size_t)p->size) {

@@ -5,7 +5,7 @@
 #include <pthread.h>
 #include <libavformat/avformat.h>
 #define READER_CAPACITY 8
-typedef struct InputItem { AVPacket *packet; AVCodecParameters *params; AVRational tb; int64_t demuxed_us; uint64_t retained_bytes; } InputItem;
+typedef struct InputItem { AVPacket *packet; AVCodecParameters *params; AVRational tb; int64_t demuxed_us; uint64_t retained_bytes; int hook_observed; } InputItem;
 /* One reader producer, one shared-pipeline consumer. All queued packet and
  * parameter references transfer together. Join before clearing/destroying. */
 typedef struct PipelineReader {
@@ -19,6 +19,9 @@ typedef struct PipelineReader {
     pthread_cond_t ring_space;
     pthread_t thread;
     int started;
+    int audio_subscribed;
+    int64_t subscription_generation;
+    struct {int64_t sequence,generation;} epochs[NAKI_INFLIGHT_CAPACITY];
     int64_t sei_pending[NAKI_INFLIGHT_CAPACITY];
 } PipelineReader;
 struct Pipeline;
@@ -32,4 +35,7 @@ void pipeline_reader_join(struct Pipeline *p);
 void pipeline_reader_clear(struct Pipeline *p);
 void pipeline_reader_destroy(struct Pipeline *p);
 int pipeline_reader_pending_sei(struct Pipeline *p);
+int pipeline_reader_subscribe(struct Pipeline *p,const NakiSeiConfig *sei,int audio,int64_t *generation);
+int pipeline_reader_epoch_consumed(struct Pipeline *p,int64_t sequence);
+int pipeline_reader_epoch_ready(struct Pipeline *p,int64_t generation);
 #endif

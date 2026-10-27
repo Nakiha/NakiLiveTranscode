@@ -43,7 +43,7 @@ class Entrypoints(unittest.TestCase):
     def test_full_preserves_every_former_ci_suite_once(self):
         suites = self.catalog['suites']
         actual = [pathlib.Path(row['script']).stem for row in suites if 'full' in row['profiles']]
-        self.assertEqual(set(actual), set(LEGACY) | {'infrastructure_test', 'test_entrypoints_test', 'pipeline_lifecycle_integration', 'organization_test', 'cqf_rate_integration', 'quality_tools_test', 'live_budget_test', 'read_origin_integration', 'codec_phases_integration', 'codec_phase_tools_test', 'decoder_controls_integration'})
+        self.assertEqual(set(actual), set(LEGACY) | {'rendition_integration', 'infrastructure_test', 'test_entrypoints_test', 'pipeline_lifecycle_integration', 'organization_test', 'cqf_rate_integration', 'quality_tools_test', 'live_budget_test', 'read_origin_integration', 'codec_phases_integration', 'codec_phase_tools_test', 'decoder_controls_integration'})
         self.assertEqual(len(actual), len(set(actual)))
         self.assertEqual(len({row['id'] for row in suites}), len(suites))
         for row in suites:
@@ -64,7 +64,24 @@ class Entrypoints(unittest.TestCase):
         self.assertIn('tests/integration/docker_smoke.py', self.catalog['separate_gates'])
         self.assertIn('tests/checks/workflow_publication_test.py', self.catalog['separate_gates'])
         sanitized = {row['id'] for row in suites.values() if 'sanitize' in row['profiles']}
-        self.assertEqual(sanitized, {'service', 'multi-output', 'watermark-review', 'lifecycle-media'})
+        self.assertEqual(sanitized, {'service', 'multi-output', 'watermark-review', 'lifecycle-media', 'renditions-sanitize'})
+
+    def test_smoke_tools_reuse_image_without_nesting_compose(self):
+        spec=importlib.util.spec_from_file_location('smoke_routing',ROOT/'tests/integration/docker_smoke.py')
+        smoke=importlib.util.module_from_spec(spec);spec.loader.exec_module(smoke)
+        smoke.RUN=self.directory;smoke.ENV=dict(os.environ,NAKI_SMOKE_TOOLS_IMAGE='naki:test')
+        completed=subprocess.CompletedProcess([],0,stdout='ok\n',stderr='')
+        with patch.object(smoke.subprocess,'run',return_value=completed) as execute:
+            self.assertEqual(smoke.command(['ffprobe',str(self.directory/'output.ts')],tool=True),'ok')
+            argv=execute.call_args.args[0]
+            self.assertEqual(argv[:4],['docker','run','--rm','--init'])
+            self.assertIn(f'type=bind,source={ROOT},target={ROOT}',argv)
+            self.assertEqual(argv[-3:],['naki:test','ffprobe',str(self.directory/'output.ts')])
+            smoke.command(['docker','compose','version'])
+            self.assertEqual(execute.call_args.args[0],['docker','compose','version'])
+            smoke.ENV.pop('NAKI_SMOKE_TOOLS_IMAGE')
+            smoke.command(['ffprobe','input.ts'],tool=True)
+            self.assertEqual(execute.call_args.args[0],['ffprobe','input.ts'])
 
     def test_selection_is_profile_bounded_and_preserves_catalog_order(self):
         args = runner.parse_args(['full', '--suite', 'live-mux', '--suite', 'service'])

@@ -31,7 +31,21 @@ static void *lease_loop(void *opaque) {
         assert(!naki_operations_frame_acquire(t->store,t->id));assert(!naki_operations_frame_release(t->store,t->id,100));
     }return NULL;
 }
+static void topology_results(void){
+    NakiOperations *source=naki_operations_open(4,2*1024*1024,1000),*remote=naki_operations_open(4,2*1024*1024,1000);assert(source&&remote);
+    NakiOperationIntent in=intent("remove");in.kind=NAKI_OP_TOPOLOGY;in.component="rendition";in.action="remove_rendition";
+    NakiOperationHandle a,b;assert(naki_operations_reserve(source,&in,1,&a)==1);assert(naki_operations_reserve(remote,&in,1,&b)==1);
+    claim(source,a,2);NakiFrameIdentity empty={0};assert(!naki_operations_applied(source,a,&empty,0,6));assert(!naki_operations_retire(source,a,7));
+    yyjson_doc *record=read_record(source,a);assert(!naki_operations_observe(remote,b,yyjson_doc_get_root(record),8));yyjson_doc_free(record);check(remote,b,"applied","not_written",0);
+    in=intent("missing-ack");in.kind=NAKI_OP_TOPOLOGY;in.component="rendition";in.action="add_rendition";assert(naki_operations_reserve(source,&in,10,&a)==1);
+    claim(source,a,11);NakiFrameIdentity frame={.frame_id=2,.source_pts=200,.source_us=200000,.source_tb_num=1,.source_tb_den=1000,.output_tb_num=1,.output_tb_den=90000};
+    assert(!naki_operations_applied(source,a,&frame,1,15));assert(!naki_operations_holder_exited(source,a,16));check(source,a,"applied","uncertain",0);
+    in=intent("confirmed");in.kind=NAKI_OP_TOPOLOGY;in.component="destination";in.action="add_destination";in.destination_id="mirror";assert(naki_operations_reserve(source,&in,20,&a)==1);
+    claim(source,a,21);assert(!naki_operations_applied(source,a,&frame,1,25));assert(!naki_operations_written(source,a,&frame,26));assert(!naki_operations_holder_exited(source,a,27));check(source,a,"applied","first_written",0);
+    naki_operations_close(&source);naki_operations_close(&remote);
+}
 int main(void) {
+    topology_results();
     NakiOperations *s=naki_operations_open(2,2*1024*1024,1000);assert(s);NakiOperationHandle a,b,c,duplicate,create,stop;
     NakiOperationIntent in=intent("A");assert(naki_operations_reserve(s,&in,1,&a)==1);
     in.origin_request_id="retry-attempt";assert(!naki_operations_reserve(s,&in,2,&duplicate)&&duplicate==a);

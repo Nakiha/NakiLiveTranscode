@@ -35,14 +35,14 @@ static int write_packet_now(Pipeline *p, AVPacket *packet, int64_t *interleaved,
     pthread_mutex_lock(&job->mutex);
     job->progress.write_started_us=now_us(); job->progress.write_phase=NAKI_WRITE_PHASE_MUX_WRITE;
     pthread_mutex_unlock(&job->mutex);
-    atomic_store(&p->write_interrupt.deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
+    atomic_store(&pipeline_output_interrupt(p)->deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
     int ret=av_write_frame(p->output,packet);
     /* Flush TS audio PES too: AVIO flushing alone cannot release those bytes. */
     if(ret>=0 && !strcmp(job->config.output_format,"mpegts")) ret=av_write_frame(p->output,NULL);
     *interleaved=now_us();
     pthread_mutex_lock(&job->mutex); job->progress.write_phase=NAKI_WRITE_PHASE_AVIO_FLUSH; pthread_mutex_unlock(&job->mutex);
     avio_flush(p->output->pb); *written=now_us();
-    atomic_store(&p->write_interrupt.deadline,0);
+    atomic_store(&pipeline_output_interrupt(p)->deadline,0);
     pthread_mutex_lock(&job->mutex); job->progress.write_started_us=0; job->progress.write_phase=NAKI_WRITE_PHASE_NONE; pthread_mutex_unlock(&job->mutex);
     if(ret>=0 && p->output->pb->error<0)ret=p->output->pb->error;
     if(ret>=0 && dts_us>p->mux_max_dts_us)p->mux_max_dts_us=dts_us;
@@ -53,6 +53,8 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     if(!packet->opaque_ref || packet->opaque_ref->size!=sizeof(MuxTrace)) return AVERROR_INVALIDDATA;
     MuxTrace *meta=(MuxTrace *)packet->opaque_ref->data;
     Stamp stamp=meta->stamp;
+    if(p->destination_copy){int64_t interleaved=0,written=0;int ret=write_packet_now(p,packet,&interleaved,&written);if(!ret){p->video_started=1;ret=naki_destinations_written(p,packet,written);}return ret;}
+
     int bytes=meta->bytes;
     int64_t encoded=meta->encoded_us;
     int output_key=!!(packet->flags&AV_PKT_FLAG_KEY);
@@ -79,9 +81,12 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     pthread_mutex_lock(&p->job->mutex);
     p->job->stats.sei_written+=naki_sei_count(pipeline_stamp_sei(meta->owner),&p->job->config.sei);
     pthread_mutex_unlock(&p->job->mutex);
-    if(stamp.delivery_lease&&(ret=naki_watermark_written(stamp.delivery_owner,stamp.delivery_lease,&identity,written))<0)return ret;
-    if(!naki_policy_untrack(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp.frame_id))return AVERROR_INVALIDDATA;
-    naki_branch_release(p->job,(uint64_t)stamp.frame_id,stamp.branch_charge);
+    if(!p->destination_owner&&stamp.delivery_lease&&(ret=naki_watermark_written(stamp.delivery_owner,stamp.delivery_lease,&identity,written))<0)return ret;
+    if(!meta->fanout_job){
+        if(!naki_policy_untrack(p->job,NAKI_TRACK_FRAME,(uint64_t)stamp.frame_id))return AVERROR_INVALIDDATA;
+        naki_branch_release(p->job,(uint64_t)stamp.frame_id,stamp.branch_charge);
+    }
+    if((ret=naki_destinations_written(p,packet,written))<0)return ret;
     if(p->job->parent) {
         Job *parent=p->job->parent;pthread_mutex_lock(&parent->mutex);
         if(!parent->progress.first_video_output_us)parent->progress.first_video_output_us=written;
@@ -133,6 +138,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     if(!trace && !first_output && !first_output_key)return 0;
     yyjson_mut_doc *doc=new_event("frame",p->job);
     json_int(doc,"frame_id",stamp.frame_id); json_int(doc,"generation",stamp.generation);
+    json_int(doc,"mux_flush_done_monotonic_us",written);json_int(doc,"packet_ingress_monotonic_us",stamp.ingress_us);
     json_int(doc,"source_time_base_num",p->input_tb.num); json_int(doc,"source_time_base_den",p->input_tb.den);
     pipeline_trace_pts(doc,"source_packet_pts",stamp.packet_pts); pipeline_trace_pts(doc,"source_packet_dts",stamp.packet_dts);
     pipeline_trace_pts(doc,"decoded_raw_pts",stamp.raw_pts); pipeline_trace_pts(doc,"source_pts",stamp.source_pts);
@@ -156,8 +162,6 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         json_int(doc,"rtmp_complete_monotonic_us",stamp.network_complete_us);
         json_int(doc,"demux_finished_monotonic_us",stamp.demux_finished_us);
         json_int(doc,"network_tag_position",stamp.network_tag_position);
-        json_int(doc,"mux_flush_done_monotonic_us",written);
-        json_int(doc,"packet_ingress_monotonic_us",stamp.ingress_us);
         json_int(doc,"decoder_submit_monotonic_us",stamp.submitted_us);
         json_int(doc,"decoded_monotonic_us",stamp.decoded_us);
         json_int(doc,"filter_submit_monotonic_us",stamp.filter_started_us);
@@ -235,7 +239,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         json_int(first,"request_monotonic_us",p->job->lifecycle.started_us);
         json_int(first,"dispatch_monotonic_us",p->job->progress.assigned_us);
         json_int(first,"worker_received_monotonic_us",p->job->progress.worker_received_us);
-        json_int(first,"packet_ingress_monotonic_us",stamp.ingress_us);
+        yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(first),"packet_ingress_monotonic_us");json_int(first,"packet_ingress_monotonic_us",stamp.ingress_us);
         json_int(first,"decoder_submit_monotonic_us",stamp.submitted_us);
         json_int(first,"decoded_monotonic_us",stamp.decoded_us);
         json_int(first,"filter_submit_monotonic_us",stamp.filter_started_us);
@@ -243,12 +247,12 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         json_int(first,"encoder_submit_monotonic_us",stamp.encoder_submit_us);
         json_int(first,"encoded_monotonic_us",encoded);
         json_int(first,"mux_begin_monotonic_us",mux_start);
-        json_int(first,"mux_flush_done_monotonic_us",written);
+        yyjson_mut_obj_remove_key(yyjson_mut_doc_get_root(first),"mux_flush_done_monotonic_us");json_int(first,"mux_flush_done_monotonic_us",written);
         json_num(first,"request_to_dispatch_ms",(p->job->progress.assigned_us-p->job->lifecycle.started_us)/1000.0);
         json_num(first,"dispatch_to_worker_ms",(p->job->progress.worker_received_us-p->job->progress.assigned_us)/1000.0);
         json_num(first,"worker_to_packet_ingress_ms",(stamp.ingress_us-p->job->progress.worker_received_us)/1000.0);
         json_num(first,"request_to_mux_ms",(written-p->job->lifecycle.started_us)/1000.0);
-        json_num(first,"encoder_api_wall_to_output_ms",p->encoder_api_us/1000.0);
+        if(p->destination_owner)yyjson_mut_obj_add_null(first,yyjson_mut_doc_get_root(first),"encoder_api_wall_to_output_ms");else json_num(first,"encoder_api_wall_to_output_ms",p->encoder_api_us/1000.0);
         json_int(first,"encoder_submitted_frames_at_output",submitted);
         yyjson_mut_doc *service_status=job_snapshot(p->job);
         yyjson_mut_val *startup=yyjson_mut_obj_get(yyjson_mut_doc_get_root(service_status),"startup");
@@ -282,7 +286,7 @@ int pipeline_drain_mux(Pipeline *p, int force) {
             } else {
                 int64_t interleaved,written;
                 ret=write_packet_now(p,packet,&interleaved,&written);
-                if(ret>=0) {pthread_mutex_lock(&p->job->mutex);p->job->stats.audio_packets_out++;pthread_mutex_unlock(&p->job->mutex);}
+                if(ret>=0) {pthread_mutex_lock(&p->job->mutex);p->job->stats.audio_packets_out++;pthread_mutex_unlock(&p->job->mutex);naki_destinations_audio_written(p);}
             }
         }
         av_packet_unref(packet);

@@ -4,7 +4,11 @@
  * delivery reference until the corresponding PTS is transferred to a mux
  * packet; missing mappings and exhausted slots remain explicit errors. */
 static void mux_trace_free(void *opaque,uint8_t *data) {
-    (void)opaque;MuxTrace *meta=(MuxTrace *)data;av_buffer_unref(&meta->owner);av_free(data);
+    (void)opaque;MuxTrace *meta=(MuxTrace *)data;
+    /* A final-ref destructor cannot return an error: missing correlation is
+     * an ownership invariant failure, never a successful frame completion. */
+    if(meta->fanout_job){if(!naki_policy_untrack(meta->fanout_job,NAKI_TRACK_FRAME,(uint64_t)meta->stamp.frame_id))abort();naki_branch_release(meta->fanout_job,(uint64_t)meta->stamp.frame_id,meta->stamp.branch_charge);}
+    av_buffer_unref(&meta->owner);av_free(data);
 }
 
 void pipeline_ledger_clear(Pipeline *p) {
@@ -13,12 +17,31 @@ void pipeline_ledger_clear(Pipeline *p) {
 
 int pipeline_encoder_send(Pipeline *p, const AVFrame *frame) {
     int64_t began=now_us(); int ret=avcodec_send_frame(p->encoder,frame);
-    p->encoder_api_us+=now_us()-began; return ret;
+    p->encoder_api_us+=now_us()-began; if(ret!=AVERROR(EAGAIN)&&p->destinations&&!strcmp(p->job->config.encoder,"libx264"))av_opt_set_int(p->encoder->priv_data,"forced-idr",0,0);return ret;
 }
 
 static int encoder_receive(Pipeline *p, AVPacket *packet) {
     int64_t began=now_us(); int ret=avcodec_receive_packet(p->encoder,packet);
     p->encoder_api_us+=now_us()-began; return ret;
+}
+
+int pipeline_validate_output_timestamps(Pipeline *p,const AVPacket *packet,AVRational time_base){
+    if(p->job->config.policy.timestamps==NAKI_TS_SOURCE_ALL&&!strcmp(p->job->config.output_format,"flv")){
+            int64_t pts=av_rescale_q(packet->pts,time_base,(AVRational){1,1000});
+            int64_t dts=av_rescale_q(packet->dts,time_base,(AVRational){1,1000});
+            if(packet->pts==AV_NOPTS_VALUE || packet->dts==AV_NOPTS_VALUE || pts<0 || dts<0 ||
+               pts>INT32_MAX || dts>INT32_MAX || pts-dts>8388607 || pts-dts< -8388608) {
+                yyjson_mut_doc *event=new_event("strict_timestamp_rejected",p->job);
+                json_int(event,"encoder_pts",packet->pts);json_int(event,"encoder_dts",packet->dts);
+                json_int(event,"encoder_time_base_num",time_base.num);
+                json_int(event,"encoder_time_base_den",time_base.den);
+                json_int(event,"pts_ms",pts);json_int(event,"dts_ms",dts);
+                json_int(event,"first_encoder_pts",p->first_encoder_pts);
+                logger_submit(p->job->logger,NULL,event);
+                p->stage="strict FLV timestamp range requires explicit retiming";return AVERROR(ERANGE);
+            }
+    }
+    return 0;
 }
 
 int pipeline_receive_encoded(Pipeline *p) {
@@ -34,21 +57,7 @@ int pipeline_receive_encoded(Pipeline *p) {
         int slot=-1;
         for(int i=0;i<LEDGER_CAPACITY;i++)if(p->ledger[i].used && p->ledger[i].pts==packet->pts){slot=i;break;}
         if(slot<0){ret=AVERROR_INVALIDDATA;break;}
-        if(p->job->config.policy.timestamps==NAKI_TS_SOURCE_ALL && !strcmp(p->job->config.output_format,"flv")) {
-            int64_t pts=av_rescale_q(packet->pts,p->encoder->time_base,(AVRational){1,1000});
-            int64_t dts=av_rescale_q(packet->dts,p->encoder->time_base,(AVRational){1,1000});
-            if(packet->pts==AV_NOPTS_VALUE || packet->dts==AV_NOPTS_VALUE || pts<0 || dts<0 ||
-               pts>INT32_MAX || dts>INT32_MAX || pts-dts>8388607 || pts-dts< -8388608) {
-                yyjson_mut_doc *event=new_event("strict_timestamp_rejected",p->job);
-                json_int(event,"encoder_pts",packet->pts);json_int(event,"encoder_dts",packet->dts);
-                json_int(event,"encoder_time_base_num",p->encoder->time_base.num);
-                json_int(event,"encoder_time_base_den",p->encoder->time_base.den);
-                json_int(event,"pts_ms",pts);json_int(event,"dts_ms",dts);
-                json_int(event,"first_encoder_pts",p->first_encoder_pts);
-                logger_submit(p->job->logger,NULL,event);
-                p->stage="strict FLV timestamp range requires explicit retiming";ret=AVERROR(ERANGE);break;
-            }
-        }
+        if((ret=pipeline_validate_output_timestamps(p,packet,p->encoder->time_base))<0)break;
         Stamp *mapped=&p->ledger[slot].stamp;
         if(p->job->config.encoder_max_future_frames) {
             size_t size=0;const uint8_t *data=av_packet_get_side_data(packet,AV_PKT_DATA_STRINGS_METADATA,&size);
@@ -130,7 +139,7 @@ int pipeline_receive_encoded(Pipeline *p) {
         av_buffer_unref(&packet->opaque_ref);packet->opaque_ref=reference;
         av_packet_rescale_ts(packet,p->encoder->time_base,p->video->time_base);packet->stream_index=p->video->index;
         if(!packet->duration)packet->duration=av_rescale_q(1,av_inv_q(p->encoder->framerate),p->video->time_base);
-        ret=pipeline_submit_mux(p,packet);av_packet_unref(packet);
+        ret=p->destinations?naki_destinations_packet(p,packet):pipeline_submit_mux(p,packet);av_packet_unref(packet);
         if(ret<0)break;
         /* Pending receive advances admitted encoding work and may spend tens
          * of ms per AU. Give input/audio a turn between coding-order packets. */
@@ -151,6 +160,7 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     if(p->job->config.output_fps)frame->duration=av_rescale_q(1,av_inv_q(p->encoder->framerate),p->encoder->time_base);
     frame->time_base=p->encoder->time_base;
     frame->pict_type=stamp.intra_reason ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
+    if(p->destinations){int force=naki_destinations_force(p,frame);if(force<0)return force;}
     if (p->last_pts!=AV_NOPTS_VALUE && frame->pts<=p->last_pts) {
         p->stage="non-monotonic encoder PTS"; return AVERROR_INVALIDDATA;
     }

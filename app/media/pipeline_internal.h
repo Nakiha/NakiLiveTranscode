@@ -28,6 +28,7 @@
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 #include <libavformat/live_mux.h>
+#include "destination_runtime.h"
 #include <libavformat/read_origin.h>
 #include <libavcodec/bsf.h>
 #include <libavutil/buffer.h>
@@ -61,6 +62,7 @@ typedef struct Stamp {
     int picture_type, decoded_key, input_key, first_i;
     int intra_reason, timestamp_source, tracked_packet;
     int64_t frame_id, packet_pts, packet_dts, raw_pts, source_pts, source_us;
+    int64_t subscription_generation,source_rate_bps;
     uint64_t watermark_revision;
     NakiWatermark *delivery_owner;
     NakiOperationHandle delivery_lease;
@@ -72,9 +74,9 @@ typedef struct Stamp {
 } Stamp;
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; atomic_int cleanup; } Interrupt;
 typedef struct Ledger { int used; int64_t pts; Stamp stamp; AVBufferRef *owner; } Ledger;
-typedef struct MuxTrace { Stamp stamp; AVBufferRef *owner; int64_t encoded_us, pts_us, hook_us; int bytes, picture_type; } MuxTrace;
+typedef struct MuxTrace { Job *fanout_job; Stamp stamp; AVBufferRef *owner; int64_t encoded_us, pts_us, hook_us; int bytes, picture_type; } MuxTrace;
 typedef struct AudioTrack {
-    int input_index, rejected, have_clock;
+    int input_index, rejected, have_clock, pending_reported;
     AVStream *output; AVBSFContext *bsf;
     NakiAudioSignature accepted;
     int64_t last_dts, next_input_dts, previous_input_dts;
@@ -88,10 +90,14 @@ typedef struct Branch Branch;
 typedef struct Pipeline {
     Job *job;
     NakiMediaHooks hooks;
+    NakiDestinations *destinations;
+    void *destination_owner;
+    int destination_copy;
     const char *stage;
     AVFormatContext *input, *output;
     AVCodecContext *decoder, *encoder;
     AVCodecAsyncContext *async;
+    AVFrame initial_input_properties; /* Immutable snapshot before async takes decoder ownership. */
     int64_t decoder_receive_us; /* receive return, written only by decoder frontend owner */
     AVFilterGraph *graph;
     AVFilterContext *source, *sink;
@@ -109,9 +115,13 @@ typedef struct Pipeline {
     int sei_length_size,sei_read_error;
     NakiSeiConfig sei_input;
     int64_t next_frame_id;
+    uint64_t rendition_frames;
     NakiTimeline timeline;
     NakiIntraState intra;
     Interrupt read_interrupt, write_interrupt;
+    /* A migrated mux keeps the protocol's original interrupt address alive.
+     * The source Pipeline outlives all joined destination writers. */
+    Interrupt *output_interrupt;
     PipelineReader reader;
     DecodePump pump;
     Ledger ledger[LEDGER_CAPACITY];
@@ -136,6 +146,9 @@ typedef struct Pipeline {
     enum AVColorSpace input_colorspace;
     enum AVColorRange input_range;
 } Pipeline;
+static inline Interrupt *pipeline_output_interrupt(Pipeline *p) {
+    return p->output_interrupt?p->output_interrupt:&p->write_interrupt;
+}
 struct Branch {
     Pipeline pipeline;
     NakiBranchQueue queue;
@@ -154,6 +167,8 @@ void pipeline_decode_destroy(Pipeline *p);
 void pipeline_refresh_auto(Pipeline *p);
 int pipeline_prepare_decoded_frame(Pipeline *p,AVFrame *frame);
 /* pipeline.c */
+int pipeline_process_frame(Pipeline *p,AVFrame *frame);
+int pipeline_handle_audio(Pipeline *p,const InputItem *audio);
 int pipeline_stamp_valid(const AVBufferRef *ref);
 const NakiSeiBundle *pipeline_stamp_sei(const AVBufferRef *ref);
 void pipeline_trace_pts(yyjson_mut_doc *doc, const char *key, int64_t pts);
@@ -167,6 +182,7 @@ int pipeline_filter_output(Pipeline *p);
 void pipeline_ledger_clear(Pipeline *p);
 int pipeline_encoder_send(Pipeline *p, const AVFrame *frame);
 int pipeline_receive_encoded(Pipeline *p);
+int pipeline_validate_output_timestamps(Pipeline *p,const AVPacket *packet,AVRational time_base);
 int64_t pipeline_source_rate(Pipeline *p,int64_t now);
 int pipeline_encode_frame(Pipeline *p, AVFrame *frame);
 int pipeline_ledger_pending(Pipeline *p);
@@ -178,6 +194,7 @@ int pipeline_submit_mux(Pipeline *p, AVPacket *packet);
 /* pipeline_output.c */
 int pipeline_finalize_output(Pipeline *p,int primary,int stopped);
 int pipeline_open_output(Pipeline *p, AVFrame *frame);
+int pipeline_open_mux(Pipeline *p);
 int pipeline_drain_output(Pipeline *p);
 void pipeline_release_media_resources(Pipeline *p,AVFrame **receive_frame);
 void pipeline_complete_job(Pipeline *p,int ret,int stopped);
