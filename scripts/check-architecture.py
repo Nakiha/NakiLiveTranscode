@@ -29,7 +29,7 @@ PRIVATE = {
         'media/input_internal.h','media/video_internal.h',
         'media/pipeline_decode.c', 'media/pipeline_decode_queue.c', 'media/mux_internal.h',
         'media/rendition_runtime.c', 'media/rendition_runtime_internal.h',
-        'media/rendition_child.c', 'media/rendition_media.c', 'media/destination_runtime.c',
+        'media/rendition_media.c', 'media/destination_runtime.c',
     },
     'media/rendition_runtime_internal.h': {'media/rendition_runtime.c', 'media/rendition_control.c'},
     'worker/job.h': {'worker/worker.c', 'worker/job.c', 'worker/job_report.c',
@@ -59,6 +59,31 @@ OWNERS = {
     'avio_open2': {'media/pipeline_output.c'},
     'avio_closep': {'media/pipeline_output.c'},
 }
+# Event authorities: declarations are allowed in the contract; state changes
+# stay on the actual resource/topology owner. Pure views remain freely usable.
+EVENT_OWNERS = {
+    'naki_encoded_seal': {'media/pipeline_video.c','media/encoded_description.c','media/encoded_description.h'},
+    'naki_topology_advance': {'media/rendition_control.c','media/rendition_lifecycle.c','media/rendition_lifecycle.h'},
+}
+for event in ('begin','ready','finished_event','fail','reaped'):
+    EVENT_OWNERS['naki_rl_'+event]={'media/rendition_runtime.c','media/rendition_lifecycle.c','media/rendition_lifecycle.h'}
+for event in ('restart','remove','attach','clear'):
+    EVENT_OWNERS['naki_rl_'+event]={'media/rendition_control.c','media/rendition_lifecycle.c','media/rendition_lifecycle.h'}
+for event in ('reserve','stop'):
+    EVENT_OWNERS['naki_rl_'+event]={'media/rendition_runtime.c','media/rendition_control.c','media/rendition_lifecycle.c','media/rendition_lifecycle.h'}
+for event in ('reserve','started','ready','attach','remove','joined','clear'):
+    EVENT_OWNERS['naki_dl_'+event]={'media/destination_runtime.c','media/destination_lifecycle.c','media/destination_lifecycle.h'}
+for event in ('init','ready','stop','fail','finish'):
+    EVENT_OWNERS['naki_writer_'+event]={'media/destination_runtime.c','media/destination_lifecycle.c','media/destination_lifecycle.h'}
+for event in ('init','open','quiesce','clear','release_decoder','close_demux','destroy'):
+    EVENT_OWNERS['pipeline_input_'+event]={'media/pipeline.c','media/pipeline_input.c','media/pipeline_internal.h'}
+for event in ('close','release'):
+    EVENT_OWNERS['pipeline_video_'+event]={'media/pipeline.c','media/pipeline_video.c','media/pipeline_internal.h'}
+for event in ('init','join','clear','destroy'):
+    EVENT_OWNERS['pipeline_reader_'+event]={'media/pipeline_input.c','media/pipeline_reader.c','media/input_internal.h'}
+EVENT_OWNERS['pipeline_decode_start']={'media/pipeline.c','media/pipeline_decode.c','media/pipeline_internal.h'}
+EVENT_OWNERS['pipeline_reader_start']={'media/pipeline.c','media/pipeline_reader.c','media/pipeline_reader.h'}
+
 JOB_PUBLISHERS = {
     'naki_job_frame_written': {'media/pipeline_mux.c'},
     'naki_job_complete': {'media/pipeline_output.c'},
@@ -132,11 +157,27 @@ def check(root):
         if name != 'media/mux_internal.h' and re.search(r'\bstruct\s+NakiMux\s*\{', code):
             fail(name, 'mux representation is private')
         for typename, owner in [('NakiInput','media/input_internal.h'),('NakiVideo','media/video_internal.h'),
-                                ('NakiEncodedDescription','media/encoded_description.c'),('NakiBranches','media/pipeline_branches.c')]:
+                                ('NakiEncodedDescription','media/encoded_description.c'),('NakiBranches','media/pipeline_branches.c'),
+                                ('Pipeline','media/pipeline_internal.h'),('PipelineReader','media/input_internal.h'),
+                                ('DecodePump','media/input_internal.h'),('Ledger','media/video_internal.h'),('Branch','media/pipeline_branches.c')]:
             if name != owner and re.search(r'\bstruct\s+'+typename+r'\s*\{', code):
                 fail(name, typename+' representation is private')
+        if name == 'media/pipeline_internal.h':
+            state = re.search(r'\bstruct\s+Pipeline\s*\{(.*?)\}\s*Pipeline\b',code,re.S)
+            if state and re.search(r'\b(?:AVCodecContext|AVCodecAsyncContext|AVFormatContext|AVStream|AVFilterGraph|AVFilterContext|AVIOContext|AVBSFContext|AVFrame|AVPacket|PipelineReader|DecodePump|Ledger|NakiBranchQueue|NakiLiveRate)\b',state[1]):
+                fail(name,'orchestration may only hold opaque component handles and timing descriptions')
         if not name.startswith('worker/') and re.search(r'\bstruct\s+Job\s*\{', code):
             fail(name, 'worker Job representation is private')
+        for token, allowed in {
+            '_private_life': {'media/rendition_lifecycle.c','media/rendition_lifecycle.h'},
+            '_private_writer': {'media/destination_lifecycle.c','media/destination_lifecycle.h'},
+            '_private_destination': {'media/destination_lifecycle.c','media/destination_lifecycle.h'},
+        }.items():
+            if name not in allowed and re.search(r'\b'+token+r'\b',code):
+                fail(name,'private lifecycle storage')
+        for symbol, owners in EVENT_OWNERS.items():
+            if re.search(r'\b'+symbol+r'\b',code) and name not in owners:
+                fail(name,'unauthorized owner event '+symbol)
         for symbol, owners in OWNERS.items():
             if re.search(r'\b' + symbol + r'\b', code) and name not in owners:
                 fail(name, 'single-owner API ' + symbol)
@@ -164,6 +205,16 @@ def check(root):
     cmake = (root / 'CMakeLists.txt').read_text(encoding='utf-8')
     for args in re.findall(r'target_link_libraries\s*\(\s*naki-control\s+([^)]*)\)', cmake):
         if re.search(r'FFMPEG|libav', args): errors.append('CMakeLists.txt: naki-control links media SDK')
+    if 'naki-live-worker' in cmake:
+        for component, expected in {
+            'input': {'pipeline_input.c','pipeline_reader.c','pipeline_decode.c','pipeline_decode_queue.c'},
+            'video': {'pipeline_video.c','pipeline_encode.c'},
+            'output': {'pipeline_output.c','pipeline_mux.c','pipeline_audio.c'},
+        }.items():
+            match = re.search(r'add_library\s*\(\s*naki-media-'+component+r'\s+STATIC\s+([^)]*)\)',cmake)
+            actual = set(match[1].split()) if match else set()
+            if actual != {'app/media/'+p for p in expected}:
+                errors.append('CMakeLists.txt: component source ownership naki-media-'+component)
     return errors
 
 def main():

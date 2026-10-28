@@ -1,6 +1,6 @@
 # Linux C 服务模块与所有权
 
-可执行的依赖门禁、稳定 mux 生命周期及按修改范围选择测试，见[组件边界](../docs/architecture.md)。`naki-control` 不依赖 FFmpeg；三个输出实现编译为 `naki-media-output`，其 `NakiMux` 状态不向调度与 destination 实现公开。
+可执行的依赖门禁、所有权与按修改范围选择测试，见[组件边界](../docs/architecture.md)。`naki-control` 不依赖 FFmpeg；输入、视频处理、输出分别编译为 `naki-media-input`、`naki-media-video`、`naki-media-output`。Job、输入/解码、滤镜/编码、mux、固定分支状态均通过各自接口访问。
 
 | 目录 | 职责 |
 | --- | --- |
@@ -26,15 +26,21 @@
 - `controller/service_internal.h`：controller 私有状态及接口，同一个 libevent 线程拥有。
 - `worker/worker.c` / `platform/ipc.c`：worker 控制、媒体启动回收与有界 SOCK_SEQPACKET JSON；控制器失联不取消媒体。
 - `control/operation_store.c` / `control/operation_cache.c` / `control/component_update.c`：worker 权威结果/pin、controller 版本缓存、typed patch/CAS/规范化意图。
-- `media/pipeline.c`：共享输入/async frontend、滤镜送取、音频策略与分支编排。
+- `media/pipeline.c`：通过组件句柄调度输入、视频、音频与分支，并按明确次序协调关闭；不直接操作 native codec/format/filter 状态。
+- `media/pipeline_input.c` / `input_internal.h`：输入打开、解码器所有权转交、时间轴/谱系、收发与关闭；reader/pump 同属该私有组件。
+- `media/pipeline_video.c` / `video_internal.h`：滤镜/合成、编码器初始化、正常排空与引用退休；编码器命令和写后反馈经此 owner 的接口执行。
+- `media/pipeline_branches.c`：固定分支私有队列、线程、准入、完成与 join。
 - `media/pipeline_reader.c/.h`：唯一 demux reader、8 项/64 MiB ring、音频参数快照和 SEI obligation；提供 init/start/pop/wake/join/clear/destroy 边界。
-- `media/pipeline_output.c`：每输出初始化、正常 drain、finalize、引用释放及终态；保留主错误，分别记录 trailer/flush/close。
+- `media/pipeline_output.c`：mux/协议初始化、稳定对象移交及 finalize；保留主错误，分别记录 trailer/flush/close。
 - `media/pipeline_encode.c`：每输出 encoder send/receive、256 项 PTS ledger 及 delivery 引用转交；缺映射/满额显式失败。
 - `media/pipeline_mux.c`：唯一 mux owner 的有界 live mux → av_write_frame → flush → 指标/首帧/写出结算；迟到音频丢弃计数。
 - `media/pipeline_audio.c`：同一 mux owner 的音频参数处理、追加音轨、时钟检查与起播前暂存。
 - `media/mux_internal.h`：仅上述 mux/audio 与 `pipeline_output.c` 可包含的稳定输出状态；原连接、FD、音轨及回调地址随同一个不透明对象移交，不逐字段复制。
 - `media/frame_trace.h`：帧谱系与本地追踪数据；wire codec 不再包含 Pipeline/Job 私有状态。
-- `media/pipeline_internal.h`：worker 私有 Stamp/Pipeline/Branch 与接口，不把原始帧/包放入 IPC。
+- `media/pipeline_internal.h`：组件句柄、标量时间描述和调度接口；私有组件结构不能从这里泄露。
+- `media/encoded_description.c/.h`：codec open 后深拷贝并封存参数；writer 持引用到 join 后，不借用活跃编码器或 AVStream。
+- `media/rendition_lifecycle.c/.h`：逻辑成员、媒体握手、停止策略、结果与 holder 的独立状态，以及有校验的拓扑阶段转换；仅 owner 发布事件。
+- `media/destination_lifecycle.c/.h`：原子 writer 状态与 owner 接入状态；ready、IDR 接入、applied、实际写出和退出证明分别处理。
 - `media/input_probe.c` / `media/input_probe.h`：带缓存的首条 H.264/HEVC 视频就绪探测；其他音轨/数据可继续晚发现，不在初始化阶段固定完整流集合。
 - `control/frame_policy.c` / `control/frame_policy.h`：纯策略核心，包含严格时间轴、接受后推进的 I 调度、因果选择和有界在途身份。
 - `control/frame_policy_config.c` / `control/frame_policy_config.h`：可选帧策略组的严格 JSON 合同；缺省兼容 legacy，过载阈值必须显式提供。
@@ -43,6 +49,7 @@
 - `control/config.c/.h`：配置解析与固定输出合同；不包含 worker 状态或 FFmpeg 媒体类型。
 - `worker/job.h`：worker 私有 JobLifecycle/JobProgress/JobStats/JobFlow、句柄与同步状态；`job_api.h` 只公开前置声明与操作。
 - `worker/job.c` / `job_report.c`：任务唤醒/取消、事件身份、状态投影；锁操作、窗口结算与递归顺序保持原样。
+- `worker/job_media.c` / `job_remote.c`：媒体事件发布、逐帧统计/终态、工厂与远端投影；媒体不包含 Job 定义或持有其锁。
 - `observability/metrics.c/.h`：直方图数据和每帧采样。`platform/runtime.c/.h`：时间、JSON 标量和目录助手。
 - `worker/job_state.h`：内部枚举与原有 wire string 映射，不增加状态转换或 HTTP 字段。
 - `observability/logger.c` / `observability/logger.h`：独立日志线程、有界队列、丢弃计数和追踪文件轮转。

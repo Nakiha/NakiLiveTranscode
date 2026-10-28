@@ -46,6 +46,8 @@ This preserves the current direct-to-writer handoff. It does not introduce a per
 | Mux allocation/handoff/close | mux-lifetime; lifecycle-media, output-finalize, rendition destination/socket regressions |
 | Audio registration/clock ownership | audio-signatures, live-mux, live-input, rendition audio/SEI |
 | Shared pool/exit proof | Native pool/wire/guard tests and rendition lifecycle/fault/recovery |
+| Rendition membership/restart/operation phase | media-lifecycle + rendition-attach; rendition process/thread, recovery, churn and format/subscription regressions |
+| Destination execution/admission | media-lifecycle + destination-runtime + mux-lifetime; rendition destinations/socket regressions |
 
 `mux-lifetime` links the real output implementation. It exercises conflicting owners, rollback, stable protocol and AVIO callback addresses, writing after the former Pipeline has been freed, FD close and exactly-once deferred-reference release. It uses an isolated local MPEG-TS writer; independent decode and actual network behavior remain integration-test responsibilities.
 
@@ -57,4 +59,14 @@ Cross-cutting lifetime/ownership changes require full functional and application
 
 `job_remote.h` keeps remote slot allocation, child/destination factories and status projection inside worker implementation. Slot allocation rolls back a partially allocated batch; factory roles reject a mismatched destructor. Adapters still prove holder exit/thread join before retiring jobs. Compiler checks reject `sizeof(Job)`, direct field access and external mutex access; native tests cover observations, bounded admission, cancellation and allocation rollback.
 
-Remaining debt: rendition and destination lifecycle still have several orthogonal flags and do not yet have a complete typed transition model. The allowlists prevent adding consumers silently; they are not a claim that all internal coupling has been eliminated. The remaining completion checklist is in `architecture-completion.md`.
+## Lifecycle authority
+
+`NakiRenditionLife` is an inline opaque value, with separate membership, holder, handshake, stop-policy and outcome dimensions. Those dimensions represent legitimate independent facts rather than unrestricted boolean combinations. Candidate reservation does not create logical membership; attachment requires the current generation, successful prepare and a running healthy holder. Removal drops membership immediately while retaining resources/ID until exit proof. Restart detaches the logical member, waits for the old holder, then begins a strictly newer generation. Failure is sticky until that new incarnation; clearing a reaped candidate's ID preserves its failure evidence for the pending operation. Abort cannot downgrade to drain.
+
+Topology advances through checked `RESERVED → WAIT_EXIT → PREPARING → WAIT_FRAME` transitions (add omits WAIT_EXIT). A reservation/old holder readiness cannot trigger attachment. The existing source-format, subscription epoch, idle deadline and frame-identity barriers remain required. Prepared/applied operation commits are checked before membership changes; the separate actual-write checkpoint remains authoritative for delivery.
+
+Destinations use an atomic writer execution value and a distinct owner-serialized attachment value. Concurrent ready/fail/finish events preserve terminal completion, sticky failure and stop escalation. New admission requires writer readiness, a verified AVC IDR and committed operation checkpoints; it does not use a generic I/key flag as a substitute. A finished message or writer-done flag is not resource exit proof: native join must succeed before the owner publishes reaped/joined and reuses ID/budget. Child startup/done and transport EOF remain one-way checkpoints, not independent topology flags.
+
+The architecture guard restricts lifecycle mutation APIs to their actual native/topology owners, rejects direct opaque-storage access, and checks the three component build source sets. The pure `media-lifecycle` test has no media SDK dependency; it traverses 454 reachable rendition states and 8,172 event attempts, checks stale/late events, failed-candidate retirement, terminal/IDR/join rules and topology barriers, and races writer ready/fail/finish. Real media tests still verify the adapter wiring, ordered messages, raw leases and protocol behavior.
+
+These constraints cover the completion scope in `architecture-completion.md`. They prevent accidental dependency and ownership drift; they do not eliminate runtime fault cases, justify removing integration coverage, or make this experimental service production-ready.

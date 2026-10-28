@@ -6,10 +6,10 @@ This continues the first boundary-hardening commit. Completion is assessed by ow
 - [x] Opaque worker Job outside worker implementation. Media reads immutable configuration/identity through a contract and publishes typed progress/counter/lifecycle events; no mutable Job/progress/statistics pointers or externally held Job mutex.
 - [x] Job allocation, child/destination construction, remote projection and final classification remain worker-owned; report windows and first-frame boundaries retain their existing authority. Stage-specific media regression passed (see validation below).
 - [x] Input/decode state and filter/encode state have separate private representations and explicit close/drain APIs. Fixed branch state is opaque too. Orchestration cannot access codec internals belonging to another component; destination writers retain deep sealed parameters and scalar stream timing.
-- [ ] Rendition holder, logical membership and operation phases use typed transitions. Removal, restart, EOF, late completion and exit proof have explicit, independently testable rules.
-- [ ] Destination writer execution and attachment phases use typed transitions; readiness, applied and actual delivery stay separate.
-- [ ] Build targets, public headers and dependency checks enforce these boundaries. Scope-specific tests and component instructions describe extension points.
-- [ ] Final functional/sanitizer evidence binds the final source and dependencies; commits are independently reviewable and pushed to the work branch.
+- [x] Rendition holder, logical membership and operation phases use typed transitions. Removal, restart, EOF, late completion and exit proof have explicit, independently testable rules.
+- [x] Destination writer execution and attachment phases use typed transitions; readiness, applied and actual delivery stay separate.
+- [x] Build targets, public headers and dependency checks enforce these boundaries. Scope-specific tests and component instructions describe extension points.
+- [x] Final functional/sanitizer evidence binds the final application/build sources and dependencies, with the sole later service-test readiness fix explicitly tracked; commits are independently reviewable and pushed to the work branch.
 
 The fixed-output path and explicit process/thread rendition backends retain their existing public behavior. No codec, protocol, dynamic format, timeline repair or resource-capacity claim is added by this work. FFmpeg/VVenC source and frozen evidence are unchanged unless a separately justified dependency change becomes necessary.
 
@@ -21,4 +21,8 @@ The selected contract run covers SDK verification, all 30 native tests, organiza
 
 ## Native owner separation validation
 
-`owner-contracts-final/summary.json` passed all eight selected steps with source SHA256 `5ff496b93c64bf366b694cdabf6bf9b6db554d78389b0a637d3d96d21939595f`: SDK verification, native tests (30 quick contracts plus two native integration helpers), the complete rendition gate, organization (including compile-negative opaque-state checks), codec phases, fixed multi-output, all 86 lifecycle-media cases and output finalization. Source, binaries and SDK manifest were unchanged through the run. Separate quick and native runs passed during development; the final owner build had no warnings. This stage does not constitute final coverage of the following lifecycle changes.
+`owner-contracts-final/summary.json` passed all eight selected steps with source SHA256 `5ff496b93c64bf366b694cdabf6bf9b6db554d78389b0a637d3d96d21939595f`: SDK verification, 30 native quick contracts, the complete rendition gate, organization (including compile-negative opaque-state checks), codec phases, fixed multi-output, all 86 lifecycle-media cases and output finalization. Source, binaries and SDK manifest were unchanged through the run. Separate quick and all-native runs (also including the two native integration helpers) passed during development; the final owner build had no warnings. This stage does not constitute final coverage of the following lifecycle changes.
+
+## Completion evidence
+
+All items above are implemented. Final normal full passed 44/44 and all-native passed 33/33. Sanitizer coverage is completed in two windows after correcting a service test's acceptance/readiness race; application/build sources and corresponding binaries are identical between windows. Exact source digests, successful runs, the retained failure and the scope of the sole test-only change are documented in [completion validation](validation-architecture-completion-20261029.md). This does not remove runtime fault cases or authorize skipping the relevant integration checks.

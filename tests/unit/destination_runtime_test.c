@@ -19,7 +19,7 @@ int main(void){
     encoder->time_base=(AVRational){1,25};p->encoded=naki_encoded_seal(encoder);assert(p->encoded);
     p->video.time_base=(AVRational){1,25};p->video.valid=1;
     assert(!naki_destinations_open(p));NakiDestinations *m=p->destinations;m->activated=1;
-    Destination *d=&m->slots[1];d->started=1;atomic_store(&d->ready,1);d->mux=calloc(1,sizeof(Pipeline));assert(d->mux);
+    Destination *d=&m->slots[1];assert(!naki_dl_reserve(&d->life,0));assert(!naki_dl_started(&d->life));naki_writer_init(&d->writer);assert(!naki_writer_ready(&d->writer));d->mux=calloc(1,sizeof(Pipeline));assert(d->mux);
     NakiOperationIntent in={.kind=NAKI_OP_TOPOLOGY,.job_id="job",.output_id="main",.operation_id="ready-race",.origin_request_id="test",
         .fingerprint="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",.component="destination",.action="add_destination",.destination_id="mirror",.expected_revision=1,.revision=2};
     assert(naki_operations_reserve(job->operations,&in,1,&d->add_operation)==1);
@@ -27,7 +27,7 @@ int main(void){
     AVPacket *packet=av_packet_alloc();assert(packet&&!av_new_packet(packet,5));memcpy(packet->data,"\0\0\0\1\x65",5);
     packet->pts=packet->dts=50;packet->opaque_ref=av_buffer_allocz(sizeof(MuxTrace));assert(packet->opaque_ref);
     MuxTrace *meta=(MuxTrace *)packet->opaque_ref->data;meta->stamp=(Stamp){.frame_id=50,.source_pts=50,.source_us=2000000,.ingress_us=now_us()};meta->pts_us=2000000;
-    assert(!naki_destinations_packet(p,packet));assert(d->active&&d->count==1&&!atomic_load(&d->failed));
+    assert(!naki_destinations_packet(p,packet));assert(naki_dl_active(&d->life)&&d->count==1&&!naki_writer_failed(&d->writer));
     yyjson_mut_doc *record=naki_operations_get(job->operations,d->add_operation);assert(record);
     assert(!strcmp(yyjson_mut_get_str(yyjson_mut_obj_get(yyjson_mut_doc_get_root(record),"state")),"applied"));yyjson_mut_doc_free(record);
     NakiFrameIdentity identity=pipeline_frame_identity(p,&meta->stamp,50,p->video.time_base);

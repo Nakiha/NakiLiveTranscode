@@ -4,6 +4,7 @@
 #include "pipeline_internal.h"
 #include "rendition_message.h"
 #include "session_idle.h"
+#include "rendition_lifecycle.h"
 #include "platform/ipc.h"
 #include "control/identity.h"
 #define LEASES (NAKI_RENDITION_VIDEO_CREDIT+NAKI_RENDITION_AUDIO_CREDIT)
@@ -19,8 +20,8 @@ typedef struct Rendition {
     int local_thread;
     pthread_t thread;
     atomic_int thread_done;
-    int prepared,finished,failed,stopping,eof_sent,removed;
-    int member,attached,restarting,remove_draining;
+    NakiRenditionLife life;
+    int eof_sent; /* transport checkpoint, not holder completion */
     unsigned automatic_attempts,incarnations;
     int64_t restart_at_us;
     uint64_t prepare_source_generation;
@@ -55,7 +56,7 @@ struct NakiRenditions {
     int64_t next_source_rate_us;
     struct {yyjson_doc *request;NakiOperationHandle operation;unsigned slot;uint64_t generation;char origin[129];} commands[8];
     unsigned command_head,command_count;
-    struct {int action,started,automatic;int64_t accepted_us,deadline_us;unsigned slot;uint64_t revision,source_generation;NakiOperationHandle operation;Config config;OutputConfig spec;char *config_json;} transition;
+    struct {NakiTopologyPhase phase;int action,automatic;int64_t accepted_us,deadline_us;unsigned slot;uint64_t revision,source_generation;NakiOperationHandle operation;Config config;OutputConfig spec;char *config_json;} transition;
 };
 
 int naki_rendition_spawn(Pipeline *p,unsigned index);

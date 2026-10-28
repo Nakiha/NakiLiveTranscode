@@ -13,16 +13,16 @@ int main(void){
     spec.watermark.required=0;assert(naki_rendition_prepare_deadline(&spec,100)==12000100);
     Job *j=calloc(1,sizeof(*j));Pipeline *p=calloc(1,sizeof(*p));NakiRenditions *m=calloc(1,sizeof(*m));assert(j&&p&&m);
     j->renditions=m;p->job=j;m->job=j;m->source_generation=1;
-    m->slots[0].pid=1;m->slots[0].prepared=1;m->slots[0].prepare_source_generation=1;
+    m->slots[0].pid=1;assert(!naki_rl_reserve(&m->slots[0].life,0));assert(!naki_rl_begin(&m->slots[0].life,1));assert(!naki_rl_ready(&m->slots[0].life,1));m->slots[0].prepare_source_generation=1;
     m->transition.operation=1;m->transition.slot=0;m->transition.revision=2;
     for(int action=NAKI_RENDITION_ADD;action<=NAKI_RENDITION_RESTART;action++){
-        m->transition.action=action;m->transition.started=0;
-        assert(!naki_rendition_attach(p,NULL));assert(!m->slots[0].attached&&m->transition.operation==1);
+        m->transition.action=action;m->transition.phase=NAKI_TOPOLOGY_RESERVED;
+        assert(!naki_rendition_attach(p,NULL));assert(!naki_rl_attached(&m->slots[0].life)&&m->transition.operation==1);
     }
-    m->transition.action=NAKI_RENDITION_REMOVE;m->transition.started=1;
+    m->transition.action=NAKI_RENDITION_REMOVE;m->transition.phase=NAKI_TOPOLOGY_WAIT_FRAME;
     assert(!naki_rendition_attach(p,NULL));
     m->transition.action=NAKI_RENDITION_ADD;m->finishing=1;
     assert(!naki_rendition_attach(p,NULL));m->finishing=0;atomic_store(&j->lifecycle.cancel,1);
-    assert(!naki_rendition_attach(p,NULL));assert(!m->slots[0].attached);
+    assert(!naki_rendition_attach(p,NULL));assert(!naki_rl_attached(&m->slots[0].life));
     free(m);free(p);free(j);puts("PASS reserved remove/add/restart cannot attach before owner preparation; stop/EOF cannot attach");return 0;
 }

@@ -106,7 +106,7 @@ int pipeline_decode_start(Pipeline *p) {
     p->in->pump.started=1;return 0;
 }
 void pipeline_decode_join(Pipeline *p) {
-    if(p->in->pump.started) {naki_wakeup_notify(&p->in->pump.wake);pthread_join(p->in->pump.thread,NULL);p->in->pump.started=0;}
+    if(p->in->pump.started) {naki_wakeup_notify(&p->in->pump.wake);if(pthread_join(p->in->pump.thread,NULL)){abort();}p->in->pump.started=0;}
 }
 void pipeline_decode_destroy(Pipeline *p) {
     if(p->in->pump.frame&&p->in->pump.frame->opaque_ref) {

@@ -2,7 +2,7 @@
 #include "control/intent.h"
 #include "worker/job_remote.h"
 static const char *actions[]={"watermark","add_rendition","remove_rendition","restart_rendition","add_destination","remove_destination","request_random_access"};
-static unsigned members(NakiRenditions *m){unsigned n=0;for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++)n+=m->slots[i].member!=0;return n;}
+static unsigned members(NakiRenditions *m){unsigned n=0;for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++)n+=naki_rl_member(&m->slots[i].life)!=0;return n;}
 static int reject(char *error,size_t cap,int code,const char *reason){snprintf(error,cap,"%s",reason);return code;}
 static int candidate(Job *job,yyjson_val *spec,Config *config,OutputConfig *output,char **json,char *error,size_t cap) {
     yyjson_doc *source=yyjson_read(naki_job_public_config(job),strlen(naki_job_public_config(job)),0);yyjson_mut_doc *d=source?yyjson_mut_doc_new(NULL):NULL;int ret=-EINVAL;
@@ -29,10 +29,10 @@ int naki_renditions_submit(Job *job,yyjson_val *request,const char *origin,yyjso
     unsigned slot=NAKI_OUTPUT_MAX;
     for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++)if(!strcmp(m->slots[i].spec.id,u.output_id)&&*u.output_id){slot=i;break;}
     if(!u.action||u.action>=NAKI_DESTINATION_ADD) {
-        if(slot==NAKI_OUTPUT_MAX||!m->slots[slot].member){ret=reject(error,cap,-ENOENT,"rendition_not_found");goto done;}
+        if(slot==NAKI_OUTPUT_MAX||!naki_rl_member(&m->slots[slot].life)){ret=reject(error,cap,-ENOENT,"rendition_not_found");goto done;}
         Rendition *r=&m->slots[slot];
         if(!u.expected_generation||u.expected_generation!=r->generation){ret=reject(error,cap,-ESTALE,"expected_generation_required_or_stale");goto done;}
-        if(!r->prepared||r->failed||r->stopping||!r->pid){ret=reject(error,cap,-EPIPE,"rendition_not_active");goto done;}
+        if(!naki_rl_prepared(&r->life)||naki_rl_failed(&r->life)||naki_rl_stopping(&r->life)||!r->pid){ret=reject(error,cap,-EPIPE,"rendition_not_active");goto done;}
         if(u.action){
             if(m->transition.operation){ret=reject(error,cap,-EAGAIN,"topology_transition_in_progress");goto done;}
             if(u.expected_revision!=m->desired_revision){ret=reject(error,cap,-ESTALE,"topology_revision_conflict");goto done;}
@@ -57,13 +57,13 @@ int naki_renditions_submit(Job *job,yyjson_val *request,const char *origin,yyjso
         for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++){Rendition *r=&m->slots[i];if(*r->spec.id){threads+=r->spec.encoder_threads;if(!strcmp(r->spec.output,spec.output)){free(json);ret=reject(error,cap,-EEXIST,"duplicate_destination");goto done;}}else if(!r->pid&&slot==NAKI_OUTPUT_MAX)slot=i;}
         if(slot==NAKI_OUTPUT_MAX||threads>16){free(json);ret=reject(error,cap,-ENOSPC,"rendition_process_or_thread_budget");goto done;}
     } else {
-        if(slot==NAKI_OUTPUT_MAX||!m->slots[slot].member){ret=reject(error,cap,-ENOENT,"rendition_not_found");goto done;}
+        if(slot==NAKI_OUTPUT_MAX||!naki_rl_member(&m->slots[slot].life)){ret=reject(error,cap,-ENOENT,"rendition_not_found");goto done;}
         Rendition *r=&m->slots[slot];if(u.expected_generation&&u.expected_generation!=r->generation){ret=reject(error,cap,-ESTALE,"rendition_generation_conflict");goto done;}
-        if(u.action==NAKI_RENDITION_RESTART&&!r->failed){ret=reject(error,cap,-EINVAL,"manual_restart_requires_failed_rendition");goto done;}
+        if(u.action==NAKI_RENDITION_RESTART&&!naki_rl_failed(&r->life)){ret=reject(error,cap,-EINVAL,"manual_restart_requires_failed_rendition");goto done;}
     }
     NakiOperationHandle op;ret=naki_operations_reserve(naki_job_operations(job),&in,now,&op);if(ret!=1){free(json);if(!ret)*result=naki_operations_get(naki_job_operations(job),op);goto done;}
     m->desired_revision++;
-    m->transition.accepted_us=now;m->transition.deadline_us=now+12000000;m->transition.action=u.action;m->transition.slot=slot;m->transition.operation=op;m->transition.revision=m->desired_revision;m->transition.config=cfg;m->transition.spec=spec;m->transition.config_json=json;
+    m->transition.accepted_us=now;m->transition.deadline_us=now+12000000;if(naki_topology_advance(&m->transition.phase,NAKI_TOPOLOGY_RESERVED)){abort();}m->transition.action=u.action;m->transition.slot=slot;m->transition.operation=op;m->transition.revision=m->desired_revision;m->transition.config=cfg;m->transition.spec=spec;m->transition.config_json=json;
     if(u.action!=NAKI_RENDITION_REMOVE)m->transition.deadline_us=naki_rendition_prepare_deadline(u.action==NAKI_RENDITION_ADD?&spec:&m->slots[slot].spec,now);
     naki_operations_transition(naki_job_operations(job),op,NAKI_OP_PREPARING,0,0,NULL,now);
     *result=naki_operations_get(naki_job_operations(job),op);ret=0;wake_job(job);
@@ -74,7 +74,8 @@ static void transition_clear(NakiRenditions *m){free(m->transition.config_json);
 static void transition_fail(NakiRenditions *m,int code,const char *why){naki_operations_transition(naki_job_operations(m->job),m->transition.operation,NAKI_OP_FAILED,1,code,why,now_us());transition_clear(m);}
 static void stop_child(Rendition *r,int drain) {
     if(!r->pid)return;
-    r->stopping=1;r->remove_draining=drain;r->stop_deadline_us=now_us()+2000000;
+    if(naki_rl_stop(&r->life,drain?NAKI_STOP_DRAIN:NAKI_STOP_ABORT)){abort();}
+    r->stop_deadline_us=now_us()+2000000;
     if(drain){r->eof_sent=0;return;}
     yyjson_mut_doc *d=ipc_message("rendition_stop");json_str(d,"rendition_instance",r->instance);ipc_send(r->control,d);yyjson_mut_doc_free(d);
 }
@@ -83,11 +84,11 @@ void naki_rendition_reaped(Pipeline *p,unsigned slot) {
     for(unsigned k=0;k<256;k++)if(r->remote_operations[k]){naki_operations_holder_exited(naki_job_operations(p->job),r->remote_operations[k],now_us());r->remote_operations[k]=0;}
     if(r->attach_operation){naki_operations_holder_exited(naki_job_operations(p->job),r->attach_operation,now_us());r->attach_operation=0;}
     if(r->remove_operation){naki_operations_transition(naki_job_operations(p->job),r->remove_operation,NAKI_OP_PREPARED,0,0,NULL,now_us());naki_operations_transition(naki_job_operations(p->job),r->remove_operation,NAKI_OP_APPLYING,1,0,NULL,now_us());naki_operations_applied(naki_job_operations(p->job),r->remove_operation,&r->detach_identity,0,now_us());naki_operations_retire(naki_job_operations(p->job),r->remove_operation,now_us());r->remove_operation=0;}
-    if(r->removed||!r->member){naki_job_remote_forget(r->job);memset(&r->spec,0,sizeof(r->spec));free(r->config_json);r->config_json=NULL;r->removed=0;}
+    if(naki_rl_removed(&r->life)||!naki_rl_member(&r->life)){naki_job_remote_forget(r->job);memset(&r->spec,0,sizeof(r->spec));free(r->config_json);r->config_json=NULL;if(naki_rl_clear(&r->life))abort();}
 }
 static int subscriptions(Pipeline *p) {
     NakiRenditions *m=naki_job_renditions(p->job);NakiSeiConfig sei={0};int audio=0;
-    for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++){Rendition *r=&m->slots[i];if(!r->member&&!(m->transition.operation&&m->transition.started&&m->transition.action==NAKI_RENDITION_ADD&&m->transition.slot==i))continue;if(naki_sei_union(&sei,&r->spec.sei))return -ENOSPC;audio|=r->spec.audio_copy&&strcmp(r->spec.output_format,"mp4");}
+    for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++){Rendition *r=&m->slots[i];if(!naki_rl_member(&r->life)&&!(m->transition.operation&&m->transition.phase!=NAKI_TOPOLOGY_RESERVED&&m->transition.action==NAKI_RENDITION_ADD&&m->transition.slot==i))continue;if(naki_sei_union(&sei,&r->spec.sei))return -ENOSPC;audio|=r->spec.audio_copy&&strcmp(r->spec.output_format,"mp4");}
     int64_t generation;int ret=pipeline_reader_subscribe(p,&sei,audio,&generation);
     if(!ret&&m->transition.operation)m->slots[m->transition.slot].required_subscription_generation=generation;
     return ret;
@@ -96,7 +97,7 @@ static void automatic_restart(Pipeline *p,int64_t now) {
     NakiRenditions *m=naki_job_renditions(p->job);Job *j=p->job;
     if(!naki_job_config(j)->rendition_auto_restart||m->finishing||m->transition.operation||m->idle_expired||naki_job_cancelled(j))return;
     for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++) {
-        Rendition *r=&m->slots[i];if(!r->member||!r->failed||r->pid||r->automatic_attempts>=(unsigned)naki_job_config(j)->rendition_restart_limit)continue;
+        Rendition *r=&m->slots[i];if(!naki_rl_member(&r->life)||!naki_rl_failed(&r->life)||r->pid||r->automatic_attempts>=(unsigned)naki_job_config(j)->rendition_restart_limit)continue;
         if(!r->restart_at_us){int64_t delay=(int64_t)naki_job_config(j)->rendition_restart_backoff_ms*1000*(1U<<r->automatic_attempts);r->restart_at_us=now+FFMIN(delay,60000000);}
         if(now<r->restart_at_us)continue;
         char operation_id[33];if(naki_id_generate(operation_id))return;
@@ -111,7 +112,7 @@ static void automatic_restart(Pipeline *p,int64_t now) {
             .origin_request_id="automatic_restart",.component="rendition",.action="restart_rendition",.expected_revision=m->desired_revision,.revision=m->desired_revision+1};
         NakiOperationHandle op;ret=naki_operations_reserve(naki_job_operations(j),&in,now,&op);r->automatic_attempts++;r->restart_at_us=0;
         if(ret!=1)return;
-        m->desired_revision++;m->transition.action=NAKI_RENDITION_RESTART;m->transition.automatic=1;m->transition.operation=op;m->transition.slot=i;m->transition.revision=m->desired_revision;m->transition.accepted_us=now;m->transition.deadline_us=now+12000000;
+        m->desired_revision++;if(naki_topology_advance(&m->transition.phase,NAKI_TOPOLOGY_RESERVED)){abort();}m->transition.action=NAKI_RENDITION_RESTART;m->transition.automatic=1;m->transition.operation=op;m->transition.slot=i;m->transition.revision=m->desired_revision;m->transition.accepted_us=now;m->transition.deadline_us=now+12000000;
         m->transition.deadline_us=naki_rendition_prepare_deadline(&r->spec,now);
         naki_operations_transition(naki_job_operations(j),op,NAKI_OP_PREPARING,0,0,NULL,now);
         yyjson_mut_doc *event=new_event("rendition_automatic_restart",j);json_str(event,"output_id",r->spec.id);json_str(event,"operation_id",operation_id);json_int(event,"attempt",r->automatic_attempts);logger_submit(naki_job_logger(j),NULL,event);return;
@@ -123,14 +124,14 @@ int naki_rendition_control_tick(Pipeline *p) {
         if(m->transition.operation){naki_operations_transition(naki_job_operations(j),m->transition.operation,NAKI_OP_CANCELLED,1,0,"session closing before attach",now);transition_clear(m);}
         naki_session_idle_finish(&m->idle);
     } else if(naki_session_idle_poll(&m->idle,now)>0){m->idle_expired=1;return 0;}
-    if(naki_job_config(j)->source_rate_limit&&now>=m->next_source_rate_us){int64_t bps=pipeline_source_rate(p,now);for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++){Rendition *r=&m->slots[i];if(r->pid&&!r->failed&&!r->stopping){yyjson_mut_doc *d=ipc_message("rendition_source_rate");json_str(d,"rendition_instance",r->instance);json_int(d,"bps",bps);ipc_send(r->control,d);yyjson_mut_doc_free(d);}}m->next_source_rate_us=now+50000;}
+    if(naki_job_config(j)->source_rate_limit&&now>=m->next_source_rate_us){int64_t bps=pipeline_source_rate(p,now);for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++){Rendition *r=&m->slots[i];if(r->pid&&!naki_rl_failed(&r->life)&&!naki_rl_stopping(&r->life)){yyjson_mut_doc *d=ipc_message("rendition_source_rate");json_str(d,"rendition_instance",r->instance);json_int(d,"bps",bps);ipc_send(r->control,d);yyjson_mut_doc_free(d);}}m->next_source_rate_us=now+50000;}
     for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++) {
         Rendition *r=&m->slots[i];
-        if(r->remove_draining&&r->pid&&!r->eof_sent){NakiRenditionMessage eof={.kind=NAKI_RMSG_EOF,.rendition_generation=r->generation};strcpy(eof.session,naki_process_id());strcpy(eof.instance,r->instance);if(!naki_rendition_send(r->media,&eof))r->eof_sent=1;}
+        if(naki_rl_draining(&r->life)&&r->pid&&!r->eof_sent){NakiRenditionMessage eof={.kind=NAKI_RMSG_EOF,.rendition_generation=r->generation};strcpy(eof.session,naki_process_id());strcpy(eof.instance,r->instance);if(!naki_rendition_send(r->media,&eof))r->eof_sent=1;}
     }
     for(unsigned count=0;count<8&&m->command_count;count++) {
         unsigned at=m->command_head;Rendition *r=&m->slots[m->commands[at].slot];NakiOperationHandle op=m->commands[at].operation;int done=0;
-        if(m->finishing||naki_job_cancelled(j)||!r->pid||r->failed||r->generation!=m->commands[at].generation){naki_operations_transition(naki_job_operations(j),op,NAKI_OP_CANCELLED,1,0,"rendition unavailable before forwarding",now);done=1;}
+        if(m->finishing||naki_job_cancelled(j)||!r->pid||naki_rl_failed(&r->life)||r->generation!=m->commands[at].generation){naki_operations_transition(naki_job_operations(j),op,NAKI_OP_CANCELLED,1,0,"rendition unavailable before forwarding",now);done=1;}
         else {
             yyjson_mut_doc *message=ipc_message("rendition_update");json_str(message,"rendition_instance",r->instance);json_str(message,"origin_request_id",m->commands[at].origin);
             yyjson_val *request=yyjson_doc_get_root(m->commands[at].request);json_str(message,"operation_id",yyjson_get_str(yyjson_obj_get(request,"operation_id")));yyjson_mut_obj_add_val(message,yyjson_mut_doc_get_root(message),"update",yyjson_val_mut_copy(message,request));
@@ -146,45 +147,47 @@ int naki_rendition_control_tick(Pipeline *p) {
     automatic_restart(p,now);
     if(!m->transition.operation){return subscriptions(p);}
     Rendition *r=&m->slots[m->transition.slot];
-    if(!m->transition.started) {
-        m->transition.started=1;
+    if(m->transition.phase==NAKI_TOPOLOGY_RESERVED) {
+        if(naki_topology_advance(&m->transition.phase,m->transition.action==NAKI_RENDITION_RESTART?NAKI_TOPOLOGY_WAIT_EXIT:NAKI_TOPOLOGY_PREPARING)){abort();}
         if(m->transition.action==NAKI_RENDITION_ADD) {
-            r->spec=m->transition.spec;free(r->config_json);r->config_json=m->transition.config_json;m->transition.config_json=NULL;r->member=r->attached=0;r->removed=r->restarting=0;r->incarnations=0;
+            r->spec=m->transition.spec;free(r->config_json);r->config_json=m->transition.config_json;m->transition.config_json=NULL;if(naki_rl_reserve(&r->life,0))abort();r->incarnations=0;
             naki_job_remote_configure(r->job,&m->transition.config,0,r->spec.id);
             int ret=subscriptions(p);if(ret<0){if(!r->pid)naki_rendition_reaped(p,m->transition.slot);transition_fail(m,ret,"subscription union budget");return 0;}
             ret=naki_rendition_spawn(p,m->transition.slot);if(ret<0){if(!r->pid)naki_rendition_reaped(p,m->transition.slot);transition_fail(m,ret,"candidate spawn failed");return 0;}
         } else if(m->transition.action==NAKI_RENDITION_REMOVE) {
-            r->member=r->attached=0;r->removed=1;r->remove_operation=m->transition.operation;r->detach_identity=m->last_frame;
+            if(naki_rl_remove(&r->life)){abort();}
+            r->remove_operation=m->transition.operation;r->detach_identity=m->last_frame;
             naki_session_idle_outputs(&m->idle,members(m),now);m->effective_revision=m->transition.revision;
             if(r->pid)stop_child(r,1);else naki_rendition_reaped(p,m->transition.slot);
             transition_clear(m);return 0;
-        } else {r->attached=0;r->restarting=1;if(!m->transition.automatic)r->automatic_attempts=0;r->restart_at_us=0;if(r->pid)stop_child(r,0);}
+        } else {if(naki_rl_restart(&r->life))abort();if(!m->transition.automatic)r->automatic_attempts=0;r->restart_at_us=0;if(r->pid)stop_child(r,0);}
     }
-    if(m->transition.action==NAKI_RENDITION_RESTART&&!r->pid&&r->restarting){int ret=naki_rendition_spawn(p,m->transition.slot);r->restarting=0;if(ret<0){transition_fail(m,ret,"restart spawn failed");return 0;}}
+    if(m->transition.phase==NAKI_TOPOLOGY_WAIT_EXIT&&!r->pid){if(naki_topology_advance(&m->transition.phase,NAKI_TOPOLOGY_PREPARING)){abort();}int ret=naki_rendition_spawn(p,m->transition.slot);if(ret<0){transition_fail(m,ret,"restart spawn failed");return 0;}}
     if(now>=m->transition.deadline_us){naki_rendition_fail(r,-ETIMEDOUT,"candidate attach deadline");transition_fail(m,-ETIMEDOUT,"candidate attach deadline");return 0;}
-    if(r->restarting&&r->pid)return 0;
-    if(r->failed&&!r->restarting){transition_fail(m,-EIO,"candidate rendition failed before attach");return 0;}
-    if(r->prepared&&r->prepare_source_generation!=m->source_generation){naki_rendition_fail(r,-ESTALE,"source format changed during prepare");transition_fail(m,-ESTALE,"source_format_generation changed during prepare");return 0;}
-    if(r->prepared){naki_operations_transition(naki_job_operations(j),m->transition.operation,NAKI_OP_PREPARED,0,0,NULL,now);}
+    if(m->transition.phase==NAKI_TOPOLOGY_WAIT_EXIT)return 0;
+    if(naki_rl_failed(&r->life)||!r->pid||naki_rl_finished(&r->life)){transition_fail(m,-EIO,"candidate rendition failed or exited before attach");return 0;}
+    if(naki_rl_prepared(&r->life)&&r->prepare_source_generation!=m->source_generation){naki_rendition_fail(r,-ESTALE,"source format changed during prepare");transition_fail(m,-ESTALE,"source_format_generation changed during prepare");return 0;}
+    if(naki_rl_prepared(&r->life)){int ret=naki_operations_transition(naki_job_operations(j),m->transition.operation,NAKI_OP_PREPARED,0,0,NULL,now);if(ret<0){transition_fail(m,ret,"candidate prepared checkpoint failed");return 0;}if(naki_topology_advance(&m->transition.phase,NAKI_TOPOLOGY_WAIT_FRAME)){abort();}}
     return 0;
 }
 int naki_rendition_attach(Pipeline *p,AVFrame *frame) {
     NakiRenditions *m=naki_job_renditions(p->job);
     /* An HTTP/control-thread reservation is not an owner-prepared attachment.
      * In particular a pending remove still names a live, prepared old holder. */
-    if(!m->transition.operation||!m->transition.started||
+    if(!m->transition.operation||m->transition.phase!=NAKI_TOPOLOGY_WAIT_FRAME||
        (m->transition.action!=NAKI_RENDITION_ADD&&m->transition.action!=NAKI_RENDITION_RESTART)||
        m->finishing||naki_job_cancelled(p->job))return 0;
     Rendition *r=&m->slots[m->transition.slot];
-    if(!r->pid||!r->prepared||r->failed||r->stopping)return 0;
+    if(!r->pid||!naki_rl_prepared(&r->life)||naki_rl_finished(&r->life)||naki_rl_failed(&r->life)||naki_rl_stopping(&r->life))return 0;
     if(r->prepare_source_generation!=m->source_generation)return 0;
     const Stamp *source=(const Stamp *)frame->opaque_ref->data;
     if(source->subscription_generation<r->required_subscription_generation||!pipeline_reader_epoch_ready(p,r->required_subscription_generation))return 0;
-    if(naki_session_idle_outputs(&m->idle,members(m)+(r->member?0:1),now_us())<0){stop_child(r,0);transition_fail(m,-ESHUTDOWN,"idle deadline reached before attachment");return 0;}
+    if(naki_session_idle_outputs(&m->idle,members(m)+(naki_rl_member(&r->life)?0:1),now_us())<0){stop_child(r,0);transition_fail(m,-ESHUTDOWN,"idle deadline reached before attachment");return 0;}
     Stamp *s=(Stamp *)frame->opaque_ref->data;r->attach_identity=pipeline_frame_identity(p,s,0,(AVRational){0,1});
-    naki_operations_transition(naki_job_operations(p->job),m->transition.operation,NAKI_OP_APPLYING,1,0,NULL,now_us());
-    int ret=naki_operations_applied(naki_job_operations(p->job),m->transition.operation,&r->attach_identity,1,now_us());if(ret<0)return ret;
-    r->member=r->attached=1;r->attach_operation=m->transition.operation;m->effective_revision=m->transition.revision;transition_clear(m);return 0;
+    int ret=naki_operations_transition(naki_job_operations(p->job),m->transition.operation,NAKI_OP_APPLYING,1,0,NULL,now_us());if(ret<0)return ret;
+    ret=naki_operations_applied(naki_job_operations(p->job),m->transition.operation,&r->attach_identity,1,now_us());if(ret<0)return ret;
+    if(naki_rl_attach(&r->life,r->generation)){abort();}
+    r->attach_operation=m->transition.operation;m->effective_revision=m->transition.revision;transition_clear(m);return 0;
 }
 void naki_rendition_publish(Pipeline *p) {
     NakiRenditions *m=naki_job_renditions(p->job);Job *j=p->job;NakiPoolStats video={0},audio={0};naki_pool_stats(m->video,&video);naki_pool_stats(m->audio,&audio);
@@ -230,7 +233,7 @@ yyjson_mut_doc *naki_renditions_snapshot(Job *job,const char *output) {
     pthread_mutex_lock(&m->mutex);
     for(unsigned i=0;i<NAKI_OUTPUT_MAX;i++){
         Rendition *r=&m->slots[i];if(strcmp(r->spec.id,output))continue;
-        NakiRenditionView view={.pid=r->pid,.attached=r->attached,.member=r->member,.generation=r->generation,
+        NakiRenditionView view={.pid=r->pid,.attached=naki_rl_attached(&r->life),.member=naki_rl_member(&r->life),.generation=r->generation,
             .source_generation=m->source_generation,.prepared_source_generation=r->prepare_source_generation,
             .session=naki_process_id(),.instance=r->instance};
         d=naki_job_remote_detail(r->job,&view);break;

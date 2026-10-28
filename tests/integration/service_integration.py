@@ -64,6 +64,19 @@ def run():
         config_file.write_text(json.dumps(config))
         subprocess.run([str(BIN / "naki-live-ctl"), "--url", BASE, "start", str(config_file)],
                         check=True, capture_output=True)
+        # 202 proves worker acceptance. Operation-history reconciliation can
+        # still gate unrelated admission with 503, especially under ASan.
+        # Assert busy/409 only after the explicit controller readiness boundary;
+        # never relax the service's recovery gate or retry a failed 409 check.
+        deadline = time.monotonic() + 2
+        while True:
+            health = http("/health")
+            if health["readiness"]["ready"]:
+                assert health["admission"]["reason"] == "busy", health
+                break
+            assert health["readiness"]["reason"] == "worker_reconciliation_pending", health
+            assert time.monotonic() < deadline, health
+            time.sleep(0.005)
         http(data=config, code=409)
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(lambda _: http("/health"), range(24)))

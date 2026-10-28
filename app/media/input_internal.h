@@ -30,6 +30,13 @@ int pipeline_decode_init(Pipeline *p);
 void pipeline_decode_join(Pipeline *p);
 void pipeline_decode_destroy(Pipeline *p);
 void pipeline_refresh_auto(Pipeline *p);
+void pipeline_reader_init(struct Pipeline *p);
+void pipeline_reader_join(struct Pipeline *p);
+void pipeline_reader_clear(struct Pipeline *p);
+void pipeline_reader_destroy(struct Pipeline *p);
+int pipeline_reader_sei_obligation(struct Pipeline *p,int64_t sequence,int add);
+void pipeline_decode_notify(void *opaque);
+int pipeline_decode_receive(Pipeline *p,AVFrame *frame,InputItem *audio);
 struct NakiInput {
     AVFormatContext *input;
     AVCodecContext *decoder;

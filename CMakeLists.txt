@@ -52,7 +52,7 @@ add_library(naki-media-input STATIC app/media/pipeline_input.c app/media/pipelin
 add_library(naki-media-video STATIC app/media/pipeline_video.c app/media/pipeline_encode.c)
 add_library(naki-media-output STATIC app/media/pipeline_output.c app/media/pipeline_mux.c app/media/pipeline_audio.c)
 set(NAKI_WORKER_SOURCES
-    app/worker/worker.c app/media/rendition_runtime.c app/media/rendition_control.c app/media/rendition_child.c app/media/rendition_media.c app/media/destination_runtime.c
+    app/worker/worker.c app/media/rendition_runtime.c app/media/rendition_control.c app/media/rendition_child.c app/media/rendition_media.c app/media/destination_runtime.c app/media/rendition_lifecycle.c app/media/destination_lifecycle.c
     app/media/frame_wire.c app/media/audio_wire.c app/media/shared_frame_pool.c app/media/rendition_message.c app/media/session_idle.c app/platform/rendition_guard.c
     app/media/watermark.c app/media/video_filter.c app/media/branch_queue.c app/platform/ipc.c
     app/media/input_probe.c app/media/audio_signature.c app/media/sei.c ${NAKI_PIPELINE_SOURCES}
@@ -92,6 +92,13 @@ target_compile_options(naki-live-ctl PRIVATE -Wall -Wextra -Wpedantic)
 target_link_libraries(naki-live-ctl PRIVATE PkgConfig::CURL yyjson)
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(naki-media-lifecycle-test tests/unit/media_lifecycle_test.c app/media/rendition_lifecycle.c app/media/destination_lifecycle.c)
+    target_include_directories(naki-media-lifecycle-test PRIVATE app)
+    target_compile_definitions(naki-media-lifecycle-test PRIVATE _GNU_SOURCE)
+    target_compile_options(naki-media-lifecycle-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
+    target_link_libraries(naki-media-lifecycle-test PRIVATE Threads::Threads)
+    add_test(NAME media-lifecycle COMMAND naki-media-lifecycle-test)
+    set_tests_properties(media-lifecycle PROPERTIES LABELS "native;quick" TIMEOUT 30)
     add_executable(naki-job-media-test tests/unit/job_media_test.c app/worker/job.c app/worker/job_media.c app/worker/job_remote.c app/observability/metrics.c app/platform/runtime.c app/media/watermark.c app/observability/logger.c app/crash/crash_client.c)
     target_include_directories(naki-job-media-test PRIVATE app)
     target_compile_options(naki-job-media-test PRIVATE -UNDEBUG -Wall -Wextra -Werror -ffunction-sections -fdata-sections)
@@ -118,7 +125,7 @@ if(BUILD_TESTING)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:naki-live> "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rendition-faults/naki-live"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:naki-crash-collector> "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rendition-faults/naki-crash-collector")
     add_executable(naki-session-config-test tests/unit/session_config_test.c)
-    add_executable(naki-destination-runtime-test tests/unit/destination_runtime_test.c app/media/encoded_description.c app/worker/job_media.c app/platform/runtime.c)
+    add_executable(naki-destination-runtime-test tests/unit/destination_runtime_test.c app/media/destination_lifecycle.c app/media/encoded_description.c app/worker/job_media.c app/platform/runtime.c)
     target_include_directories(naki-destination-runtime-test PRIVATE app)
     target_compile_options(naki-destination-runtime-test PRIVATE -UNDEBUG -Wall -Wextra -Werror -ffunction-sections -fdata-sections)
     target_link_options(naki-destination-runtime-test PRIVATE -Wl,--gc-sections)
@@ -144,7 +151,7 @@ if(BUILD_TESTING)
     set_target_properties(naki-frame-wire-test PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
     add_test(NAME frame-wire COMMAND naki-frame-wire-test)
     set_tests_properties(frame-wire PROPERTIES LABELS "native;quick" TIMEOUT 30)
-    add_executable(naki-rendition-attach-test tests/unit/rendition_attach_test.c app/worker/job_media.c app/media/rendition_control.c app/media/session_idle.c app/platform/ipc.c app/platform/runtime.c)
+    add_executable(naki-rendition-attach-test tests/unit/rendition_attach_test.c app/media/rendition_lifecycle.c app/worker/job_media.c app/media/rendition_control.c app/media/session_idle.c app/platform/ipc.c app/platform/runtime.c)
     target_include_directories(naki-rendition-attach-test PRIVATE app)
     target_compile_options(naki-rendition-attach-test PRIVATE -UNDEBUG -Wall -Wextra -Werror -ffunction-sections -fdata-sections)
     target_link_options(naki-rendition-attach-test PRIVATE -Wl,--gc-sections)

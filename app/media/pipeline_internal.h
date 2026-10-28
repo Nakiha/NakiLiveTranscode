@@ -93,9 +93,7 @@ int64_t pipeline_video_api_us(const Pipeline *p);
 void pipeline_video_close(Pipeline *p);
 void pipeline_video_release(Pipeline *p);
 int pipeline_mux_format(Pipeline *p,int *global_header);
-void pipeline_decode_notify(void *opaque);
 int pipeline_decode_start(Pipeline *p);
-int pipeline_decode_receive(Pipeline *p,AVFrame *frame,InputItem *audio);
 int pipeline_prepare_decoded_frame(Pipeline *p,AVFrame *frame);
 /* pipeline.c */
 int pipeline_process_frame(Pipeline *p,AVFrame *frame);

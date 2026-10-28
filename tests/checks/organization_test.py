@@ -41,6 +41,13 @@ class Organization(unittest.TestCase):
             ('media/illegal.c', 'struct Job { int secret; };', 'representation is private'),
             ('media/illegal.c', 'void f(void){naki_job_frame_written(0,0);}', 'unauthorized Job publisher'),
             ('media/illegal.c', 'void f(void){naki_job_child_free(0);}', 'unauthorized Job publisher'),
+            ('media/illegal.c', 'void f(void){naki_rl_reaped(0,1);}', 'unauthorized owner event'),
+            ('media/illegal.c', 'void f(void){naki_writer_finish(0);}', 'unauthorized owner event'),
+            ('media/illegal.c', 'void f(void){naki_topology_advance(0,1);}', 'unauthorized owner event'),
+            ('media/illegal.c', 'void f(void){pipeline_input_destroy(0);}', 'unauthorized owner event'),
+            ('media/illegal.c', 'void f(void){pipeline_reader_destroy(0);}', 'unauthorized owner event'),
+            ('media/illegal.c', 'void f(void){x._private_writer=0;}', 'private lifecycle storage'),
+            ('media/pipeline_internal.h', 'typedef struct Pipeline { AVCodecContext *encoder; } Pipeline;', 'orchestration may only hold opaque'),
         ]
         for name, source, expected in cases:
             with self.subTest(name=name, expected=expected), tempfile.TemporaryDirectory() as directory:
@@ -64,6 +71,8 @@ class Organization(unittest.TestCase):
             self.assertEqual(architecture_guard.check(root), [])
             (root / 'CMakeLists.txt').write_text('target_link_libraries(naki-control PUBLIC PkgConfig::FFMPEG)')
             self.assertTrue(any('links media SDK' in e for e in architecture_guard.check(root)))
+            (root / 'CMakeLists.txt').write_text('add_executable(naki-live-worker main.c)')
+            self.assertTrue(any('component source ownership' in e for e in architecture_guard.check(root)))
 
     def test_all_control_sources_compile_without_media_sdk(self):
         subprocess.run(['cc', '-std=c11', '-Werror', '-fsyntax-only',
@@ -107,7 +116,7 @@ class Organization(unittest.TestCase):
 
     def test_config_and_metrics_headers_need_no_native_sdk(self):
         # No pkg-config or SDK include paths: these contracts are plain C/yyjson.
-        code = '#include "control/config.h"\n#include "observability/metrics.h"\nint main(void){Config c={0};Metric m={0};return c.output_count+(int)m.count;}\n'
+        code = '#include "control/config.h"\n#include "observability/metrics.h"\n#include "media/rendition_lifecycle.h"\n#include "media/destination_lifecycle.h"\nint main(void){Config c={0};Metric m={0};return c.output_count+(int)m.count;}\n'
         subprocess.run(['cc', '-std=c11', '-Werror', '-fsyntax-only', '-x', 'c',
                         '-I' + str(ROOT / 'app'), '-I' + str(ROOT / 'third_party/yyjson/src'), '-'],
                        input=code, text=True, capture_output=True, check=True)

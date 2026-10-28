@@ -5,7 +5,19 @@
 #include "rendition_media.h"
 #include "frame_wire.h"
 #include "audio_wire.h"
-#include "pipeline_internal.h"
+#include "platform/runtime.h"
+#include "worker/frame_policy_runtime.h"
+#include "watermark.h"
+#include "destination_runtime.h"
+#include "control/resource_limits.h"
+#include "crash/crash.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <libavutil/mem.h>
 #include "platform/ipc.h"
 #include "platform/rendition_guard.h"
 #include "control/identity.h"
@@ -20,7 +32,7 @@
  * the parent stops reading. No pixel destructor waits on socket or logger. */
 typedef struct Child {
     Job *job;
-    Pipeline *media;
+    struct Pipeline *media;
     NakiPoolView video,audio;
     char session[33],instance[33];
     uint64_t generation,source_generation,inflight_limit;
@@ -191,7 +203,7 @@ cleanup:
     if(result&&!media_started){yyjson_mut_doc *failed=ipc_message("rendition_ready");if(failed){json_str(failed,"rendition_instance",c.instance);json_int(failed,"error",-EINVAL);json_str(failed,"error_reason",*c.failure_reason?c.failure_reason:failure_stage);(void)ipc_send(c.control_fd,failed);yyjson_mut_doc_free(failed);}}
     /* All codec/filter/logger holders and read-only views are gone before a
      * local backend publishes completion. A hung thread stays quarantined. */
-    if(media_started){request_stop(c.job);pthread_join(media,NULL);}
+    if(media_started){request_stop(c.job);if(pthread_join(media,NULL)){abort();}}
     if(boot)yyjson_doc_free(boot);
     if(operation_reply)yyjson_mut_doc_free(operation_reply);
     naki_job_child_free(&c.job);

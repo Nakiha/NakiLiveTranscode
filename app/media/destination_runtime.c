@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "destination_runtime.h"
+#include "destination_lifecycle.h"
 #include "worker/job_remote.h"
 #include "pipeline_internal.h"
 #include "control/identity.h"
@@ -14,10 +15,10 @@ typedef struct Delivery {AVPacket *packet;InputItem audio;uint64_t bytes;int64_t
 typedef struct Destination {
     struct NakiDestinations *owner;
     char id[33];Pipeline *mux;Job *private_job;
-    pthread_t thread;atomic_int ready,done,stop,failed;
+    pthread_t thread;NakiWriterLife writer;NakiDestinationLife life;
     pthread_mutex_t mutex;
     Delivery queue[PACKETS];unsigned head,count;uint64_t bytes;
-    int started,active,removed;atomic_int exit_error;
+    atomic_int exit_error;
     uint64_t generation,written,audio_written,bytes_written;
     int64_t first_pts_us,first_written_us,last_written_us,attach_deadline_us,last_video_pts,last_video_dts;int have_video_clock;
     Metric latency;
@@ -75,17 +76,17 @@ int naki_destinations_validate(const Config *cfg,const NakiUpdateRequest *u,char
 }
 static void delivery_free(Delivery *x){av_packet_free(&x->packet);pipeline_input_free(&x->audio);memset(x,0,sizeof(*x));}
 static void failed(Destination *d,int error){
-    atomic_store(&d->failed,1);atomic_store(&d->stop,1);atomic_store(&d->exit_error,error);
+    atomic_store(&d->exit_error,error);naki_writer_fail(&d->writer);
     pipeline_mux_cancel(d->mux);
 }
 static void *writer(void *opaque){
     Destination *d=opaque;Pipeline *p=d->mux;(void)crash_thread_init();int ret=d->private_job?pipeline_open_mux(p):0;
-    if(ret<0){failed(d,ret);atomic_store(&d->ready,-1);}else atomic_store(&d->ready,1);
+    if(ret<0)failed(d,ret);else (void)naki_writer_ready(&d->writer);
     while(ret>=0){
         Delivery item={0};pthread_mutex_lock(&d->mutex);
         if(d->count){item=d->queue[d->head];memset(&d->queue[d->head],0,sizeof(item));d->head=(d->head+1)%PACKETS;d->count--;d->bytes-=item.bytes;}
-        int stop=atomic_load(&d->stop);pthread_mutex_unlock(&d->mutex);
-        if(atomic_load(&d->failed)){delivery_free(&item);break;}
+        int stop=naki_writer_stopping(&d->writer);pthread_mutex_unlock(&d->mutex);
+        if(naki_writer_failed(&d->writer)){delivery_free(&item);break;}
         if(item.packet||item.audio.packet){
             if(now_us()-item.ingress>10000000){delivery_free(&item);ret=AVERROR(ETIMEDOUT);break;}
             if(item.packet){av_packet_rescale_ts(item.packet,d->owner->encoder->video.time_base,p->video.time_base);item.packet->stream_index=p->video.index;
@@ -101,17 +102,17 @@ static void *writer(void *opaque){
         if(ret>=0&&pipeline_mux_live(p))ret=pipeline_flush_deferred_audio(p);
         if(ret>=0&&pipeline_mux_live(p))ret=pipeline_drain_mux(p,0);
     }
-    if(ret>=0&&!atomic_load(&d->failed)){ret=pipeline_flush_deferred_audio(p);if(ret>=0)ret=pipeline_drain_mux(p,1);}
+    if(ret>=0&&!naki_writer_failed(&d->writer)){ret=pipeline_flush_deferred_audio(p);if(ret>=0)ret=pipeline_drain_mux(p,1);}
     if(ret<0)failed(d,ret);
-    ret=pipeline_finalize_output(p,ret,atomic_load(&d->failed));
-    if(ret<0&&!atomic_load(&d->failed))failed(d,ret);
+    ret=pipeline_finalize_output(p,ret,naki_writer_failed(&d->writer));
+    if(ret<0&&!naki_writer_failed(&d->writer))failed(d,ret);
     uint64_t final_bytes=naki_job_bytes(p->job);
     pthread_mutex_lock(&d->owner->mutex);d->bytes_written=final_bytes;pthread_mutex_unlock(&d->owner->mutex);
     /* Cancellation can still arrive until join. Retire payload references now,
      * but keep the immutable mux pointer/atomic interrupt storage alive. */
     pipeline_mux_retire_audio(p);
     pthread_mutex_lock(&d->mutex);while(d->count){delivery_free(&d->queue[d->head]);d->head=(d->head+1)%PACKETS;d->count--;}d->bytes=0;pthread_mutex_unlock(&d->mutex);
-    atomic_store(&d->done,1);return NULL;
+    naki_writer_finish(&d->writer);return NULL;
 }
 static Pipeline *mux_new(NakiDestinations *m,Destination *d,Job *job){
     Pipeline *p=calloc(1,sizeof(*p));if(!p)return NULL;Pipeline *source=m->encoder;
@@ -132,20 +133,20 @@ int naki_destinations_open(Pipeline *p){
 static int activate(NakiDestinations *m){
     if(m->activated)return 0;
     Pipeline *source=m->encoder;Destination *d=&m->slots[0];strcpy(d->id,"primary");
-    d->generation=++m->next_generation;d->active=1;d->mux=mux_new(m,d,source->job);if(!d->mux)return -ENOMEM;
+    d->generation=++m->next_generation;if(naki_dl_reserve(&d->life,1))abort();naki_writer_init(&d->writer);d->mux=mux_new(m,d,source->job);if(!d->mux){if(naki_dl_clear(&d->life))abort();d->id[0]=0;return -ENOMEM;}
     NakiDestinationBaseline baseline;naki_job_destination_baseline(source->job,&baseline);
     d->written=baseline.packets;d->audio_written=baseline.audio;d->first_written_us=baseline.first_us;d->last_written_us=baseline.last_us;d->latency=baseline.latency;
     d->bytes_written=pipeline_mux_bytes(source);
     Pipeline *p=d->mux;
     int ret=pipeline_mux_move(source,p);
     if(ret>=0){
-        atomic_store(&d->ready,1); /* Preserve the existing primary's next packet. */
+        (void)naki_writer_ready(&d->writer); /* Preserve the existing primary's next packet. */
         ret=pthread_create(&d->thread,NULL,writer,d);if(ret)ret=-ret;
     }
     if(ret<0){/* No writer exists: return the same object, including callbacks. */
         if(p->mux&&pipeline_mux_move(p,source)<0)abort();
-        naki_encoded_unref(&p->encoded);free(p);d->mux=NULL;atomic_store(&d->ready,0);return ret;}
-    d->started=1;
+        naki_encoded_unref(&p->encoded);free(p);d->mux=NULL;if(naki_dl_clear(&d->life))abort();d->id[0]=0;return ret;}
+    if(naki_dl_started(&d->life))abort();
     m->activated=1;return 0;
 }
 int naki_destinations_submit(Pipeline *p,const NakiUpdateRequest *u,const char *origin,yyjson_mut_doc **result,char *error,size_t cap){
@@ -177,7 +178,7 @@ static void command_apply(NakiDestinations *m,yyjson_val *request,NakiOperationH
     Destination *d=NULL;unsigned free_slot=DESTINATIONS;
     for(unsigned i=0;i<DESTINATIONS;i++){if(!strcmp(m->slots[i].id,id)&&*id)d=&m->slots[i];if(!*m->slots[i].id&&free_slot==DESTINATIONS)free_slot=i;}
     if(action==NAKI_DESTINATION_REMOVE){
-        if(!d||d->removed){ret=-ENOENT;goto fail;}d->active=0;d->removed=1;d->remove_operation=operation;atomic_store(&d->stop,1);return;
+        if(!d||naki_dl_removed(&d->life)){ret=-ENOENT;goto fail;}if(naki_dl_remove(&d->life))abort();d->remove_operation=operation;naki_writer_stop(&d->writer);return;
     }
     if(d){ret=-EEXIST;goto fail;}if(free_slot==DESTINATIONS){ret=-ENOSPC;goto fail;}
     yyjson_val *spec=yyjson_obj_get(request,"spec");const char *output=yyjson_get_str(yyjson_obj_get(spec,"output")),*format=yyjson_get_str(yyjson_obj_get(spec,"output_format"));
@@ -186,9 +187,12 @@ static void command_apply(NakiDestinations *m,yyjson_val *request,NakiOperationH
     d=&m->slots[free_slot];d->private_job=naki_job_destination_new(p->job,output,format);if(!d->private_job){ret=-ENOMEM;goto fail;}
     Job *j=d->private_job;
     d->mux=mux_new(m,d,j);if(!d->mux){naki_job_destination_free(&d->private_job);ret=-ENOMEM;goto fail;}
+    if(naki_dl_reserve(&d->life,0)){abort();}
+    naki_writer_init(&d->writer);
     strcpy(d->id,id);d->generation=++m->next_generation;d->add_operation=operation;d->first_pts_us=INT64_MIN;d->attach_deadline_us=now_us()+10000000;
-    ret=pthread_create(&d->thread,NULL,writer,d);if(ret){ret=-ret;pipeline_mux_release(d->mux);naki_encoded_unref(&d->mux->encoded);free(d->mux);d->mux=NULL;naki_job_destination_free(&d->private_job);d->id[0]=0;goto fail;}
-    d->started=1;return;
+    ret=pthread_create(&d->thread,NULL,writer,d);if(ret){ret=-ret;pipeline_mux_release(d->mux);naki_encoded_unref(&d->mux->encoded);free(d->mux);d->mux=NULL;naki_job_destination_free(&d->private_job);d->id[0]=0;if(naki_dl_clear(&d->life))abort();goto fail;}
+    if(naki_dl_started(&d->life)){abort();}
+    return;
 fail:naki_operations_transition(ops,operation,NAKI_OP_FAILED,1,ret,"destination transition rejected",now_us());
 }
 static void status(NakiDestinations *m){
@@ -196,7 +200,7 @@ static void status(NakiDestinations *m){
     if(!m->activated){yyjson_mut_val *v=yyjson_mut_obj(doc);yyjson_mut_obj_add_str(doc,v,"destination_id","primary");yyjson_mut_obj_add_str(doc,v,"state","active");yyjson_mut_arr_add_val(list,v);}
     else for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(!*d->id)continue;yyjson_mut_val *v=yyjson_mut_obj(doc);
         yyjson_mut_obj_add_strcpy(doc,v,"destination_id",d->id);yyjson_mut_obj_add_uint(doc,v,"destination_generation",d->generation);
-        yyjson_mut_obj_add_str(doc,v,"state",atomic_load(&d->failed)?"failed":d->removed?"removed":atomic_load(&d->done)?"completed":d->active?"active":atomic_load(&d->ready)>0?"waiting_for_rap":"preparing");
+        yyjson_mut_obj_add_str(doc,v,"state",naki_writer_failed(&d->writer)?"failed":naki_dl_removed(&d->life)?"removed":naki_writer_done(&d->writer)?"completed":naki_dl_active(&d->life)?"active":naki_writer_is_ready(&d->writer)?"waiting_for_rap":"preparing");
         yyjson_mut_obj_add_real(doc,v,"ingress_to_mux_mean_ms",d->latency.count?d->latency.sum_ms/d->latency.count:0);yyjson_mut_obj_add_real(doc,v,"ingress_to_mux_max_ms",d->latency.max_ms);
         yyjson_mut_obj_add_uint(doc,v,"packets_written",d->written);yyjson_mut_obj_add_uint(doc,v,"audio_packets_written",d->audio_written);yyjson_mut_obj_add_uint(doc,v,"bytes_written",d->bytes_written);yyjson_mut_obj_add_sint(doc,v,"first_written_us",d->first_written_us);yyjson_mut_obj_add_sint(doc,v,"last_written_us",d->last_written_us);yyjson_mut_obj_add_int(doc,v,"error_code",atomic_load(&d->exit_error));
         pthread_mutex_lock(&d->mutex);yyjson_mut_obj_add_uint(doc,v,"queue_packets",d->count);yyjson_mut_obj_add_uint(doc,v,"queue_bytes",d->bytes);pthread_mutex_unlock(&d->mutex);
@@ -208,14 +212,13 @@ int naki_destinations_poll(Pipeline *p){
     NakiDestinations *m=p->destinations;if(!m)return 0;pthread_mutex_lock(&m->mutex);
     for(unsigned i=0;i<8&&m->count;i++){unsigned at=m->head;command_apply(m,yyjson_doc_get_root(m->commands[at].request),m->commands[at].operation);yyjson_doc_free(m->commands[at].request);m->commands[at].request=NULL;m->head=(at+1)%8;m->count--;}
     for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];
-        if(d->add_operation&&!d->active&&now_us()>=d->attach_deadline_us)failed(d,-ETIMEDOUT);
-        if(d->add_operation&&atomic_load(&d->failed)&&!d->active){naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_FAILED,1,atomic_load(&d->exit_error),"destination failed before RAP admission",now_us());d->add_operation=0;}
-        if(d->add_operation&&atomic_load(&d->done)){naki_operations_holder_exited(naki_job_operations(p->job),d->add_operation,now_us());d->add_operation=0;}
-        if(d->add_operation&&atomic_load(&d->ready)<0){naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_FAILED,1,atomic_load(&d->exit_error),"destination open failed",now_us());d->add_operation=0;}
-        else if(d->add_operation&&atomic_load(&d->ready)>0&&!d->active){int ret=naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_PREPARED,0,0,NULL,now_us());if(ret<0)failed(d,ret);}
-        if(d->remove_operation&&atomic_load(&d->done)){naki_operations_transition(naki_job_operations(p->job),d->remove_operation,NAKI_OP_PREPARED,0,0,NULL,now_us());naki_operations_transition(naki_job_operations(p->job),d->remove_operation,NAKI_OP_APPLYING,1,0,NULL,now_us());NakiFrameIdentity empty={0};naki_operations_applied(naki_job_operations(p->job),d->remove_operation,&empty,0,now_us());naki_operations_retire(naki_job_operations(p->job),d->remove_operation,now_us());d->remove_operation=0;
+        if(d->add_operation&&!naki_dl_active(&d->life)&&now_us()>=d->attach_deadline_us)failed(d,-ETIMEDOUT);
+        if(d->add_operation&&naki_writer_failed(&d->writer)&&!naki_dl_active(&d->life)){naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_FAILED,1,atomic_load(&d->exit_error),"destination failed before RAP admission",now_us());d->add_operation=0;}
+        if(d->add_operation&&naki_writer_done(&d->writer)){naki_operations_holder_exited(naki_job_operations(p->job),d->add_operation,now_us());d->add_operation=0;}
+        if(d->add_operation&&naki_writer_is_ready(&d->writer)&&!naki_dl_active(&d->life)&&!naki_dl_removed(&d->life)){int ret=naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_PREPARED,0,0,NULL,now_us());if(ret>=0)ret=naki_dl_ready(&d->life,&d->writer);if(ret<0)failed(d,ret);}
+        if(d->remove_operation&&naki_writer_done(&d->writer)){naki_operations_transition(naki_job_operations(p->job),d->remove_operation,NAKI_OP_PREPARED,0,0,NULL,now_us());naki_operations_transition(naki_job_operations(p->job),d->remove_operation,NAKI_OP_APPLYING,1,0,NULL,now_us());NakiFrameIdentity empty={0};naki_operations_applied(naki_job_operations(p->job),d->remove_operation,&empty,0,now_us());naki_operations_retire(naki_job_operations(p->job),d->remove_operation,now_us());d->remove_operation=0;
             /* Only a joined writer releases its ID/budget for a new generation. */
-            pthread_join(d->thread,NULL);pipeline_mux_release(d->mux);naki_encoded_unref(&d->mux->encoded);naki_job_destination_free(&d->private_job);free(d->mux);
+            if(pthread_join(d->thread,NULL)){abort();}if(naki_dl_joined(&d->life))abort();pipeline_mux_release(d->mux);naki_encoded_unref(&d->mux->encoded);naki_job_destination_free(&d->private_job);free(d->mux);
             pthread_mutex_destroy(&d->mutex);memset(d,0,sizeof(*d));d->owner=m;pthread_mutex_init(&d->mutex,NULL);
         }
     }
@@ -224,7 +227,7 @@ int naki_destinations_poll(Pipeline *p){
 }
 static int enqueue(Destination *d,Delivery *item){
     pthread_mutex_lock(&d->mutex);int ret=0;
-    if(atomic_load(&d->failed)||atomic_load(&d->stop))ret=-EPIPE;
+    if(naki_writer_failed(&d->writer)||naki_writer_stopping(&d->writer))ret=-EPIPE;
     else if(d->count==PACKETS||item->bytes>DEST_BYTES-d->bytes)ret=-ENOBUFS;
     else {d->queue[(d->head+d->count++)%PACKETS]=*item;d->bytes+=item->bytes;memset(item,0,sizeof(*item));}
     pthread_mutex_unlock(&d->mutex);if(ret)failed(d,ret);return ret;
@@ -241,17 +244,19 @@ int naki_destinations_packet(Pipeline *p,AVPacket *packet){
         if(!rap){naki_operations_transition(naki_job_operations(p->job),m->rap_operation,NAKI_OP_FAILED,1,-EPROTO,"encoder did not return a verified IDR",now_us());m->rap_operation=0;}
         else {naki_operations_applied(naki_job_operations(p->job),m->rap_operation,&identity,1,now_us());}
     }
-    for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(!d->started||d->removed||atomic_load(&d->failed)||atomic_load(&d->done)||atomic_load(&d->ready)<=0)continue;
-        if(!d->active&&!rap)continue;
+    for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(!naki_dl_live(&d->life)||naki_dl_removed(&d->life)||naki_writer_failed(&d->writer)||naki_writer_done(&d->writer)||!naki_writer_is_ready(&d->writer))continue;
+        if(!naki_dl_active(&d->life)&&!rap)continue;
         Delivery x={.packet=av_packet_clone(packet),.bytes=packet->size,.ingress=meta->stamp.ingress_us};if(!x.packet){failed(d,-ENOMEM);continue;}
-        if(!d->active){
+        if(!naki_dl_active(&d->life)){
+            int ready=naki_dl_ready(&d->life,&d->writer);if(ready<0){failed(d,ready);delivery_free(&x);continue;}
             /* ready may have changed since the last owner poll. Commit the
              * prepared checkpoint before admitting the first IDR. */
             int ret=naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_PREPARED,0,0,NULL,now_us());
             if(!ret)ret=naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_APPLYING,1,0,NULL,now_us());
             if(!ret)ret=naki_operations_applied(naki_job_operations(p->job),d->add_operation,&identity,1,now_us());
             if(ret<0){failed(d,ret);delivery_free(&x);continue;}
-            d->first_identity=identity;d->first_pts_us=meta->pts_us;d->active=1;}
+            int admitted=naki_dl_attach(&d->life,&d->writer,rap,1);if(admitted<0){failed(d,admitted);delivery_free(&x);continue;}
+            d->first_identity=identity;d->first_pts_us=meta->pts_us;}
         (void)enqueue(d,&x);delivery_free(&x);
     }
     pthread_mutex_unlock(&m->mutex);return 0;
@@ -261,7 +266,7 @@ int naki_destinations_audio(Pipeline *p,const InputItem *audio){
     AVPacket *owned=av_packet_clone(audio->packet);if(!owned)return -ENOMEM;
     int ret=av_packet_make_writable(owned);if(ret<0){av_packet_free(&owned);return ret;}
     pthread_mutex_lock(&m->mutex);
-    for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(!d->active||d->removed||atomic_load(&d->failed)||atomic_load(&d->done)||!naki_job_config(d->mux->job)->audio_copy||!strcmp(naki_job_config(d->mux->job)->output_format,"mp4"))continue;
+    for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(!naki_dl_active(&d->life)||naki_dl_removed(&d->life)||naki_writer_failed(&d->writer)||naki_writer_done(&d->writer)||!naki_job_config(d->mux->job)->audio_copy||!strcmp(naki_job_config(d->mux->job)->output_format,"mp4"))continue;
         int64_t pts=audio->packet->pts!=AV_NOPTS_VALUE?av_rescale_q(audio->packet->pts,audio->tb,AV_TIME_BASE_Q):INT64_MIN;
         if(d->private_job&&pts<d->first_pts_us)continue;
         Delivery x={.bytes=(uint64_t)owned->size+4096,.ingress=audio->demuxed_us};x.audio=*audio;x.audio.packet=av_packet_clone(owned);x.audio.params=avcodec_parameters_alloc();
@@ -301,9 +306,9 @@ int naki_destinations_close(Pipeline *p,int stopped){
     int inactive_error=0;if(!m->activated&&!stopped){inactive_error=pipeline_flush_deferred_audio(p);if(inactive_error>=0)inactive_error=pipeline_drain_mux(p,1);}
     pthread_mutex_lock(&m->mutex);m->closing=1;
     while(m->count){unsigned at=m->head;naki_operations_transition(naki_job_operations(p->job),m->commands[at].operation,NAKI_OP_CANCELLED,1,0,"rendition closing",now_us());yyjson_doc_free(m->commands[at].request);m->head=(at+1)%8;m->count--;}
-    for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(d->started){atomic_store(&d->stop,1);if(stopped)failed(d,AVERROR_EXIT);}}
+    for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(naki_dl_live(&d->life)){naki_writer_stop(&d->writer);if(stopped)failed(d,AVERROR_EXIT);}}
     pthread_mutex_unlock(&m->mutex);int success=0,desired=0;
-    for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(d->started){desired++;pthread_join(d->thread,NULL);success+=!atomic_load(&d->failed);if(d->add_operation){if(!d->active)naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_CANCELLED,1,0,"rendition closed before RAP admission",now_us());else naki_operations_holder_exited(naki_job_operations(p->job),d->add_operation,now_us());}
+    for(unsigned i=0;i<DESTINATIONS;i++){Destination *d=&m->slots[i];if(naki_dl_live(&d->life)){desired++;if(pthread_join(d->thread,NULL)){abort();}if(naki_dl_joined(&d->life))abort();success+=!naki_writer_failed(&d->writer);if(d->add_operation){if(!naki_dl_active(&d->life))naki_operations_transition(naki_job_operations(p->job),d->add_operation,NAKI_OP_CANCELLED,1,0,"rendition closed before RAP admission",now_us());else naki_operations_holder_exited(naki_job_operations(p->job),d->add_operation,now_us());}
         if(d->remove_operation){NakiFrameIdentity empty={0};naki_operations_transition(naki_job_operations(p->job),d->remove_operation,NAKI_OP_PREPARED,0,0,NULL,now_us());naki_operations_transition(naki_job_operations(p->job),d->remove_operation,NAKI_OP_APPLYING,1,0,NULL,now_us());naki_operations_applied(naki_job_operations(p->job),d->remove_operation,&empty,0,now_us());naki_operations_retire(naki_job_operations(p->job),d->remove_operation,now_us());}}}
     if(m->rap_operation){if(!m->rap_frame)naki_operations_transition(naki_job_operations(p->job),m->rap_operation,NAKI_OP_CANCELLED,1,0,"rendition closed before RAP frame",now_us());else naki_operations_holder_exited(naki_job_operations(p->job),m->rap_operation,now_us());}
     pthread_mutex_lock(&m->mutex);status(m);pthread_mutex_unlock(&m->mutex);

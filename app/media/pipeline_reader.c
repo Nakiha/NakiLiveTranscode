@@ -206,7 +206,7 @@ void pipeline_reader_wake(Pipeline *p) {
 }
 void pipeline_reader_join(Pipeline *p) {
     if(p->in->reader.started) {
-        pthread_join(p->in->reader.thread,NULL);
+        if(pthread_join(p->in->reader.thread,NULL)){abort();}
         p->in->reader.started=0;
     }
 }

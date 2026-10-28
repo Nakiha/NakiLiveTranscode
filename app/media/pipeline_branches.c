@@ -180,7 +180,7 @@ int pipeline_branches_finish(Pipeline *p,int aborting) {
     }
     int completed=0;
     for(int i=0;i<p->branches->count;i++) {
-        Branch *b=&p->branches->slots[i];if(b->started) {pthread_join(b->thread,NULL);b->started=0;}
+        Branch *b=&p->branches->slots[i];if(b->started) {if(pthread_join(b->thread,NULL)){abort();}b->started=0;}
         if((naki_job_state(b->pipeline.job)==NAKI_JOB_STATE_COMPLETED))completed++;
     }
     return completed?0:AVERROR(EPIPE);
