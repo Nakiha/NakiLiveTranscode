@@ -41,7 +41,6 @@ static int valid_frame(const NakiFrameIdentity *frame,int written) {
     return frame&&frame->frame_id&&frame->source_tb_num>0&&frame->source_tb_den>0&&
         frame->source_pts!=INT64_MIN&&frame->source_us!=INT64_MIN&&(!written||(frame->output_tb_num>0&&frame->output_tb_den>0));
 }
-size_t naki_operations_record_bytes(void) {return sizeof(Operation);}
 static int terminal(const Operation *record) {
     return record->state==NAKI_OP_FAILED||record->state==NAKI_OP_SUPERSEDED||record->state==NAKI_OP_CANCELLED||record->state==NAKI_OP_STOPPED||
         (record->state==NAKI_OP_APPLIED&&(record->delivery==DELIVERY_WRITTEN||record->delivery==DELIVERY_NOT_WRITTEN||record->delivery==DELIVERY_UNCERTAIN));
@@ -190,15 +189,6 @@ int naki_operations_written(NakiOperations *s,NakiOperationHandle id,const NakiF
 int naki_operations_retire(NakiOperations *s,NakiOperationHandle id,int64_t now) {
     pthread_mutex_lock(&s->mutex);Operation *r=get(s,id);int result=r?0:-ENOENT;
     if(r&&!r->retired) {r->retired=1;close_delivery(r,now);changed(s,r);}pthread_mutex_unlock(&s->mutex);return result;
-}
-void naki_operations_cancel_unclaimed(NakiOperations *s,int64_t now) {
-    pthread_mutex_lock(&s->mutex);
-    for(unsigned i=0;i<s->capacity;i++) {
-        Operation *r=&s->records[i];if(!r->used||(r->kind!=NAKI_OP_UPDATE&&r->kind!=NAKI_OP_TOPOLOGY))continue;
-        if(r->state==NAKI_OP_ACCEPTED||r->state==NAKI_OP_PREPARING||r->state==NAKI_OP_PREPARED) {r->state=NAKI_OP_CANCELLED;strcpy(r->reason,"job stopping before owner claim");}
-        r->retired=1;close_delivery(r,now);changed(s,r);
-    }
-    pthread_mutex_unlock(&s->mutex);
 }
 static yyjson_mut_val *frame_json(yyjson_mut_doc *d,const NakiFrameIdentity *f) {
     yyjson_mut_val *v=yyjson_mut_obj(d);yyjson_mut_obj_add_uint(d,v,"frame_id",f->frame_id);yyjson_mut_obj_add_sint(d,v,"source_pts",f->source_pts);

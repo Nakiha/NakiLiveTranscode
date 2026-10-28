@@ -15,6 +15,12 @@ int __wrap_av_frame_get_buffer(AVFrame *frame,int align) {
         atomic_fetch_add(&large_rgba_allocations,1);
     return __real_av_frame_get_buffer(frame,align);
 }
+static int submit(NakiWatermark *wm,const NakiWatermarkConfig *cfg,char *error,size_t cap) {
+    NakiUpdateRequest request;yyjson_mut_doc *answer=NULL;
+    int ret=naki_update_from_legacy(cfg,2,"render-test","main","update-2",&request,error,cap);
+    if(!ret)ret=naki_watermark_submit(wm,&request,"render-test",&answer,error,cap);
+    yyjson_mut_doc_free(answer);return ret;
+}
 int main(int argc,char **argv) {
     assert(argc==4||argc==5);assert(curl_global_init(CURL_GLOBAL_DEFAULT)==CURLE_OK);
     atomic_int cancel;atomic_init(&cancel,0);
@@ -27,13 +33,15 @@ int main(int argc,char **argv) {
     if(optional_setup)cfg.required=0;
     if(getenv("NAKI_WM_TEST_DEADLINE"))cfg.startup_timeout_ms=100;
     NakiWatermark *wm=naki_watermark_open(&cfg,av_gettime_relative(),&cancel);assert(wm);
+    NakiOperations *operations=naki_operations_open(2,1024*1024,1000);assert(operations);
+    assert(!naki_watermark_bind(wm,operations,"render-test","main","create-test",NULL));
     if(getenv("NAKI_WM_TEST_DEADLINE")) {
         av_usleep(150000);cfg.startup_timeout_ms=5000;char error[256];
-        assert(!naki_watermark_request(wm,&cfg,2,error,sizeof(error)));
+        assert(!submit(wm,&cfg,error,sizeof(error)));
     }
     int ret=naki_watermark_wait(wm);
     if(ret<0) {
-        fprintf(stderr,"asset prepare failed: %d\n",ret);naki_watermark_close(&wm);
+        fprintf(stderr,"asset prepare failed: %d\n",ret);naki_watermark_close(&wm);naki_operations_close(&operations);
         if(argc==5) {
             unsigned allocations=atomic_load(&large_rgba_allocations);
             fprintf(stderr,"large_rgba_allocations_before_budget_rejection=%u\n",allocations);
@@ -43,7 +51,7 @@ int main(int argc,char **argv) {
     }
     if(getenv("NAKI_WM_TEST_GATE_UPDATE")) {
         char error[256];strcpy(cfg.uri,"/nonexistent-watermark-test.png");
-        assert(!naki_watermark_request(wm,&cfg,2,error,sizeof(error)));
+        assert(!submit(wm,&cfg,error,sizeof(error)));
     }
     if(optional_setup) {
         int ready=0;
@@ -57,12 +65,14 @@ int main(int argc,char **argv) {
         assert(ready);NakiWatermarkCompositor *compositor=NULL;
         AVFrame *frame=av_frame_alloc();assert(frame);frame->format=AV_PIX_FMT_GRAY8;frame->width=32;frame->height=24;frame->pts=0;
         assert(av_frame_get_buffer(frame,32)>=0);memset(frame->data[0],42,(size_t)frame->linesize[0]*frame->height);
-        uint64_t revision=99;assert(!naki_watermark_frame(wm,&compositor,frame,AV_TIME_BASE_Q,0,&revision));
+        NakiFrameIdentity identity={.frame_id=1,.source_pts=0,.source_us=0,.source_tb_num=1,.source_tb_den=1000000};NakiOperationHandle lease=0;
+        uint64_t revision=99;assert(!naki_watermark_frame_tracked(wm,&compositor,frame,AV_TIME_BASE_Q,&identity,&revision,&lease));
+        assert(!naki_watermark_release_frame(wm,lease));
         assert(!compositor&&revision==0&&frame->data[0][0]==42);
         yyjson_mut_doc *doc=yyjson_mut_doc_new(NULL);yyjson_mut_doc_set_root(doc,yyjson_mut_obj(doc));naki_watermark_status(wm,doc);
         yyjson_mut_val *status=yyjson_mut_obj_get(yyjson_mut_doc_get_root(doc),"watermark");
         assert(yyjson_mut_get_uint(yyjson_mut_obj_get(status,"failed_revision"))==1);
-        yyjson_mut_doc_free(doc);av_frame_free(&frame);naki_watermark_close(&wm);curl_global_cleanup();return 0;
+        yyjson_mut_doc_free(doc);av_frame_free(&frame);naki_watermark_close(&wm);naki_operations_close(&operations);curl_global_cleanup();return 0;
     }
     int ten=atoi(argv[3]);NakiWatermarkCompositor *compositor=NULL;
     const char *color=getenv("NAKI_WM_TEST_COLOR");int bt709=color&&strstr(color,"709"),full=color&&strstr(color,"full");
@@ -91,10 +101,12 @@ int main(int argc,char **argv) {
         assert(naki_watermark_video(wm,frame,32,24)>=0);uint64_t revision=0;
         int hdr_change=getenv("NAKI_WM_TEST_HDR_CHANGE")&&i==1;
         if(hdr_change)frame->color_trc=AVCOL_TRC_SMPTE2084;
-        int composed=naki_watermark_frame(wm,&compositor,frame,AV_TIME_BASE_Q,frame->pts,&revision);
+        NakiFrameIdentity identity={.frame_id=i+1,.source_pts=frame->pts,.source_us=frame->pts,.source_tb_num=1,.source_tb_den=1000000};NakiOperationHandle lease=0;
+        int composed=naki_watermark_frame_tracked(wm,&compositor,frame,AV_TIME_BASE_Q,&identity,&revision,&lease);
+        assert(!naki_watermark_release_frame(wm,lease));
         if(hdr_change) {
-            assert(composed<0);char error[256];assert(naki_watermark_request(wm,&cfg,2,error,sizeof(error))<0);
-            av_frame_free(&frame);fclose(output);naki_watermark_compositor_free(&compositor);naki_watermark_close(&wm);curl_global_cleanup();return 0;
+            assert(composed<0);char error[256];assert(submit(wm,&cfg,error,sizeof(error))<0);
+            av_frame_free(&frame);fclose(output);naki_watermark_compositor_free(&compositor);naki_watermark_close(&wm);naki_operations_close(&operations);curl_global_cleanup();return 0;
         }
         assert(composed>=0);
         if(frame->nb_side_data!=3) {fprintf(stderr,"side_data_count=%d expected=3\n",frame->nb_side_data);return 6;}
@@ -113,5 +125,5 @@ int main(int argc,char **argv) {
         assert(av_image_copy_to_buffer(data,size,(const uint8_t *const *)frame->data,frame->linesize,frame->format,32,24,1)==size);
         assert(fwrite(data,1,size,output)==(size_t)size);av_free(data);av_frame_free(&frame);
     }
-    fclose(output);naki_watermark_compositor_free(&compositor);naki_watermark_close(&wm);curl_global_cleanup();return 0;
+    fclose(output);naki_watermark_compositor_free(&compositor);naki_watermark_close(&wm);naki_operations_close(&operations);curl_global_cleanup();return 0;
 }

@@ -18,7 +18,6 @@ typedef struct PipelineReader {
     int head, count, read_done, read_error;
     struct {int64_t us,bits;} rate[1024];
     int rate_head,rate_count;
-    int64_t rate_bits;
     uint64_t reader_bytes;
     pthread_mutex_t ring_mutex;
     pthread_cond_t ring_space;

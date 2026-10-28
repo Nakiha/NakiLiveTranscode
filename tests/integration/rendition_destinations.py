@@ -53,6 +53,47 @@ def survivor_case(directory, sample, frames):
     return report
 
 
+def empty_destination_case(directory, sample, frames, backend):
+    directory.mkdir();h=Harness(directory);report={}
+    try:
+        h.start()
+        h.api(body=dict(input=str(sample),outputs=[dict(id='main',output=str(directory/'primary.mp4'),output_format='mp4',width=160,height=96,encoder_preset='ultrafast',audio_copy=False)],rendition_backend=backend,pace=True,max_threads=2,min_threads=2,decoder_auto_threads=False,frame_log=True,timestamps={'mode':'source_all'}),expected=202)
+        initial=wait(lambda:(s if (s:=h.api()).get('packets_out',0)>=8 else None));job=initial['job_id'];generation=initial['outputs'][0]['rendition_generation']
+        def request(action, id=None, spec=None):
+            body=dict(operation_id=uuid.uuid4().hex,action=action,expected_revision=h.api()['topology_revision'],expected_generation=generation,target=dict(component='destination' if id else 'rendition',output_id='main'))
+            if id:body['target']['destination_id']=id
+            if spec:body['spec']=spec
+            h.api(f'/v1/jobs/{job}/updates',body,202)
+            wait(lambda:h.api()['topology_revision']>=body['expected_revision']+1)
+            return body
+        def done(body, delivery):
+            def poll():
+                op=h.api(f'/v1/jobs/{job}/operations/{body["operation_id"]}')
+                require(op['state'] not in ('failed','cancelled'),op)
+                return op if op['state']=='applied' and op['delivery']['state']==delivery else None
+            return wait(poll)
+        removed=done(request('remove_destination','primary'),'not_written')
+        raps=[]
+        for _ in range(2):
+            op=done(request('request_random_access'),'not_written')
+            require(op['retired'] and op['delivery']['inflight_frame_leases']==0 and op['delivery']['first_written'] is None,op)
+            raps.append(op)
+        mirror=request('add_destination','mirror',dict(output=str(directory/'mirror.mp4'),output_format='mp4'))
+        # A later real writer still receives an explicitly requested IDR and
+        # confirms actual delivery; empty-target cleanup cannot poison reuse.
+        delivered=done(request('request_random_access'),'first_written');attached=done(mirror,'first_written')
+        require(delivered['delivery']['inflight_frame_leases']==0,delivered)
+        final=wait(lambda:(s if (s:=h.api())['state'] in ('completed','completed_partial','failed','stopped') else None),30)
+        require(final['state']=='completed' and final['frames_decoded']==frames and final['shared_pool_occupied_slots']==0,final)
+        destination=next(d for d in final['outputs'][0]['destinations'] if d['destination_id']=='mirror')
+        expected=frames-attached['applied_checkpoint']['frame_id']+1
+        require(destination['packets_written']==expected and len(decoded_hashes(directory/'mirror.mp4'))==expected,('mirror suffix after empty destination RAP',expected,destination))
+        report.update(passed=True,backend=backend,removed=removed,empty_raps=raps,delivered=delivered,mirror=attached,expected_frames=expected,final=final)
+    finally:
+        h.close();(directory/'summary.json').write_text(json.dumps(report,indent=2)+'\n')
+    return report
+
+
 def main():
     run=Path(tempfile.mkdtemp(prefix='rendition-destinations-',dir=ROOT/'out'));sample=run/'source.ts';frames=300
     command([ORACLE_FFMPEG,'-v','error','-f','lavfi','-i','testsrc2=size=160x96:rate=25','-frames:v',frames,'-c:v','libx264','-preset','ultrafast','-threads','2','-g','25','-bf','3','-f','mpegts',sample])
@@ -116,6 +157,7 @@ def main():
         for name in ['mirror.mp4','mirror2.mp4']:
             command([ORACLE_FFMPEG,'-v','error','-xerror','-i',run/name,'-f','null','-'])
         report['survivor']=survivor_case(run/'survivor',sample,frames)
+        report['empty_destinations']=[empty_destination_case(run/f'empty-{backend}',sample,frames,backend) for backend in ('process','thread')]
         report.update(passed=True,events=events,final=final,rap=rap_done,mirror=mirror_done,mirror_second_expected=expected,first_removed=removed)
     finally:
         h.close();stop_sink.set();sink.close();sink_thread.join(timeout=3);(run/'summary.json').write_text(json.dumps(report,indent=2)+'\n')

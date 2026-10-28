@@ -65,24 +65,23 @@ void *pipeline_main(void *opaque) {
     ret=pipeline_reader_start(&p);
     if (ret) {ret=AVERROR(ret); goto cleanup;}
     if(naki_job_config(job)->decoder_pump&&(ret=pipeline_decode_start(&p))<0)goto cleanup;
-    int eof_sent=0, decoder_eof=0;
-    while (!naki_job_cancelled(job) && !decoder_eof) {
+    int eof_sent=0;
+    while (!naki_job_cancelled(job)) {
         if(naki_job_renditions(job)){ret=naki_renditions_poll(&p,0);if(ret==AVERROR_EOF){ret=0;idle_finished=1;break;}if(ret<0)goto cleanup;if(!naki_renditions_capacity(&p)){poll(NULL,0,5);continue;}}
         if(p.branches&&(ret=pipeline_branches_check(&p,0))<0) {p.stage="all outputs failed";goto cleanup;}
         uint64_t wake;
         while (read(naki_job_wake_fd(job),&wake,sizeof(wake))<0 && errno==EINTR) {}
         int progress=0;
         p.stage=naki_job_config(job)->decoder_async?"async decode receive":"synchronous decode receive";
-        for (int batch=0;batch<1;batch++) {
-            ret=pipeline_input_receive(&p,frame,&pending);
-            if (ret==AVERROR_EOF) {decoder_eof=1; ret=0; break;}
-            if (ret==AVERROR(EAGAIN)) {ret=0; break;}
+        ret=pipeline_input_receive(&p,frame,&pending);
+        if (ret==AVERROR_EOF) {ret=0; break;}
+        if (ret==AVERROR(EAGAIN)) ret=0;
+        else {
             if (ret<0) goto cleanup;
             ret=naki_job_renditions(job)?naki_renditions_frame(&p,frame):p.branches?pipeline_branches_frame(&p,frame):pipeline_process_frame(&p,frame); av_frame_unref(frame);
             if (ret<0) goto cleanup;
             progress=1;
         }
-        if (decoder_eof) break;
         int input_done=0, input_error=0;
         if (!naki_job_config(job)->decoder_pump && !pending.packet && !eof_sent) pending=pipeline_reader_pop(&p,&input_done,&input_error);
         if(pending.params) {

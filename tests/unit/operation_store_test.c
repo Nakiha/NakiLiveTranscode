@@ -59,7 +59,9 @@ int main(void) {
     in=intent("stop");in.kind=NAKI_OP_STOP;assert(naki_operations_reserve(s,&in,4,&stop)==1);
     in=intent("A");in.kind=NAKI_OP_STOP;assert(naki_operations_reserve(s,&in,5,&duplicate)==-EEXIST);
     assert(!naki_operations_pin(s,b,NAKI_OP_PIN_DESIRED,0));claim(s,a,10);
-    naki_operations_cancel_unclaimed(s,20);check(s,b,"cancelled","not_ready",0);check(s,a,"applying","not_ready",0);
+    assert(!naki_operations_transition(s,b,NAKI_OP_CANCELLED,0,0,"job stopping before owner claim",20));
+    assert(!naki_operations_retire(s,b,20));assert(!naki_operations_retire(s,a,20));
+    check(s,b,"cancelled","not_ready",0);check(s,a,"applying","not_ready",0);
     assert(naki_operations_transition(s,a,NAKI_OP_SUPERSEDED,0,0,"later desired",21)==-EPERM);
     NakiFrameIdentity first={.frame_id=1,.source_pts=100,.source_us=100000,.source_tb_num=1,.source_tb_den=1000,.output_tb_num=1,.output_tb_den=90000};
     assert(!naki_operations_applied(s,a,&first,1,30));check(s,a,"applied","pending",1);

@@ -94,14 +94,13 @@ static void *reader_main(void *opaque) {
             if(naki_job_config(job)->source_rate_limit) {
                 pthread_mutex_lock(&p->in->reader.ring_mutex);
                 while(p->in->reader.rate_count&&p->in->reader.rate[p->in->reader.rate_head].us<=finished-1000000) {
-                    p->in->reader.rate_bits-=p->in->reader.rate[p->in->reader.rate_head].bits;
                     p->in->reader.rate_head=(p->in->reader.rate_head+1)%1024;p->in->reader.rate_count--;
                 }
                 int full=p->in->reader.rate_count==1024;
                 if(!full) {
                     int pos=(p->in->reader.rate_head+p->in->reader.rate_count++)%1024;
                     int64_t bits=8*((int64_t)packet->size+(seq==0?p->in->input->streams[p->in->stream_index]->codecpar->extradata_size:0));
-                    p->in->reader.rate[pos].us=source_origin.complete_us;p->in->reader.rate[pos].bits=bits;p->in->reader.rate_bits+=bits;
+                    p->in->reader.rate[pos].us=source_origin.complete_us;p->in->reader.rate[pos].bits=bits;
                 }
                 pthread_mutex_unlock(&p->in->reader.ring_mutex);
                 if(full){pipeline_input_free(&item);ret=AVERROR(ENOBUFS);break;}
@@ -230,7 +229,6 @@ int64_t pipeline_source_rate(Pipeline *p,int64_t now) {
     if(naki_job_remote(p->job)==2)return naki_job_source_rate(p->job);
     pthread_mutex_lock(&p->in->reader.ring_mutex);
     while(p->in->reader.rate_count&&p->in->reader.rate[p->in->reader.rate_head].us<=now-1000000) {
-        p->in->reader.rate_bits-=p->in->reader.rate[p->in->reader.rate_head].bits;
         p->in->reader.rate_head=(p->in->reader.rate_head+1)%1024;p->in->reader.rate_count--;
     }
     int64_t bits=0;

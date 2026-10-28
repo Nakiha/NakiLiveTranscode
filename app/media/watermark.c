@@ -452,18 +452,6 @@ int naki_watermark_submit(NakiWatermark *wm,const NakiUpdateRequest *request,con
     *result=naki_operations_get(wm->operations,operation);ret=wm->poisoned?wm->poisoned:*result?0:AVERROR(ENOMEM);
     pthread_mutex_unlock(&wm->mutex);dispose_generation(wm,discard,discard!=NULL);return ret;
 }
-int naki_watermark_request(NakiWatermark *wm,const NakiWatermarkConfig *c,uint64_t revision,char *e,size_t n) {
-    pthread_mutex_lock(&wm->mutex);const char *error=NULL;
-    if(atomic_load(&wm->stop)||atomic_load(wm->cancel))error="watermark: job is closing";
-    else if(c->enabled&&wm->video_unsupported)error="watermark: HDR or oversized canvas is unsupported";
-    else if(revision!=wm->accepted+1)error="watermark: revision must equal accepted_revision + 1";
-    else if(c->required!=wm->required)error="watermark: startup.required is immutable";
-    else if(wm->required&&!c->enabled)error="watermark: required watermark cannot be cleared";
-    else if(wm->operations)error="watermark: use an operation-bound request";
-    if(error) {snprintf(e,n,"%s",error);pthread_mutex_unlock(&wm->mutex);return -1;}
-    Asset *discard=queue_request_locked(wm,c,revision,0);pthread_mutex_unlock(&wm->mutex);
-    dispose_generation(wm,discard,discard!=NULL);return 0;
-}
 int naki_watermark_wait(NakiWatermark *wm) {
     pthread_mutex_lock(&wm->mutex);int ret=0;
     while(wm->required&&!wm->ready) {
@@ -686,12 +674,13 @@ void naki_watermark_owner_finish(NakiWatermark *wm,int error,int cancelled) {
     pthread_mutex_lock(&wm->mutex);Asset *discard=fail_claim_locked(wm,error,cancelled);
     pthread_mutex_unlock(&wm->mutex);dispose_generation(wm,discard,discard!=NULL);
 }
-static int watermark_frame(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame *frame,AVRational tb,
-                           int64_t source_us,const NakiFrameIdentity *identity,uint64_t *revision,NakiOperationHandle *lease) {
-    if(lease)*lease=0;
+int naki_watermark_frame_tracked(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame *frame,AVRational tb,
+                                const NakiFrameIdentity *identity,uint64_t *revision,NakiOperationHandle *lease) {
+    if(!identity||!lease)return AVERROR(EINVAL);
+    int64_t source_us=identity->source_us;*lease=0;
     pthread_mutex_lock(&wm->mutex);
-    if(wm->poisoned||(wm->operations&&!identity)) {
-        int error=wm->poisoned?wm->poisoned:AVERROR(EINVAL);pthread_mutex_unlock(&wm->mutex);return error;
+    if(wm->poisoned) {
+        int error=wm->poisoned;pthread_mutex_unlock(&wm->mutex);return error;
     }
     if((atomic_load(&wm->stop)||atomic_load(wm->cancel))&&!wm->claim.present) {pthread_mutex_unlock(&wm->mutex);return AVERROR(ECANCELED);}
     int ret=0;
@@ -769,14 +758,6 @@ static int watermark_frame(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFra
     }
     pthread_mutex_unlock(&wm->mutex);asset_free(asset);
     dispose_generation(wm,old,old!=NULL);dispose_generation(wm,failed,failed!=NULL);return ret;
-}
-int naki_watermark_frame(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame *frame,AVRational tb,int64_t source_us,uint64_t *revision) {
-    return watermark_frame(wm,ptr,frame,tb,source_us,NULL,revision,NULL);
-}
-int naki_watermark_frame_tracked(NakiWatermark *wm,NakiWatermarkCompositor **ptr,AVFrame *frame,AVRational tb,
-                                const NakiFrameIdentity *identity,uint64_t *revision,NakiOperationHandle *lease) {
-    if(!identity||!lease)return AVERROR(EINVAL);
-    return watermark_frame(wm,ptr,frame,tb,identity->source_us,identity,revision,lease);
 }
 int naki_watermark_release_frame(NakiWatermark *wm,NakiOperationHandle lease) {
     return lease?naki_operations_frame_release(wm->operations,lease,clock_us()):0;

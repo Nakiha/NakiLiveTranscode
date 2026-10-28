@@ -40,11 +40,9 @@ int naki_operations_frame_release(NakiOperations *store,NakiOperationHandle hand
 int naki_operations_written(NakiOperations *store,NakiOperationHandle handle,const NakiFrameIdentity *frame,int64_t written_us);
 int naki_operations_written_once(NakiOperations *store,NakiOperationHandle handle,const NakiFrameIdentity *frame,int64_t written_us,int *first);
 int naki_operations_retire(NakiOperations *store,NakiOperationHandle handle,int64_t now_us);
-void naki_operations_cancel_unclaimed(NakiOperations *store,int64_t now_us);
 yyjson_mut_doc *naki_operations_get(NakiOperations *store,NakiOperationHandle handle);
 /* Bounded export index, stable while reservations are pinned by the caller's job lifecycle. */
 yyjson_mut_doc *naki_operations_page(NakiOperations *store,unsigned cursor,unsigned maximum,unsigned *next);
-size_t naki_operations_record_bytes(void);
 /* Mirror only explicit child record fields, never handles or runtime objects.
  * Caller binds handle to the independently authenticated rendition generation. */
 int naki_operations_observe(NakiOperations *store,NakiOperationHandle handle,yyjson_val *record,int64_t now_us);

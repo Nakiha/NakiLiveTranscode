@@ -34,6 +34,12 @@ static uint64_t status(NakiWatermark *wm,const char *key) {
 static void wait_status(NakiWatermark *wm,const char *key,uint64_t value) {
     int i;for(i=0;i<500&&status(wm,key)!=value;i++)av_usleep(10000);assert(i<500);
 }
+static int submit(NakiWatermark *wm,const NakiWatermarkConfig *cfg,char *error,size_t cap) {
+    NakiUpdateRequest request;yyjson_mut_doc *answer=NULL;
+    int ret=naki_update_from_legacy(cfg,2,"state-test","main","update-2",&request,error,cap);
+    if(!ret)ret=naki_watermark_submit(wm,&request,"state-test",&answer,error,cap);
+    yyjson_mut_doc_free(answer);return ret;
+}
 int main(int argc,char **argv) {
     assert(argc==3);assert(curl_global_init(CURL_GLOBAL_DEFAULT)==CURLE_OK);
     FILE *out=fopen(argv[2],"w");assert(out);fputs("{\"cases\":[\n",out);int count=0,failures=0;
@@ -45,16 +51,18 @@ int main(int argc,char **argv) {
             .width=12,.height=8,.x=2,.y=2,.stretch=1,.opacity=1};
         assert(strlen(argv[1])<sizeof(cfg.uri));strcpy(cfg.uri,argv[1]);
         NakiWatermark *wm=naki_watermark_open(&cfg,av_gettime_relative(),&cancel);assert(wm);char error[256];
+        NakiOperations *operations=naki_operations_open(2,1024*1024,1000);assert(operations);
+        assert(!naki_watermark_bind(wm,operations,"state-test","main","create-test",NULL));
         if(candidate) {
             cfg.enabled=candidate!=4;if(candidate==2)strcpy(cfg.uri,"/nonexistent-watermark-state-test.png");
-            assert(!naki_watermark_request(wm,&cfg,2,error,sizeof(error)));
+            assert(!submit(wm,&cfg,error,sizeof(error)));
         }
         if(candidate!=3) {
             release_loader();wait_status(wm,candidate==2?"failed_revision":"prepared_revision",candidate?2:1);
         } else assert(status(wm,"prepared_revision")!=2);
         if(required) {
             assert(!naki_watermark_wait(wm));cfg.enabled=0;
-            assert(naki_watermark_request(wm,&cfg,2,error,sizeof(error))<0&&status(wm,"accepted_revision")==1);
+            assert(submit(wm,&cfg,error,sizeof(error))<0&&status(wm,"accepted_revision")==1);
         }
         AVFrame *f=av_frame_alloc();assert(f);f->format=AV_PIX_FMT_YUV420P;
         f->width=video==2?4096:32;f->height=video==2?2162:24;f->pts=0;
@@ -63,8 +71,10 @@ int main(int argc,char **argv) {
         assert(av_frame_get_buffer(f,32)>=0);ptrdiff_t lines[4];for(int i=0;i<4;i++)lines[i]=f->linesize[i];
         assert(!av_image_fill_black(f->data,lines,f->format,f->color_range,f->width,f->height));
         NakiWatermarkCompositor *compositor=NULL;uint64_t revision=99;
+        NakiFrameIdentity identity={.frame_id=1,.source_pts=0,.source_us=0,.source_tb_num=1,.source_tb_den=1000000};NakiOperationHandle lease=0;
         int ret=naki_watermark_video(wm,f,f->width,f->height);
-        if(ret>=0)ret=naki_watermark_frame(wm,&compositor,f,AV_TIME_BASE_Q,0,&revision);
+        if(ret>=0)ret=naki_watermark_frame_tracked(wm,&compositor,f,AV_TIME_BASE_Q,&identity,&revision,&lease);
+        assert(!naki_watermark_release_frame(wm,lease));
         int fatal=video&&initial&&candidate!=4;
         int image=!video&&(candidate==1||(!candidate&&initial));
         uint64_t expected_revision=candidate==4?2:image?(candidate?2:1):initial?0:1;
@@ -72,7 +82,7 @@ int main(int argc,char **argv) {
         int match=fatal?ret<0:ret>=0&&revision==expected_revision&&abs(pixel-(image?81:16))<=1;
         fprintf(out,"%s{\"initial_enabled\":%d,\"required\":%d,\"candidate\":\"%s\",\"video\":%d,\"ret\":%d,\"revision\":%llu,\"expected_revision\":%llu,\"pixel\":%d,\"match\":%s}",
             count?",\n":"",initial,required,names[candidate],video,ret,(unsigned long long)revision,(unsigned long long)expected_revision,pixel,match?"true":"false");
-        count++;failures+=!match;naki_watermark_compositor_free(&compositor);av_frame_free(&f);release_loader();naki_watermark_close(&wm);
+        count++;failures+=!match;naki_watermark_compositor_free(&compositor);av_frame_free(&f);release_loader();naki_watermark_close(&wm);naki_operations_close(&operations);
     }
     fprintf(out,"\n],\"count\":%d,\"failures\":%d}\n",count,failures);fclose(out);curl_global_cleanup();
     printf("boundary matrix: %d cases, %d failures\n",count,failures);return failures?1:0;
