@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include "media/mux_internal.h"
+#include "worker/job.h"
 #include <assert.h>
 
 /* The isolated test links the real mux open/move/finalize/release implementation.

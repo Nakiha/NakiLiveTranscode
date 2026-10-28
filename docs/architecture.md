@@ -41,4 +41,10 @@ This preserves the current direct-to-writer handoff. It does not introduce a per
 
 Cross-cutting lifetime/ownership changes require full functional and application sanitizer regression. A local feature change can use the relevant focused checks once its dependency and ownership scope is established. Existing test suites remain authoritative; do not remove a boundary case merely because a module was reorganized. Performance and capacity claims require separate fresh measurements.
 
-Remaining debt: `Pipeline` and worker `Job` still expose broad private state to their enumerated implementations; rendition lifecycle has several orthogonal flags and does not yet have a complete typed transition model. The allowlists prevent adding consumers silently; they are not a claim that all internal coupling has been eliminated.
+## Worker publication boundary
+
+`Job` is opaque outside worker implementation. Media borrows immutable configuration/identity, retains existing lifetime-bound service handles, and publishes typed checkpoints, observations and completed-write events through `job_media.h`. It never takes the Job mutex or receives writable statistics/progress pointers. The worker owns every-frame latency sampling, first-I/recurring-I/output-key classification, reporting windows and final classification. Only the mux owner can publish completed writes; publication and factory callers are enumerated by the architecture checker.
+
+`job_remote.h` keeps remote slot allocation, child/destination factories and status projection inside worker implementation. Slot allocation rolls back a partially allocated batch; factory roles reject a mismatched destructor. Adapters still prove holder exit/thread join before retiring jobs. Compiler checks reject `sizeof(Job)`, direct field access and external mutex access; native tests cover observations, bounded admission, cancellation and allocation rollback.
+
+Remaining debt: `Pipeline` still exposes broad private state to its enumerated implementations; rendition lifecycle has several orthogonal flags and does not yet have a complete typed transition model. The allowlists prevent adding consumers silently; they are not a claim that all internal coupling has been eliminated. The remaining completion checklist is in `architecture-completion.md`.

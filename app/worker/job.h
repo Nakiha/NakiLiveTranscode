@@ -93,6 +93,7 @@ typedef struct JobFlow {
 } JobFlow;
 
 struct Job {
+    enum {NAKI_JOB_ALLOCATION_ROOT,NAKI_JOB_ALLOCATION_REMOTE_SLOT,NAKI_JOB_ALLOCATION_DESTINATION,NAKI_JOB_ALLOCATION_CHILD} allocation_kind;
     Config config;
     struct Job *parent,*outputs[NAKI_OUTPUT_MAX];
     char output_id[33];

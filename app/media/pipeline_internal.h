@@ -1,6 +1,6 @@
 #ifndef NAKI_PIPELINE_INTERNAL_H
 #define NAKI_PIPELINE_INTERNAL_H
-#include "worker/job.h"
+#include "worker/job_media.h"
 #include "platform/runtime.h"
 #include "platform/wakeup.h"
 #include "worker/frame_policy_runtime.h"
@@ -77,6 +77,7 @@ typedef struct Pipeline {
     AVFilterContext *source, *sink;
     NakiWatermarkCompositor *watermark_compositor;
     uint64_t watermark_revision;
+    uint64_t filter_generation;
     AVStream *video;
     int stream_index;
     int input_width, input_height, input_format, seen_input_i;
@@ -134,7 +135,6 @@ int pipeline_stamp_valid(const AVBufferRef *ref);
 const NakiSeiBundle *pipeline_stamp_sei(const AVBufferRef *ref);
 void pipeline_trace_pts(yyjson_mut_doc *doc, const char *key, int64_t pts);
 NakiFrameIdentity pipeline_frame_identity(Pipeline *p,const Stamp *stamp,int64_t output_pts,AVRational output_tb);
-void pipeline_checkpoint(Pipeline *p, int64_t *field);
 int pipeline_interrupted(void *opaque);
 int pipeline_flush_deferred_audio(Pipeline *p);
 int pipeline_filter_output(Pipeline *p);

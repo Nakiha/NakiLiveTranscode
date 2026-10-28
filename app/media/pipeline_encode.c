@@ -17,7 +17,7 @@ void pipeline_ledger_clear(Pipeline *p) {
 
 int pipeline_encoder_send(Pipeline *p, const AVFrame *frame) {
     int64_t began=now_us(); int ret=avcodec_send_frame(p->encoder,frame);
-    p->encoder_api_us+=now_us()-began; if(ret!=AVERROR(EAGAIN)&&p->destinations&&!strcmp(p->job->config.encoder,"libx264"))av_opt_set_int(p->encoder->priv_data,"forced-idr",0,0);return ret;
+    p->encoder_api_us+=now_us()-began; if(ret!=AVERROR(EAGAIN)&&p->destinations&&!strcmp(naki_job_config(p->job)->encoder,"libx264"))av_opt_set_int(p->encoder->priv_data,"forced-idr",0,0);return ret;
 }
 
 static int encoder_receive(Pipeline *p, AVPacket *packet) {
@@ -26,7 +26,7 @@ static int encoder_receive(Pipeline *p, AVPacket *packet) {
 }
 
 int pipeline_validate_output_timestamps(Pipeline *p,const AVPacket *packet,AVRational time_base){
-    if(p->job->config.policy.timestamps==NAKI_TS_SOURCE_ALL&&!strcmp(p->job->config.output_format,"flv")){
+    if(naki_job_config(p->job)->policy.timestamps==NAKI_TS_SOURCE_ALL&&!strcmp(naki_job_config(p->job)->output_format,"flv")){
             int64_t pts=av_rescale_q(packet->pts,time_base,(AVRational){1,1000});
             int64_t dts=av_rescale_q(packet->dts,time_base,(AVRational){1,1000});
             if(packet->pts==AV_NOPTS_VALUE || packet->dts==AV_NOPTS_VALUE || pts<0 || dts<0 ||
@@ -37,7 +37,7 @@ int pipeline_validate_output_timestamps(Pipeline *p,const AVPacket *packet,AVRat
                 json_int(event,"encoder_time_base_den",time_base.den);
                 json_int(event,"pts_ms",pts);json_int(event,"dts_ms",dts);
                 json_int(event,"first_encoder_pts",p->first_encoder_pts);
-                logger_submit(p->job->logger,NULL,event);
+                logger_submit(naki_job_logger(p->job),NULL,event);
                 p->stage="strict FLV timestamp range requires explicit retiming";return AVERROR(ERANGE);
             }
     }
@@ -48,31 +48,30 @@ int pipeline_receive_encoded(Pipeline *p) {
     AVPacket *packet=av_packet_alloc();
     if(!packet)return AVERROR(ENOMEM);
     int ret;
-    int cooperative=p->job->config.decoder_pump&&!p->job->parent&&!p->encoder_draining;
+    int cooperative=naki_job_config(p->job)->decoder_pump&&!naki_job_parent(p->job)&&!p->encoder_draining;
     p->encoder_poll_pending=0;p->encoder_polled_packet=0;
     while((ret=encoder_receive(p,packet))>=0) {
         int64_t encoded_us=now_us(), hook_us=0;
-        pthread_mutex_lock(&p->job->mutex);p->job->progress.last_encoded_us=encoded_us;pthread_mutex_unlock(&p->job->mutex);
-        if(p->job->parent) {pthread_mutex_lock(&p->job->parent->mutex);p->job->parent->progress.last_encoded_us=encoded_us;pthread_mutex_unlock(&p->job->parent->mutex);}
+        naki_job_encoded(p->job,encoded_us);
         int slot=-1;
         for(int i=0;i<LEDGER_CAPACITY;i++)if(p->ledger[i].used && p->ledger[i].pts==packet->pts){slot=i;break;}
         if(slot<0){ret=AVERROR_INVALIDDATA;break;}
         if((ret=pipeline_validate_output_timestamps(p,packet,p->encoder->time_base))<0)break;
         Stamp *mapped=&p->ledger[slot].stamp;
-        if(p->job->config.encoder_max_future_frames) {
+        if(naki_job_config(p->job)->encoder_max_future_frames) {
             size_t size=0;const uint8_t *data=av_packet_get_side_data(packet,AV_PKT_DATA_STRINGS_METADATA,&size);
             AVDictionary *info=NULL;
             if(!data||av_packet_unpack_dictionary(data,size,&info)<0) {ret=AVERROR_INVALIDDATA;break;}
             AVDictionaryEntry *entry=av_dict_get(info,"live_future_frames",NULL,0);
             char *end=NULL;long depth=entry?strtol(entry->value,&end,10):-1;
-            int valid=entry&&end&&!*end&&depth>=0&&depth<=p->job->config.encoder_max_future_frames;
-            if(p->job->config.constrained_crf) {
+            int valid=entry&&end&&!*end&&depth>=0&&depth<=naki_job_config(p->job)->encoder_max_future_frames;
+            if(naki_job_config(p->job)->constrained_crf) {
                 AVDictionaryEntry *qp=av_dict_get(info,"live_slice_qp",NULL,0);
                 char *qp_end=NULL;long actual=qp?strtol(qp->value,&qp_end,10):100;
                 if(!qp||!qp_end||*qp_end||actual < -12||actual>63)valid=0;
                 mapped->actual_slice_qp=(int)actual;
             }
-            if(p->job->config.codec_trace) {
+            if(naki_job_config(p->job)->codec_trace) {
                 NakiEncoderTrace *t=&mapped->encode_trace;
 #define PARSE_TRACE(key,dest) do { \
     AVDictionaryEntry *e=av_dict_get(info,key,NULL,0);char *tail=NULL;errno=0; \
@@ -95,7 +94,7 @@ int pipeline_receive_encoded(Pipeline *p) {
         if(mapped->intra_reason) {
             size_t size=0; const uint8_t *stats=av_packet_get_side_data(packet,AV_PKT_DATA_QUALITY_STATS,&size);
             if(size<5 || stats[4]!=AV_PICTURE_TYPE_I) {p->stage="encoder did not confirm requested I picture"; ret=AVERROR_INVALIDDATA; break;}
-            pthread_mutex_lock(&p->job->mutex);p->job->stats.intra_confirmed++;pthread_mutex_unlock(&p->job->mutex);
+            naki_job_count(p->job,NAKI_COUNT_INTRA_CONFIRMED,1);
         }
         if(p->hooks.video_packet) {
             size_t stats_size=0;
@@ -119,9 +118,9 @@ int pipeline_receive_encoded(Pipeline *p) {
             if(ret<0)break;
         }
         p->stage="selected SEI output repackaging";
-        ret=naki_sei_inject(packet,p->encoder->codec_id,pipeline_stamp_sei(p->ledger[slot].owner),&p->job->config.sei);
+        ret=naki_sei_inject(packet,p->encoder->codec_id,pipeline_stamp_sei(p->ledger[slot].owner),&naki_job_config(p->job)->sei);
         if(ret<0)break;
-        if(p->job->config.constrained_crf) {
+        if(naki_job_config(p->job)->constrained_crf) {
             int64_t bits=8*((int64_t)packet->size+(packet->pts==p->first_encoder_pts?p->encoder->extradata_size:0));
             int kind=output_type==AV_PICTURE_TYPE_I?0:output_type==AV_PICTURE_TYPE_P?1:output_type==AV_PICTURE_TYPE_B?2:-1;
             /* Match the actual mux time-base rounding, not a display-PTS
@@ -157,14 +156,14 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     AVRational filter_tb=av_buffersink_get_time_base(p->sink);
     frame->pts=av_rescale_q(frame->pts,filter_tb,p->encoder->time_base);
     frame->duration=av_rescale_q(frame->duration,filter_tb,p->encoder->time_base);
-    if(p->job->config.output_fps)frame->duration=av_rescale_q(1,av_inv_q(p->encoder->framerate),p->encoder->time_base);
+    if(naki_job_config(p->job)->output_fps)frame->duration=av_rescale_q(1,av_inv_q(p->encoder->framerate),p->encoder->time_base);
     frame->time_base=p->encoder->time_base;
     frame->pict_type=stamp.intra_reason ? AV_PICTURE_TYPE_I : AV_PICTURE_TYPE_NONE;
     if(p->destinations){int force=naki_destinations_force(p,frame);if(force<0)return force;}
     if (p->last_pts!=AV_NOPTS_VALUE && frame->pts<=p->last_pts) {
         p->stage="non-monotonic encoder PTS"; return AVERROR_INVALIDDATA;
     }
-    int strict=p->job->config.policy.timestamps==NAKI_TS_SOURCE_ALL;
+    int strict=naki_job_config(p->job)->policy.timestamps==NAKI_TS_SOURCE_ALL;
     int64_t output_display_pts=0;
     if(strict) {
         /* Check the retained display sequence, before encoder B-picture reorder.
@@ -183,32 +182,32 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     int ret;
     AVBufferRef *owner=av_buffer_ref(frame->opaque_ref);
     if(!owner)return AVERROR(ENOMEM);
-    if(p->job->config.constrained_crf) {
+    if(naki_job_config(p->job)->constrained_crf) {
         int64_t began=now_us();
         int byte_input=frame->format==AV_PIX_FMT_YUV420P;
         if(!byte_input&&frame->format!=AV_PIX_FMT_YUV420P10LE) {av_buffer_unref(&owner);return AVERROR_INVALIDDATA;}
         double complexity=naki_rate_complexity_samples(&p->rate,frame->data[0],frame->linesize[0]/(byte_input?1:2),frame->width,frame->height,byte_input);
-        int64_t source=p->job->config.source_rate_limit?pipeline_source_rate(p,began):0;
+        int64_t source=naki_job_config(p->job)->source_rate_limit?pipeline_source_rate(p,began):0;
         int64_t pts_us=av_rescale_q(frame->pts,p->encoder->time_base,AV_TIME_BASE_Q);
         int64_t period=av_rescale_q(1,av_inv_q(p->encoder->framerate),AV_TIME_BASE_Q);
-        if(naki_rate_select(&p->rate,p->job->config.qp,p->job->config.maxrate,p->job->config.source_rate_limit,
+        if(naki_rate_select(&p->rate,naki_job_config(p->job)->qp,naki_job_config(p->job)->maxrate,naki_job_config(p->job)->source_rate_limit,
             source,began,pts_us,period,frame->width*frame->height,!!stamp.intra_reason,complexity,&stamp.rate)<0) {
             av_buffer_unref(&owner);return AVERROR_INVALIDDATA;
         }
-        if(av_dict_set_int(&frame->metadata,"naki_qp_offset",stamp.rate.qp-p->job->config.qp,0)<0) {av_buffer_unref(&owner);return AVERROR(ENOMEM);}
+        if(av_dict_set_int(&frame->metadata,"naki_qp_offset",stamp.rate.qp-naki_job_config(p->job)->qp,0)<0) {av_buffer_unref(&owner);return AVERROR(ENOMEM);}
     }
     stamp.encoder_submit_us=now_us();
-    pipeline_checkpoint(p,&p->job->progress.first_encoder_submit_us);
+    naki_job_checkpoint(p->job,NAKI_CP_FIRST_ENCODER_SUBMIT,0);
     while ((ret=pipeline_encoder_send(p,frame))==AVERROR(EAGAIN)) {
         if ((ret=pipeline_receive_encoded(p))<0) {av_buffer_unref(&owner);return ret;}
     }
     if (ret<0) {av_buffer_unref(&owner);return ret;}
     stamp.encoder_accepted_us=now_us();
     if(strict) {p->last_output_display_pts=output_display_pts;p->have_output_display_pts=1;}
-    naki_intra_accept(&p->job->config.policy,&p->intra,stamp.source_us,stamp.intra_reason);
-    if(stamp.intra_reason) {pthread_mutex_lock(&p->job->mutex);p->job->stats.intra_requested++;pthread_mutex_unlock(&p->job->mutex);}
+    naki_intra_accept(&naki_job_config(p->job)->policy,&p->intra,stamp.source_us,stamp.intra_reason);
+    if(stamp.intra_reason) {naki_job_count(p->job,NAKI_COUNT_INTRA_REQUESTED,1);}
     p->ledger[slot]=(Ledger){.used=1,.pts=frame->pts,.stamp=stamp,.owner=owner}; p->last_pts=frame->pts;
-    pthread_mutex_lock(&p->job->mutex); p->job->stats.frames_filtered++; pthread_mutex_unlock(&p->job->mutex);
+    naki_job_count(p->job,NAKI_COUNT_FILTERED,1);
     return pipeline_receive_encoded(p);
 }
 

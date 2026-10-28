@@ -29,7 +29,7 @@ PRIVATE = {
     },
     'media/rendition_runtime_internal.h': {'media/rendition_runtime.c', 'media/rendition_control.c'},
     'worker/job.h': {'worker/worker.c', 'worker/job.c', 'worker/job_report.c',
-                     'worker/frame_policy_runtime.c', 'media/pipeline_internal.h'},
+                     'worker/job_media.c', 'worker/job_remote.c', 'worker/frame_policy_runtime.c'},
     'controller/service_internal.h': {'controller/service.c', 'controller/service_http.c',
         'controller/service_supervisor.c', 'controller/service_projection.c'},
 }
@@ -45,6 +45,31 @@ OWNERS = {
     'av_write_trailer': {'media/pipeline_output.c'},
     'avio_open2': {'media/pipeline_output.c'},
     'avio_closep': {'media/pipeline_output.c'},
+}
+JOB_PUBLISHERS = {
+    'naki_job_frame_written': {'media/pipeline_mux.c'},
+    'naki_job_complete': {'media/pipeline_output.c'},
+    'naki_job_finalize_begin': {'media/pipeline_output.c'},
+    'naki_job_finalize_result': {'media/pipeline_output.c'},
+    'naki_job_remote_slots': {'media/rendition_runtime.c'},
+    'naki_job_bind_renditions': {'media/rendition_runtime.c'},
+    'naki_job_remote_configure': {'media/rendition_control.c'},
+    'naki_job_remote_forget': {'media/rendition_control.c'},
+    'naki_job_remote_spawned': {'media/rendition_runtime.c'},
+    'naki_job_remote_exit_observed': {'media/rendition_runtime.c'},
+    'naki_job_remote_retired': {'media/rendition_runtime.c'},
+    'naki_job_remote_project': {'media/rendition_runtime.c'},
+    'naki_job_destination_new': {'media/destination_runtime.c'},
+    'naki_job_destination_free': {'media/destination_runtime.c'},
+    'naki_job_destinations_publish': {'media/destination_runtime.c'},
+    'naki_job_destination_written': {'media/destination_runtime.c'},
+    'naki_job_child_new': {'media/rendition_child.c'},
+    'naki_job_child_logger': {'media/rendition_child.c'},
+    'naki_job_child_identity': {'media/rendition_child.c'},
+    'naki_job_child_resources': {'media/rendition_child.c'},
+    'naki_job_child_trace': {'media/rendition_child.c'},
+    'naki_job_child_stopped': {'media/rendition_child.c'},
+    'naki_job_child_free': {'media/rendition_child.c'},
 }
 TOKEN = re.compile(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', re.S)
 INCLUDE = re.compile(r'^\s*#\s*include\s+([<"])([^>"\n]+)[>"]', re.M)
@@ -83,6 +108,8 @@ def check(root):
                 if child in PRIVATE and name not in PRIVATE[child]: fail(name, 'private header: ' + child)
                 if layer == 'controller' and child.startswith('media/') and child != 'media/media_hooks.h':
                     fail(name, 'controller may only consume the media hook capability contract')
+                if layer == 'controller' and child.startswith('worker/') and child not in {'worker/job_api.h', 'worker/job_state.h'}:
+                    fail(name, 'controller may not invoke worker media publication/factories')
             elif target.startswith('libav') and layer == 'control':
                 fail(name, 'control must not depend on the native media SDK')
             elif quote == '"' and not target.startswith('libav'):
@@ -91,9 +118,15 @@ def check(root):
         code = code_only(text)
         if name != 'media/mux_internal.h' and re.search(r'\bstruct\s+NakiMux\s*\{', code):
             fail(name, 'mux representation is private')
+        if not name.startswith('worker/') and re.search(r'\bstruct\s+Job\s*\{', code):
+            fail(name, 'worker Job representation is private')
         for symbol, owners in OWNERS.items():
             if re.search(r'\b' + symbol + r'\b', code) and name not in owners:
                 fail(name, 'single-owner API ' + symbol)
+        if not name.startswith('worker/'):
+            for symbol, owners in JOB_PUBLISHERS.items():
+                if re.search(r'\b' + symbol + r'\b', code) and name not in owners:
+                    fail(name, 'unauthorized Job publisher/factory ' + symbol)
     # Follow local includes: a harmless-looking wrapper cannot leak mutable state.
     for name in edges:
         if name.startswith('controller/'):

@@ -40,12 +40,11 @@ int pipeline_finalize_output(Pipeline *p,int primary,int stopped) {
     Job *job=p->job;int trailer=0,flush=0,closed=0;int64_t began=now_us();
     int64_t deadline=began+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US);
     if(p->mux){atomic_store(&p->mux->interrupt.cleanup,1);atomic_store(&p->mux->interrupt.deadline,deadline);}
-    pthread_mutex_lock(&job->mutex);job->progress.finalize_started_us=began;job->progress.finalize_deadline_us=deadline;
-    job->progress.write_started_us=began;job->progress.write_phase=NAKI_WRITE_PHASE_OUTPUT_FINALIZE;pthread_mutex_unlock(&job->mutex);
+    naki_job_finalize_begin(job,began,deadline);
     if(p->mux&&p->mux->header_written)trailer=av_write_trailer(p->mux->output);
     if(p->mux&&p->mux->output&&p->mux->output->pb) {
         avio_flush(p->mux->output->pb);flush=p->mux->output->pb->error;
-        pthread_mutex_lock(&job->mutex);job->stats.bytes_out=p->mux->output->pb->bytes_written;pthread_mutex_unlock(&job->mutex);
+        naki_job_bytes_written(job,p->mux->output->pb->bytes_written);
         if(p->mux->output->flags&AVFMT_FLAG_CUSTOM_IO) {av_freep(&p->mux->output->pb->buffer);avio_context_free(&p->mux->output->pb);}
         else closed=avio_closep(&p->mux->output->pb);
     }
@@ -58,15 +57,11 @@ int pipeline_finalize_output(Pipeline *p,int primary,int stopped) {
         else if(flush<0) {primary=flush;p->stage="output flush";}
         else if(closed<0) {primary=closed;p->stage="output protocol close";}
     }
-    pthread_mutex_lock(&job->mutex);
-    job->progress.finalize_trailer_error=trailer<0?trailer:0;job->progress.finalize_flush_error=flush<0?flush:0;
-    job->progress.finalize_close_error=closed<0?closed:0;job->progress.finalize_primary_error=primary<0?primary:0;
-    job->progress.finalize_finished_us=now_us();job->progress.write_started_us=0;job->progress.write_phase=NAKI_WRITE_PHASE_NONE;
-    pthread_mutex_unlock(&job->mutex);
+    naki_job_finalize_result(job,trailer,flush,closed,primary,now_us());
     if(p->hooks.close) {
         NakiMediaEnd end={.cancelled=stopped,.error_code=primary<0?primary:0,.stage=p->stage};
-        if(job->parent)end.output_failures=atomic_load(&job->lifecycle.branch_failed)||(primary<0&&!stopped);
-        else for(int i=0;i<job->config.output_count;i++)end.output_failures+=atomic_load(&job->outputs[i]->lifecycle.branch_failed);
+        if(naki_job_parent(job))end.output_failures=naki_job_failed(job)||(primary<0&&!stopped);
+        else end.output_failures=naki_job_output_failures(job);
         p->hooks.close(p->hooks.opaque,&end);p->hooks=(NakiMediaHooks){0};
     }
     if(p->mux) {
@@ -97,7 +92,7 @@ static int64_t local_seek(void *opaque, int64_t offset, int whence) {
 
 int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     int prepared=pipeline_mux_prepare(p);if(prepared<0)return prepared;
-    const Config *cfg=&p->job->config;
+    const Config *cfg=naki_job_config(p->job);
     int vvc=!strcmp(cfg->encoder,"libvvenc");
     int byte_input=vvc&&cfg->encoder_input_bit_depth==8;
     enum AVPixelFormat output_pixels=vvc&&!byte_input?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_YUV420P;
@@ -112,17 +107,17 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     if(ret<0)return ret;
     p->input_width=frame->width; p->input_height=frame->height; p->input_format=frame->format;
     p->input_colorspace=frame->colorspace;p->input_range=frame->color_range;
-    pthread_mutex_lock(&p->job->mutex);p->job->stats.filter_generations=1;pthread_mutex_unlock(&p->job->mutex);
+    p->filter_generation=naki_job_filter_generation(p->job,1);
 
     p->stage="encoder initialization";
-    pipeline_checkpoint(p,&p->job->progress.encoder_open_started_us);
+    naki_job_checkpoint(p->job,NAKI_CP_ENCODER_OPEN_STARTED,0);
     const AVCodec *codec=avcodec_find_encoder_by_name(cfg->encoder);
     if (!codec) return AVERROR_ENCODER_NOT_FOUND;
     p->encoder=avcodec_alloc_context3(codec);
     if (!p->encoder) return AVERROR(ENOMEM);
     p->encoder->width=av_buffersink_get_w(p->sink);
     p->encoder->height=av_buffersink_get_h(p->sink);
-    pthread_mutex_lock(&p->job->mutex);p->job->progress.fixed_output_width=p->encoder->width;p->job->progress.fixed_output_height=p->encoder->height;pthread_mutex_unlock(&p->job->mutex);
+    naki_job_output_size_set(p->job,p->encoder->width,p->encoder->height);
     p->encoder->sample_aspect_ratio=av_buffersink_get_sample_aspect_ratio(p->sink);
     p->encoder->pix_fmt=output_pixels;
     /* The live VVenC fork preserves PTS at 90 kHz and generates DTS from the
@@ -200,9 +195,9 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     if (ret>=0 && av_dict_count(options)) ret=AVERROR_OPTION_NOT_FOUND;
     av_dict_free(&options);
     if (ret<0) return ret;
-    pipeline_checkpoint(p,&p->job->progress.encoder_open_done_us);
+    naki_job_checkpoint(p->job,NAKI_CP_ENCODER_OPEN_DONE,0);
     ret=pipeline_open_mux(p);if(ret<0)return ret;
-    pipeline_checkpoint(p,&p->job->progress.output_header_done_us);
+    naki_job_checkpoint(p->job,NAKI_CP_OUTPUT_HEADER_DONE,0);
     yyjson_mut_doc *doc=new_event("pipeline_ready",p->job);
     json_int(doc,"input_width",frame->width); json_int(doc,"input_height",frame->height);
     json_int(doc,"output_width",p->encoder->width); json_int(doc,"output_height",p->encoder->height);
@@ -223,8 +218,8 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     json_int(doc,"encoder_time_base_num",p->encoder->time_base.num);
     json_int(doc,"encoder_time_base_den",p->encoder->time_base.den);
     json_int(doc,"trace_ledger_capacity",LEDGER_CAPACITY);
-    json_num(doc,"startup_ms",(now_us()-p->job->lifecycle.started_us)/1000.0);
-    logger_submit(p->job->logger,NULL,doc); return 0;
+    json_num(doc,"startup_ms",(now_us()-naki_job_started_us(p->job))/1000.0);
+    logger_submit(naki_job_logger(p->job),NULL,doc); return 0;
 }
 
 int pipeline_drain_output(Pipeline *p) {
@@ -239,7 +234,7 @@ int pipeline_drain_output(Pipeline *p) {
     }
     if(ret<0||(ret=pipeline_receive_encoded(p))<0)return ret;
     if(!p->destinations&&((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0))return ret;
-    return (pipeline_ledger_pending(p)||(p->job->config.constrained_crf&&p->rate.pending_bits))?AVERROR_INVALIDDATA:0;
+    return (pipeline_ledger_pending(p)||(naki_job_config(p->job)->constrained_crf&&p->rate.pending_bits))?AVERROR_INVALIDDATA:0;
 }
 
 /* Call after reader/async shutdown (shared owner) or queue abort (branch owner),
@@ -261,39 +256,12 @@ void pipeline_release_media_resources(Pipeline *p,AVFrame **receive_frame) {
  * priority over parent cancellation; the shared owner keeps its captured stop
  * classification, including the existing overload override. Only the shared
  * owner finishes the common trace, after all branches have joined. */
-void pipeline_complete_job(Pipeline *p,int ret,int stopped) {
-    Job *j=p->job;
-    pthread_mutex_lock(&j->mutex);
-    memset(&j->flow.policy_inflight,0,sizeof(j->flow.policy_inflight));
-    j->lifecycle.ended_us=now_us();
-    if(j->parent) {
-        j->flow.policy_closing=1;
-        memset(&j->flow.branch_pending,0,sizeof(j->flow.branch_pending));
-        j->stats.branch_inflight_bytes=j->stats.branch_inflight_frames=0;
-        j->stats.branch_queued=j->stats.branch_queue_bytes=j->stats.branch_queue_media_us=0;
-        j->stats.branch_video_queued=j->stats.branch_audio_queued=0;
-        j->progress.branch_oldest_ingress_us=0;
-        j->lifecycle.state=j->lifecycle.branch_failed?NAKI_JOB_STATE_FAILED:atomic_load(&j->parent->lifecycle.cancel)?NAKI_JOB_STATE_STOPPED:NAKI_JOB_STATE_COMPLETED;
-    } else {
-        int partial=0;
-        for(int i=0;i<j->config.output_count;i++)if(*j->outputs[i]->output_id&&j->outputs[i]->lifecycle.branch_failed)partial=1;
-        j->lifecycle.state=stopped?NAKI_JOB_STATE_STOPPED:ret<0?NAKI_JOB_STATE_FAILED:partial?NAKI_JOB_STATE_COMPLETED_PARTIAL:NAKI_JOB_STATE_COMPLETED;
-        if(ret<0&&!stopped) {
-            char message[AV_ERROR_MAX_STRING_SIZE];av_strerror(ret,message,sizeof(message));
-            snprintf(j->lifecycle.error,sizeof(j->lifecycle.error),"%s: %s",p->stage,message);
-        }
-    }
-    pthread_mutex_unlock(&j->mutex);
-    logger_submit(j->logger,NULL,job_report(j,1));
-    if(!j->parent)logger_trace_finish(j->logger,j->trace);
-    atomic_store(&j->lifecycle.done,1);
-    if(j->parent)wake_job(j->parent);
-}
+void pipeline_complete_job(Pipeline *p,int ret,int stopped){naki_job_complete(p->job,ret,stopped,p->stage);}
 
 /* One mux owner; encoder parameters are immutable after codec open. This also
  * prepares an independent destination without opening a second encoder. */
 int pipeline_open_mux(Pipeline *p) {
-    Config *cfg=&p->job->config;int ret;
+    const Config *cfg=naki_job_config(p->job);int ret;
     if((ret=pipeline_mux_prepare(p))<0)return ret;
     if(!p->mux->output){ret=avformat_alloc_output_context2(&p->mux->output,NULL,cfg->output_format,cfg->output);if(ret<0)return ret;
         if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->mux->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;}
@@ -328,7 +296,7 @@ int pipeline_open_mux(Pipeline *p) {
     if (ret<0) return ret;
     p->mux->header_written=1;
     if(strcmp(cfg->output_format,"mp4")) {
-        ret=avformat_live_mux_init(p->mux->output,(int64_t)cfg->mux_wait_ms*1000,(p->destination_owner||p->job->remote_rendition==2)?4:256,4*1024*1024);
+        ret=avformat_live_mux_init(p->mux->output,(int64_t)cfg->mux_wait_ms*1000,(p->destination_owner||naki_job_remote(p->job)==2)?4:256,4*1024*1024);
         if(ret<0)return ret;
         p->mux->live_mux=1;
     }

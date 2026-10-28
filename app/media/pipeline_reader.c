@@ -25,14 +25,14 @@ static void *reader_main(void *opaque) {
     (void)crash_thread_init();
     Pipeline *p=opaque; Job *job=p->job;
     int ret=0; int64_t seq=0, first_ts=AV_NOPTS_VALUE, epoch=0, read_started=0;
-    while (!atomic_load(&job->lifecycle.cancel)) {
+    while (!naki_job_cancelled(job)) {
         /* Reserve reader space before consuming network bytes. One producer;
          * a consumer can only make more space while this read is in progress. */
         pthread_mutex_lock(&p->reader.ring_mutex);
-        while(p->reader.count>=job->config.reader_queue_capacity&&!atomic_load(&job->lifecycle.cancel))
+        while(p->reader.count>=naki_job_config(job)->reader_queue_capacity&&!naki_job_cancelled(job))
             pthread_cond_wait(&p->reader.ring_space,&p->reader.ring_mutex);
         pthread_mutex_unlock(&p->reader.ring_mutex);
-        if(atomic_load(&job->lifecycle.cancel))break;
+        if(naki_job_cancelled(job))break;
         AVPacket *packet=av_packet_alloc();
         if (!packet) {ret=AVERROR(ENOMEM); break;}
         if(!read_started)read_started=now_us();
@@ -55,42 +55,42 @@ static void *reader_main(void *opaque) {
         InputItem item={.packet=packet,.tb=p->input_tb,.demuxed_us=finished};
         if (!video) {
             AVStream *stream=p->input->streams[packet->stream_index];
-            int deliver=audio_subscribed && (job->config.output_count||strcmp(job->config.output_format,"mp4"));
+            int deliver=audio_subscribed && (naki_job_config(job)->output_count||strcmp(naki_job_config(job)->output_format,"mp4"));
             if (stream->codecpar->codec_type!=AVMEDIA_TYPE_AUDIO || (!deliver && !p->hooks.audio_packet)) {
                 pipeline_input_free(&item); continue;
             }
             if(stream->codecpar->extradata_size<0 || stream->codecpar->extradata_size>65536||stream->codecpar->ch_layout.nb_channels>64||stream->codecpar->nb_coded_side_data>32) {
-                pthread_mutex_lock(&job->mutex);job->stats.audio_unsupported++;pthread_mutex_unlock(&job->mutex);
+                naki_job_count(job,NAKI_COUNT_AUDIO_UNSUPPORTED,1);
                 pipeline_input_free(&item);continue;
             }
             uint64_t side_bytes=0;
             for(int k=0;k<stream->codecpar->nb_coded_side_data;k++)side_bytes+=stream->codecpar->coded_side_data[k].size;
-            if(side_bytes>262144) {pthread_mutex_lock(&job->mutex);job->stats.audio_unsupported++;pthread_mutex_unlock(&job->mutex);pipeline_input_free(&item);continue;}
+            if(side_bytes>262144) {naki_job_count(job,NAKI_COUNT_AUDIO_UNSUPPORTED,1);pipeline_input_free(&item);continue;}
             item.params=avcodec_parameters_alloc(); item.tb=stream->time_base;
             if (!item.params) {pipeline_input_free(&item); ret=AVERROR(ENOMEM); break;}
             ret=avcodec_parameters_copy(item.params,stream->codecpar);
             if(ret<0) {pipeline_input_free(&item); break;}
         }
         int64_t due=0;
-        if (job->config.pace) {
+        if (naki_job_config(job)->pace) {
             int64_t ts=packet->dts!=AV_NOPTS_VALUE ? packet->dts : packet->pts;
             if (ts==AV_NOPTS_VALUE) ts=av_rescale_q(seq,av_inv_q(p->frame_rate),p->input_tb);
             ts=av_rescale_q(ts,item.tb,AV_TIME_BASE_Q);
             if (first_ts==AV_NOPTS_VALUE) {first_ts=ts; epoch=finished;}
             due=epoch+ts-first_ts;
-            while (!atomic_load(&job->lifecycle.cancel) && now_us()<due) {
+            while (!naki_job_cancelled(job) && now_us()<due) {
                 int64_t left=due-now_us();
                 if (left>0) av_usleep((unsigned)(left>10000 ? 10000 : left));
             }
         }
-        if (atomic_load(&job->lifecycle.cancel)) {pipeline_input_free(&item); break;}
+        if (naki_job_cancelled(job)) {pipeline_input_free(&item); break;}
         ret=av_packet_make_refcounted(packet);
         if (ret<0) {pipeline_input_free(&item); break;}
         if (video) {
             const AVReadOrigin *origin=avformat_packet_read_origin(packet);
             AVReadOrigin source_origin=origin?*origin:(AVReadOrigin){0};
-            if(job->config.network_trace&&!origin) {pipeline_input_free(&item);ret=AVERROR_INVALIDDATA;break;}
-            if(job->config.source_rate_limit) {
+            if(naki_job_config(job)->network_trace&&!origin) {pipeline_input_free(&item);ret=AVERROR_INVALIDDATA;break;}
+            if(naki_job_config(job)->source_rate_limit) {
                 pthread_mutex_lock(&p->reader.ring_mutex);
                 while(p->reader.rate_count&&p->reader.rate[p->reader.rate_head].us<=finished-1000000) {
                     p->reader.rate_bits-=p->reader.rate[p->reader.rate_head].bits;
@@ -123,7 +123,7 @@ static void *reader_main(void *opaque) {
             stamp->network_complete_us=source_origin.complete_us;
             stamp->network_tag_position=source_origin.tag_position;
             stamp->demux_finished_us=finished;
-            if(job->config.network_trace) {
+            if(naki_job_config(job)->network_trace) {
                 yyjson_mut_doc *event=new_event("input_video_packet",job);
                 json_int(event,"sequence",seq);json_int(event,"bytes",packet->size);
                 json_int(event,"config_bytes",seq==0?p->input->streams[p->stream_index]->codecpar->extradata_size:0);
@@ -133,7 +133,7 @@ static void *reader_main(void *opaque) {
                 json_int(event,"tag_position",source_origin.tag_position);
                 pipeline_trace_pts(event,"pts",packet->pts);pipeline_trace_pts(event,"dts",packet->dts);
                 json_int(event,"tb_num",p->input_tb.num);json_int(event,"tb_den",p->input_tb.den);
-                logger_submit(job->logger,job->trace,event);
+                logger_submit(naki_job_logger(job),naki_job_trace(job),event);
             }
             stamp->sei_size=(uint32_t)sei_size;stamp->subscription_generation=subscription_generation;
             if(seq==INT64_MAX) {pipeline_input_free(&item); ret=AVERROR(ERANGE); break;}
@@ -141,20 +141,20 @@ static void *reader_main(void *opaque) {
             if(sei_size) {
                 ret=pipeline_reader_sei_obligation(p,stamp->sequence,1);
                 if(ret<0) {pipeline_input_free(&item);break;}
-                pthread_mutex_lock(&job->mutex);job->stats.sei_extracted+=pipeline_stamp_sei(packet->opaque_ref)->count;pthread_mutex_unlock(&job->mutex);
+                naki_job_count(job,NAKI_COUNT_SEI_EXTRACTED,pipeline_stamp_sei(packet->opaque_ref)->count);
             }
             stamp->ingress_us=now_us(); stamp->scheduled_us=due;
             stamp->packet_pts=packet->pts; stamp->packet_dts=packet->dts;
             ret=naki_policy_track(job,NAKI_TRACK_PACKET,(uint64_t)stamp->sequence,stamp->ingress_us);
             if(ret<0) {pipeline_input_free(&item); break;}
             stamp->tracked_packet=1;
-            if(job->renditions){
+            if(naki_job_renditions(job)){
                 int registered=0;pthread_mutex_lock(&p->reader.ring_mutex);
                 for(unsigned k=0;k<NAKI_INFLIGHT_CAPACITY;k++)if(!p->reader.epochs[k].sequence){p->reader.epochs[k].sequence=stamp->sequence+1;p->reader.epochs[k].generation=subscription_generation;registered=1;break;}
                 pthread_mutex_unlock(&p->reader.ring_mutex);
                 if(!registered){pipeline_input_free(&item);ret=AVERROR(ENOBUFS);break;}
             }
-            pipeline_checkpoint(p,&job->progress.first_packet_us);
+            naki_job_checkpoint(job,NAKI_CP_FIRST_PACKET,0);
             stamp->input_key=!!(packet->flags&AV_PKT_FLAG_KEY);
         }
         AVCodecParameters video_parameters={0};
@@ -163,11 +163,11 @@ static void *reader_main(void *opaque) {
         if(ret<0||accounting.charged_bytes>NAKI_INPUT_RETAINED_ITEM_BYTES) {pipeline_input_free(&item);if(ret>=0)ret=AVERROR(ENOBUFS);break;}
         item.retained_bytes=accounting.charged_bytes;
         pthread_mutex_lock(&p->reader.ring_mutex);
-        while ((p->reader.count==READER_CAPACITY||item.retained_bytes>NAKI_READER_RETAINED_BYTES-p->reader.reader_bytes) && !atomic_load(&job->lifecycle.cancel)) pthread_cond_wait(&p->reader.ring_space,&p->reader.ring_mutex);
-        if (atomic_load(&job->lifecycle.cancel)) {pthread_mutex_unlock(&p->reader.ring_mutex); pipeline_input_free(&item); break;}
+        while ((p->reader.count==READER_CAPACITY||item.retained_bytes>NAKI_READER_RETAINED_BYTES-p->reader.reader_bytes) && !naki_job_cancelled(job)) pthread_cond_wait(&p->reader.ring_space,&p->reader.ring_mutex);
+        if (naki_job_cancelled(job)) {pthread_mutex_unlock(&p->reader.ring_mutex); pipeline_input_free(&item); break;}
         p->reader.ring[(p->reader.head+p->reader.count)%READER_CAPACITY]=item; p->reader.count++;p->reader.reader_bytes+=item.retained_bytes;
         pthread_mutex_unlock(&p->reader.ring_mutex);
-        pthread_mutex_lock(&job->mutex);job->progress.last_input_us=now_us();if(video)job->stats.packets_in++;pthread_mutex_unlock(&job->mutex);
+        naki_job_input_received(job,video,0,now_us());
         pipeline_decode_notify(p);
     }
     pthread_mutex_lock(&p->reader.ring_mutex);
@@ -225,7 +225,7 @@ int pipeline_reader_pending_sei(Pipeline *p) {
 }
 
 int64_t pipeline_source_rate(Pipeline *p,int64_t now) {
-    if(p->job->remote_rendition==2)return atomic_load(&p->job->remote_source_rate);
+    if(naki_job_remote(p->job)==2)return naki_job_source_rate(p->job);
     pthread_mutex_lock(&p->reader.ring_mutex);
     while(p->reader.rate_count&&p->reader.rate[p->reader.rate_head].us<=now-1000000) {
         p->reader.rate_bits-=p->reader.rate[p->reader.rate_head].bits;

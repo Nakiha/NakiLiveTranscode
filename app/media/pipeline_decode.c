@@ -11,7 +11,7 @@ void pipeline_decode_notify(void *opaque) {
 }
 int pipeline_decode_init(Pipeline *p) {
     pthread_mutex_init(&p->pump.mutex,NULL);
-    return naki_wakeup_init(&p->pump.wake,p->job->config.decoder_pump);
+    return naki_wakeup_init(&p->pump.wake,naki_job_config(p->job)->decoder_pump);
 }
 static void decoded_stamp_free(void *opaque,uint8_t *data) {
     AVBufferRef *origin=opaque;
@@ -21,7 +21,7 @@ static void *decode_main(void *opaque) {
     (void)crash_thread_init();Pipeline *p=opaque;DecodePump *q=&p->pump;
     AVFrame *frame=av_frame_alloc();InputItem pending={0};
     int ret=frame?0:AVERROR(ENOMEM),eof_sent=0;int64_t next_stats=0;
-    while(ret>=0&&!atomic_load(&p->job->lifecycle.cancel)) {
+    while(ret>=0&&!naki_job_cancelled(p->job)) {
         ret=naki_wakeup_clear(&q->wake);if(ret<0)break;
         int progress=0,available;
         pthread_mutex_lock(&q->mutex);available=!q->occupied;pthread_mutex_unlock(&q->mutex);
@@ -43,19 +43,15 @@ static void *decode_main(void *opaque) {
                 ret=pipeline_prepare_decoded_frame(p,frame);if(ret<0)break;
                 Stamp *stamp=(Stamp *)frame->opaque_ref->data;
                 int protect=stamp->picture_type==AV_PICTURE_TYPE_I||stamp->frame_id==1||
-                    naki_sei_count(pipeline_stamp_sei(frame->opaque_ref),&p->job->config.sei)>0;
-                if(!p->job->config.rendition_backend&&p->job->config.policy.intra==NAKI_INTRA_SOURCE&&!p->job->config.policy.overload_levels&&
+                    naki_sei_count(pipeline_stamp_sei(frame->opaque_ref),&naki_job_config(p->job)->sei)>0;
+                if(!naki_job_config(p->job)->rendition_backend&&naki_job_config(p->job)->policy.intra==NAKI_INTRA_SOURCE&&!naki_job_config(p->job)->policy.overload_levels&&
                    !naki_video_rate_keep((uint64_t)stamp->frame_id,p->rate_divisor,protect)) {
-                    pthread_mutex_lock(&p->job->mutex);
-                    p->job->stats.frames_decoded++;p->job->stats.frames_dropped_rate++;
-                    if(p->job->stats.frame_id_last<(uint64_t)stamp->frame_id)p->job->stats.frame_id_last=(uint64_t)stamp->frame_id;
-                    p->job->stats.timestamp_wraps=stamp->timestamp_wraps;
-                    pthread_mutex_unlock(&p->job->mutex);
-                    if(p->job->config.frame_log&&(stamp->frame_id-1)%p->job->config.frame_log_every==0) {
+                    naki_job_rate_dropped(p->job,stamp);
+                    if(naki_job_config(p->job)->frame_log&&(stamp->frame_id-1)%naki_job_config(p->job)->frame_log_every==0) {
                         yyjson_mut_doc *event=new_event("frame_drop",p->job);
                         json_int(event,"frame_id",stamp->frame_id);json_int(event,"input_sequence",stamp->sequence);
                         json_int(event,"source_pts",stamp->source_pts);json_int(event,"overload_level",0);
-                        json_str(event,"reason","output_rate");logger_submit(p->job->logger,p->job->trace,event);
+                        json_str(event,"reason","output_rate");logger_submit(naki_job_logger(p->job),naki_job_trace(p->job),event);
                     }
                     av_frame_unref(frame);progress=1;
                     /* Continue feeding below; only retained pictures occupy
@@ -94,7 +90,7 @@ static void *decode_main(void *opaque) {
             /* A private eventfd preserves notifications racing this wait.
              * The timeout is only for the periodic stats snapshot; decoding,
              * slot release, reader progress and join all explicitly notify. */
-            if(!atomic_load(&p->job->lifecycle.cancel))ret=naki_wakeup_wait(&q->wake,1000);
+            if(!naki_job_cancelled(p->job))ret=naki_wakeup_wait(&q->wake,1000);
         }
     }
     pipeline_input_free(&pending);av_frame_free(&frame);pipeline_refresh_auto(p);
@@ -102,7 +98,7 @@ static void *decode_main(void *opaque) {
     wake_job(p->job);return NULL;
 }
 int pipeline_decode_start(Pipeline *p) {
-    int rate=naki_video_rate_output(&p->video_rate,p->job->config.output_fps,&p->output_rate,&p->rate_divisor);
+    int rate=naki_video_rate_output(&p->video_rate,naki_job_config(p->job)->output_fps,&p->output_rate,&p->rate_divisor);
     if(rate<0)return rate;
     p->pump.frame=av_frame_alloc();if(!p->pump.frame)return AVERROR(ENOMEM);
     int ret=pthread_create(&p->pump.thread,NULL,decode_main,p);

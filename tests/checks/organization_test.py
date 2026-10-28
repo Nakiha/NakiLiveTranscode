@@ -32,6 +32,9 @@ class Organization(unittest.TestCase):
             ('media/illegal.c', '#include "pipeline_mux.c"\n', 'implementation include'),
             ('media/illegal.c', '#define H "mux_internal.h"\n#include H\n', 'computed include'),
             ('media/illegal.c', 'struct NakiMux { int secret; };', 'representation is private'),
+            ('media/illegal.c', 'struct Job { int secret; };', 'representation is private'),
+            ('media/illegal.c', 'void f(void){naki_job_frame_written(0,0);}', 'unauthorized Job publisher'),
+            ('media/illegal.c', 'void f(void){naki_job_child_free(0);}', 'unauthorized Job publisher'),
         ]
         for name, source, expected in cases:
             with self.subTest(name=name, expected=expected), tempfile.TemporaryDirectory() as directory:
@@ -61,6 +64,17 @@ class Organization(unittest.TestCase):
                         '-I' + str(ROOT / 'app'), '-I' + str(ROOT / 'third_party/yyjson/src'),
                         *map(str, (ROOT / 'app/control').glob('*.c'))],
                        capture_output=True, text=True, check=True)
+
+    def test_media_contracts_cannot_access_mutable_job(self):
+        prefix = pathlib.Path(os.environ.get('NAKI_BUILD_ROOT', pathlib.Path.home()/'.cache/naki-live-transcode-n9')) / 'install'
+        command = ['cc', '-std=c11', '-Werror', '-fsyntax-only', '-x', 'c',
+                   '-I'+str(ROOT/'app'), '-I'+str(ROOT/'third_party/yyjson/src'), '-I'+str(prefix/'include'), '-']
+        headers = '#include "worker/job_media.h"\n#include "worker/job_remote.h"\n'
+        good = subprocess.run(command, input=headers+'int f(Job *j){return naki_job_config(j)->width;}\n', text=True, capture_output=True)
+        self.assertEqual(good.returncode, 0, good.stderr)
+        for expression in ('sizeof(Job)', 'j->stats.packets_out', 'sizeof(j->mutex)'):
+            bad = subprocess.run(command, input=headers+'int f(Job *j){return (int)('+expression+');}\n', text=True, capture_output=True)
+            self.assertNotEqual(bad.returncode, 0, expression)
 
     def test_no_imports_from_old_flat_test_layout_inside_functions(self):
         # Walk the whole AST, including function-local imports that a plain

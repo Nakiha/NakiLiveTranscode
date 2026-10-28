@@ -1,3 +1,4 @@
+#include "worker/job.h"
 /* Inspect private slot state to deterministically exercise ready becoming true
  * after the owner poll, before its next IDR. No writer thread or I/O is needed. */
 #include "media/destination_runtime.c"

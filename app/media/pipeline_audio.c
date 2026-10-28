@@ -1,10 +1,6 @@
 #include "mux_internal.h"
 
-static void audio_count(Pipeline *p, int unsupported) {
-    pthread_mutex_lock(&p->job->mutex);
-    if(unsupported)p->job->stats.audio_unsupported++; else p->job->stats.audio_dropped++;
-    pthread_mutex_unlock(&p->job->mutex);
-}
+static void audio_count(Pipeline *p,int unsupported){naki_job_count(p->job,unsupported?NAKI_COUNT_AUDIO_UNSUPPORTED:NAKI_COUNT_AUDIO_DROPPED,1);}
 static int prepare_audio_params(AVCodecParameters *par, const AVPacket *pkt) {
     if(par->codec_id!=AV_CODEC_ID_AAC && par->codec_id!=AV_CODEC_ID_MP3)return AVERROR(ENOSYS);
     if(par->extradata_size>65536 || par->extradata_size<0)return AVERROR(EINVAL);
@@ -87,20 +83,20 @@ static int process_audio(Pipeline *p, const InputItem *item) {
             json_int(doc,"accepted_core_sample_rate",track->accepted.core_rate);json_int(doc,"observed_core_sample_rate",observed.core_rate);
             json_int(doc,"accepted_coded_channels",track->accepted.layout.nb_channels);json_int(doc,"observed_coded_channels",observed.layout.nb_channels);
             json_int(doc,"accepted_object_type",track->accepted.object_type);json_int(doc,"observed_object_type",observed.object_type);
-            logger_submit(p->job->logger,NULL,doc);naki_audio_signature_clear(&observed);return 0;
+            logger_submit(naki_job_logger(p->job),NULL,doc);naki_audio_signature_clear(&observed);return 0;
         }
     } else if(signature_ret<0) {
-        if(signature_ret==AVERROR(EAGAIN)&&!(track->pending_reported&1)){track->pending_reported|=1;yyjson_mut_doc *event=new_event("audio_parameters_pending",p->job);json_str(event,"stage","immutable input signature");json_int(event,"extradata_bytes",item->params->extradata_size);json_int(event,"packet_bytes",item->packet->size);logger_submit(p->job->logger,NULL,event);}
+        if(signature_ret==AVERROR(EAGAIN)&&!(track->pending_reported&1)){track->pending_reported|=1;yyjson_mut_doc *event=new_event("audio_parameters_pending",p->job);json_str(event,"stage","immutable input signature");json_int(event,"extradata_bytes",item->params->extradata_size);json_int(event,"packet_bytes",item->packet->size);logger_submit(naki_job_logger(p->job),NULL,event);}
         if(signature_ret!=AVERROR(EAGAIN)) {
             track->rejected=1;yyjson_mut_doc *doc=new_event("audio_track_rejected",p->job);
             json_int(doc,"input_stream",track->input_index);json_str(doc,"codec",avcodec_get_name(item->params->codec_id));
-            json_str(doc,"reason","input_configuration_unreadable");json_int(doc,"error_code",signature_ret);logger_submit(p->job->logger,NULL,doc);
+            json_str(doc,"reason","input_configuration_unreadable");json_int(doc,"error_code",signature_ret);logger_submit(naki_job_logger(p->job),NULL,doc);
         }
         audio_count(p,signature_ret!=AVERROR(EAGAIN));naki_audio_signature_clear(&observed);return 0;
     }
     if(!track->output) {
         int ret=prepare_audio_params(item->params,item->packet);
-        if(ret==AVERROR(EAGAIN)){if(!(track->pending_reported&2)){track->pending_reported|=2;yyjson_mut_doc *event=new_event("audio_parameters_pending",p->job);json_str(event,"stage","bounded audio decoder probe");json_int(event,"extradata_bytes",item->params->extradata_size);json_int(event,"packet_bytes",item->packet->size);logger_submit(p->job->logger,NULL,event);}audio_count(p,0);naki_audio_signature_clear(&observed);return 0;}
+        if(ret==AVERROR(EAGAIN)){if(!(track->pending_reported&2)){track->pending_reported|=2;yyjson_mut_doc *event=new_event("audio_parameters_pending",p->job);json_str(event,"stage","bounded audio decoder probe");json_int(event,"extradata_bytes",item->params->extradata_size);json_int(event,"packet_bytes",item->packet->size);logger_submit(naki_job_logger(p->job),NULL,event);}audio_count(p,0);naki_audio_signature_clear(&observed);return 0;}
         if(ret==AVERROR(ENOMEM)) {naki_audio_signature_clear(&observed);return ret;}
         if(ret>=0 && item->params->codec_id==AV_CODEC_ID_AAC) {
             const AVBitStreamFilter *filter=av_bsf_get_by_name("aac_adtstoasc");
@@ -114,15 +110,15 @@ static int process_audio(Pipeline *p, const InputItem *item) {
             track->rejected=1;audio_count(p,1);
             yyjson_mut_doc *doc=new_event("audio_track_rejected",p->job);
             json_int(doc,"input_stream",track->input_index);json_str(doc,"codec",avcodec_get_name(item->params->codec_id));
-            json_int(doc,"error_code",ret);logger_submit(p->job->logger,NULL,doc);
+            json_int(doc,"error_code",ret);logger_submit(naki_job_logger(p->job),NULL,doc);
             return 0;
         }
         track->accepted=observed;memset(&observed,0,sizeof(observed));
-        pthread_mutex_lock(&p->job->mutex);p->job->stats.audio_tracks++;pthread_mutex_unlock(&p->job->mutex);
+        naki_job_count(p->job,NAKI_COUNT_AUDIO_TRACKS,1);
         yyjson_mut_doc *doc=new_event("audio_track_added",p->job);
         json_int(doc,"input_stream",track->input_index);json_int(doc,"output_stream",track->output->index);
         json_str(doc,"codec",avcodec_get_name(item->params->codec_id));json_int(doc,"sample_rate",item->params->sample_rate);
-        json_str(doc,"action","registered_without_reopening_output");logger_submit(p->job->logger,NULL,doc);
+        json_str(doc,"action","registered_without_reopening_output");logger_submit(naki_job_logger(p->job),NULL,doc);
     }
     naki_audio_signature_clear(&observed);
     AVPacket *packet=av_packet_clone(item->packet);

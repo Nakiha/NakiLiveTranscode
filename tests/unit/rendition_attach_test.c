@@ -1,3 +1,4 @@
+#include "worker/job.h"
 #include "media/rendition_runtime_internal.h"
 #include <assert.h>
 #include <stdlib.h>
