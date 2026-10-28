@@ -40,5 +40,5 @@ int naki_rendition_media_close(Pipeline **out,int error,int stopped) {
     naki_watermark_owner_finish(naki_job_watermark(j),error,stopped);naki_watermark_stop(naki_job_watermark(j));
     error=pipeline_finalize_output(p,error,stopped);pipeline_release_media_resources(p,NULL);
     if(error<0&&!stopped)naki_job_media_error(j,error,p->stage);
-    pipeline_complete_job(p,error,stopped);free(p);*out=NULL;return error;
+    naki_job_complete(p->job,error,stopped,p->stage);free(p);*out=NULL;return error;
 }

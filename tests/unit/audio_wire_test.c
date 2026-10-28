@@ -1,6 +1,10 @@
 #include "media/audio_wire.h"
-#include "media/pipeline_internal.h"
 #include <assert.h>
+#include <errno.h>
+#include <stdio.h>
+#include <string.h>
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 #include <libavutil/mem.h>
 static void free_item(InputItem *item){av_packet_free(&item->packet);avcodec_parameters_free(&item->params);}
 static void returned(void *opaque,uint8_t *data){(void)data;(*(int *)opaque)++;}

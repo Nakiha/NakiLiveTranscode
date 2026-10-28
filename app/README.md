@@ -15,8 +15,7 @@
 
 配置/控制代码编译为 `naki-control` 静态目标。跨目录包含使用从 app/ 开始的明确路径；controller 不允许包含 `worker/job.h` 或 `media/pipeline_internal.h`。配置与指标头可在不安装 FFmpeg SDK 的情况下单独编译检查。
 
-
-当前是单输入、1–4 个固定逻辑输出的实验服务。本次按职责分目录并收窄共享接口，未增加模块线程、通用插件框架或 IPC 媒体通道。历史模块拆分窗口见[核心整理验证](../docs/validation-core-refactor.md)；本次运行证据见[目录整理验证](../docs/validation-organization.md)。
+当前保持单输入，默认固定输出路径和显式 process/thread 分支后端均为实验功能。历史模块拆分窗口见[核心整理验证](../docs/validation-core-refactor.md)和[目录整理验证](../docs/validation-organization.md)；后续所有权收口见[完成验证](../docs/validation-architecture-completion-20261029.md)。
 
 - `controller/service.c`：启动、参数、libevent 注册及退出编排。
 - `controller/service_http.c`：HTTP 路由、JSON 校验/响应与有界待确认请求。

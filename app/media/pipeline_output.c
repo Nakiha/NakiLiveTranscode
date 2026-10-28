@@ -38,7 +38,7 @@ void pipeline_mux_retire_audio(Pipeline *p) {
 void pipeline_mux_release(Pipeline *p) {
     if(!p->mux)return;
     pipeline_mux_retire_audio(p);
-    free(p->mux);p->mux=NULL;p->video.valid=0;
+    free(p->mux);p->mux=NULL;
 }
 
 /* Called only by the owning shared/branch pipeline thread. The orchestration
@@ -76,7 +76,7 @@ int pipeline_finalize_output(Pipeline *p,int primary,int stopped) {
     }
     if(p->mux) {
         if(p->mux->output) {avformat_free_context(p->mux->output);p->mux->output=NULL;}
-        p->mux->header_written=p->mux->live_mux=0;p->video.valid=0;
+        p->mux->header_written=p->mux->live_mux=0;
         atomic_store(&p->mux->interrupt.deadline,0);
     }
     return primary;
@@ -99,12 +99,6 @@ static int64_t local_seek(void *opaque, int64_t offset, int whence) {
     off_t pos=lseek(m->custom_output_fd,(off_t)offset,whence&~AVSEEK_FORCE);
     return pos<0 ? AVERROR(errno) : (int64_t)pos;
 }
-
-/* Publish only after owned media references are released. Branch failure has
- * priority over parent cancellation; the shared owner keeps its captured stop
- * classification, including the existing overload override. Only the shared
- * owner finishes the common trace, after all branches have joined. */
-void pipeline_complete_job(Pipeline *p,int ret,int stopped){naki_job_complete(p->job,ret,stopped,p->stage);}
 
 /* One mux owner; encoder parameters are immutable after codec open. This also
  * prepares an independent destination without opening a second encoder. */
@@ -141,7 +135,7 @@ int pipeline_open_mux(Pipeline *p) {
     ret=avformat_write_header(p->mux->output,NULL);
     atomic_store(&p->mux->interrupt.deadline,0);
     if (ret<0) return ret;
-    p->video.time_base=video->time_base;p->video.avg_frame_rate=video->avg_frame_rate;p->video.index=video->index;p->video.valid=1;
+    p->video.time_base=video->time_base;p->video.index=video->index;
     p->mux->header_written=1;
     if(strcmp(cfg->output_format,"mp4")) {
         ret=avformat_live_mux_init(p->mux->output,(int64_t)cfg->mux_wait_ms*1000,(p->destination_owner||naki_job_remote(p->job)==2)?4:256,4*1024*1024);

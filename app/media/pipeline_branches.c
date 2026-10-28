@@ -1,4 +1,6 @@
 #include "pipeline_internal.h"
+#include "branch_queue.h"
+#define BRANCH_ADMISSION_GRACE_US 100000
 typedef struct Branch {
     Pipeline pipeline;
     NakiBranchQueue queue;
@@ -73,7 +75,7 @@ static void *branch_main(void *opaque) {
     ret=pipeline_finalize_output(p,ret,naki_job_cancelled(naki_job_parent(j)));
     if(ret<0&&!naki_job_cancelled(naki_job_parent(j)))fail_branch(b,ret,p->stage);
     pipeline_release_media_resources(p,NULL);
-    pipeline_complete_job(p,ret,0);
+    naki_job_complete(p->job,ret,0,p->stage);
     return NULL;
 }
 int pipeline_branches_start(Pipeline *p) {

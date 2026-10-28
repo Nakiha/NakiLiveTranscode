@@ -23,6 +23,7 @@
 #include "control/identity.h"
 #include "control/intent.h"
 #include <curl/curl.h>
+#include <libavformat/avformat.h>
 #include <sys/eventfd.h>
 #include <sys/prctl.h>
 #include <signal.h>

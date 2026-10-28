@@ -82,11 +82,11 @@ for event in ('close','release'):
 for event in ('init','join','clear','destroy'):
     EVENT_OWNERS['pipeline_reader_'+event]={'media/pipeline_input.c','media/pipeline_reader.c','media/input_internal.h'}
 EVENT_OWNERS['pipeline_decode_start']={'media/pipeline.c','media/pipeline_decode.c','media/pipeline_internal.h'}
-EVENT_OWNERS['pipeline_reader_start']={'media/pipeline.c','media/pipeline_reader.c','media/pipeline_reader.h'}
+EVENT_OWNERS['pipeline_reader_start']={'media/pipeline.c','media/pipeline_reader.c','media/pipeline_internal.h'}
 
 JOB_PUBLISHERS = {
     'naki_job_frame_written': {'media/pipeline_mux.c'},
-    'naki_job_complete': {'media/pipeline_output.c'},
+    'naki_job_complete': {'media/pipeline.c','media/pipeline_branches.c','media/rendition_media.c'},
     'naki_job_finalize_begin': {'media/pipeline_output.c'},
     'naki_job_finalize_result': {'media/pipeline_output.c'},
     'naki_job_remote_slots': {'media/rendition_runtime.c'},

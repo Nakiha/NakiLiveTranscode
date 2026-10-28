@@ -1,4 +1,5 @@
 #include "mux_internal.h"
+#include "branch_queue.h"
 
 static void audio_count(Pipeline *p,int unsupported){naki_job_count(p->job,unsupported?NAKI_COUNT_AUDIO_UNSUPPORTED:NAKI_COUNT_AUDIO_DROPPED,1);}
 static int prepare_audio_params(AVCodecParameters *par, const AVPacket *pkt) {

@@ -40,6 +40,7 @@ class Organization(unittest.TestCase):
             ('media/illegal.c', 'void f(void){avcodec_send_frame(0,0);}', 'single-owner API'),
             ('media/illegal.c', 'struct Job { int secret; };', 'representation is private'),
             ('media/illegal.c', 'void f(void){naki_job_frame_written(0,0);}', 'unauthorized Job publisher'),
+            ('media/pipeline_output.c', 'void f(void){naki_job_complete(0,0,0,0);}', 'unauthorized Job publisher'),
             ('media/illegal.c', 'void f(void){naki_job_child_free(0);}', 'unauthorized Job publisher'),
             ('media/illegal.c', 'void f(void){naki_rl_reaped(0,1);}', 'unauthorized owner event'),
             ('media/illegal.c', 'void f(void){naki_writer_finish(0);}', 'unauthorized owner event'),

@@ -4,6 +4,9 @@
  * address from allocation through close, including an owner handoff. Protocol
  * interrupts and custom AVIO callbacks never point into a Pipeline. */
 #include "pipeline_internal.h"
+#include "audio_signature.h"
+#include <libavformat/avformat.h>
+#include <libavformat/live_mux.h>
 #include <libavcodec/bsf.h>
 
 typedef struct AudioTrack {

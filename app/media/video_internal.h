@@ -1,5 +1,6 @@
 #ifndef NAKI_VIDEO_INTERNAL_H
 #define NAKI_VIDEO_INTERNAL_H
+#define LEDGER_CAPACITY 256
 #include "pipeline_internal.h"
 #include <libavutil/opt.h>
 #include <libavfilter/buffersrc.h>

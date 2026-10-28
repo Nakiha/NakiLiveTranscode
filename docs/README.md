@@ -1,16 +1,15 @@
 # 文档索引与当前状态
 
 长期维护的可执行组件边界与测试范围见[架构约束](architecture.md)。
-本轮修改和同源码分段回归结果见[2026-10-28 边界加固验证](validation-architecture-20261028.md)。
-继续完成 Job、输入/视频和生命周期收口的最终证据见[2026-10-29 收口完成验证](validation-architecture-completion-20261029.md)。
+边界加固的阶段记录见[2026-10-28 验证](validation-architecture-20261028.md)，Job、输入/视频和生命周期收口见[2026-10-29 验证](validation-architecture-completion-20261029.md)。各报告保留原源码窗口。
 
 编码分支进程隔离、动态增删、保活和多目标接入：见 [rendition 运行时](rendition-runtime.md)（实验功能；默认后端不变）；本轮结果见 [issue #4 本机验收](rendition-acceptance-20261026.md)。
 
 后续审计修复与当前合入检查见 [2026-10-27 审计复核](validation-rendition-audit-20261027.md)；原验收报告保留其历史源码窗口。
 
-更新日期：2026-10-26。当前为实验性的 Linux/WSL 0.9.0 服务：一个活动 H.264/HEVC 输入、1–4 个固定逻辑输出。FFmpeg 使用 n9.0.2 fork，历史目录名 `ffmpeg-7.0.3` 不代表当前库版本。
+更新日期：2026-10-29。当前为实验性的 Linux/WSL 0.9.0 服务：一个活动 H.264/HEVC 输入，默认固定输出路径和显式 process/thread 分支后端的合同分别见下表。FFmpeg 使用 n9.0.2 fork，历史目录名 `ffmpeg-7.0.3` 不代表当前库版本。
 
-最新实验记录：[后续I帧预算与GOP派发细分](validation-i-budget-gop-dispatch-20261018.md)，沿用HEVC 8Mbps输入，分别验证I帧模型、预算及等待边界。
+历史性能实验：[后续I帧预算与GOP派发细分](validation-i-budget-gop-dispatch-20261018.md)。其媒体、参数和结果属于原测量窗口。
 
 ## 当前合同
 
@@ -19,7 +18,7 @@
 | 运行与 HTTP 字段 | [服务](service.md)、[OpenAPI](openapi.json) | 已实现的 v1；无认证的本机接口，静态 OpenAPI 不由服务托管 |
 | 创建/更新/停止与查询 | [组件更新](component-updates.md)、[健康进度](health-progress.md)、[进程恢复](processes.md) | worker ACK、显式 job/operation 身份、有限内存重试；不提供持久 journal 或 exactly-once |
 | 固定多输出/动态输入 | [固定输出合同](branching-contract.md) | 默认既有路径：2–4 路独立 owner；单元素 outputs 归一化为直接路径；不在线增删路或改输出规格 |
-| 显式动态分支后端 | [rendition 运行时](rendition-runtime.md)、[本轮验收](rendition-acceptance-20261026.md) | 最多 4 路，process/thread 对照、动态增删与恢复、可配置保活、受限 AVC 多目标；实验版，最终验收未完成 |
+| 显式动态分支后端 | [rendition 运行时](rendition-runtime.md)、[原验收](rendition-acceptance-20261026.md)、[收口验证](validation-architecture-completion-20261029.md) | 最多 4 路，process/thread、逻辑分支增删与恢复、可配置保活、受限 AVC 多目标；实验版，验证范围以对应报告为准 |
 | 音频与封装 | [live mux](live-mux.md)、[音轨签名](audio-signatures.md)、[输入恢复](live-input-stability.md) | AAC/MP3 透传与晚音轨追加；MP4 视频限定；不是音频转码或任意 codec |
 | 帧/时钟/元数据 | [帧策略](frame-policy.md)、[SEI](sei.md)、[名义帧率](video-rate.md)、[VVenC](vvenc.md) | 严格 source_all、显式 I/抽帧、选定 SEI 类型；不修复脏时间戳，不自动保留所有消息 |
 | 水印 | [单水印 v1](watermark.md) | 每输出 SDR 8/10-bit，JPEG/PNG/GIF，完整 revision 兼容接口与 typed patch；HDR/多水印未实现 |
@@ -29,7 +28,7 @@
 
 ## 当前验证与历史证据
 
-本次目录、公共设施与接口整理的最终窗口见[目录整理验证](validation-organization.md)，功能入口见[测试说明](testing.md)，独立测量见[性能入口](benchmarking.md)。历史报告继续保留原源码窗口。
+目录整理的原窗口见[目录整理验证](validation-organization.md)，当前所有权与生命周期证据见[收口验证](validation-architecture-completion-20261029.md)。功能入口见[测试说明](testing.md)，独立测量见[性能入口](benchmarking.md)。
 
 [RTMP CQF 1080p60→540p30实测](validation-rtmp-cqf-20261018.md)记录原生CQF、显式整数降帧与源I/3B核验，以及2/4线程完整素材性能和相关回归；本机两种线程配置均未达到实时30fps。
 

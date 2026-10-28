@@ -2,16 +2,14 @@
 #define NAKI_PIPELINE_INTERNAL_H
 #include "worker/job_media.h"
 #include "platform/runtime.h"
-#include "platform/wakeup.h"
 #include "worker/frame_policy_runtime.h"
 #include "pipeline_reader.h"
 #include "watermark.h"
 #include "frame_trace.h"
-#include "branch_queue.h"
+#include "sei.h"
 #include "crash/crash.h"
 #include "media_hooks.h"
 #include "control/resource_limits.h"
-#include "audio_signature.h"
 #include "encoded_description.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -21,8 +19,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <libavformat/avformat.h>
-#include <libavformat/live_mux.h>
 #include "destination_runtime.h"
 #include <libavutil/buffer.h>
 #include <libavutil/error.h>
@@ -33,13 +29,7 @@
 /* Orchestration handles and immutable timing. Native input/decode, video,
  * mux and branch representations are private to their respective owners.
  * Owners release through explicit APIs; no component copies another's state. */
-#define LEDGER_CAPACITY 256
 #define IO_TIMEOUT_US 10000000
-#define BRANCH_ADMISSION_GRACE_US 100000
-
-#if !defined(AVFORMAT_LIVE_INPUT_POLL_VERSION) || AVFORMAT_LIVE_INPUT_POLL_VERSION != 1
-#error "The matching FFmpeg resumable live input poll API 1 is required"
-#endif
 
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; atomic_int cleanup; } Interrupt;
 typedef struct MuxTrace { Job *fanout_job; Stamp stamp; AVBufferRef *owner; int64_t encoded_us, pts_us, hook_us; int bytes, picture_type; } MuxTrace;
@@ -58,7 +48,7 @@ typedef struct Pipeline {
     NakiVideo *v;
     NakiMux *mux;
     NakiEncodedDescription *encoded;
-    struct {AVRational time_base,avg_frame_rate;int index,valid;} video;
+    struct {AVRational time_base;int index;} video;
     AVRational input_tb,frame_rate;
     NakiVideoRate video_rate,output_rate;
     int rate_divisor,input_wrap_bits;
@@ -66,7 +56,16 @@ typedef struct Pipeline {
     NakiBranches *branches;
     int64_t io_timeout_us;
 } Pipeline;
-/* MODULE INTERFACES */
+/* Reader orchestration; InputItem itself is the shared leaf contract. */
+InputItem pipeline_reader_pop(struct Pipeline *p, int *done, int *error);
+int pipeline_reader_start(struct Pipeline *p);
+void pipeline_reader_wake(struct Pipeline *p);
+int pipeline_reader_pending_sei(struct Pipeline *p);
+int pipeline_reader_subscribe(struct Pipeline *p,const NakiSeiConfig *sei,int audio,int64_t *generation);
+int pipeline_reader_epoch_consumed(struct Pipeline *p,int64_t sequence);
+int pipeline_reader_epoch_ready(struct Pipeline *p,int64_t generation);
+
+/* Opaque component operations. */
 int pipeline_branches_start(Pipeline *p);
 int pipeline_branches_check(Pipeline *p,int finishing);
 int pipeline_branches_frame(Pipeline *p,AVFrame *frame);
@@ -95,17 +94,17 @@ void pipeline_video_release(Pipeline *p);
 int pipeline_mux_format(Pipeline *p,int *global_header);
 int pipeline_decode_start(Pipeline *p);
 int pipeline_prepare_decoded_frame(Pipeline *p,AVFrame *frame);
-/* pipeline.c */
 int pipeline_process_frame(Pipeline *p,AVFrame *frame);
 int pipeline_handle_audio(Pipeline *p,const InputItem *audio);
+int pipeline_flush_deferred_audio(Pipeline *p);
+/* Shared frame identity and trace helpers. */
 int pipeline_stamp_valid(const AVBufferRef *ref);
 const NakiSeiBundle *pipeline_stamp_sei(const AVBufferRef *ref);
 void pipeline_trace_pts(yyjson_mut_doc *doc, const char *key, int64_t pts);
 NakiFrameIdentity pipeline_frame_identity(Pipeline *p,const Stamp *stamp,int64_t output_pts,AVRational output_tb);
 int pipeline_interrupted(void *opaque);
-int pipeline_flush_deferred_audio(Pipeline *p);
 
-/* pipeline_encode.c */
+/* Timestamp validation and input-owner rate observation. */
 int pipeline_validate_output_timestamps(Pipeline *p,const AVPacket *packet,AVRational time_base);
 int64_t pipeline_source_rate(Pipeline *p,int64_t now);
 
@@ -119,16 +118,15 @@ int pipeline_mux_live(const Pipeline *p);
 uint64_t pipeline_mux_bytes(const Pipeline *p);
 void pipeline_mux_cancel(Pipeline *p);
 
-/* pipeline_mux.c */
+/* Mux owner: packet admission/drain. */
 int pipeline_drain_mux(Pipeline *p, int force);
 int pipeline_submit_mux(Pipeline *p, AVPacket *packet);
 
-/* pipeline_output.c */
+/* Video open/drain, mux finalization and ordered resource release. */
 int pipeline_finalize_output(Pipeline *p,int primary,int stopped);
 int pipeline_open_output(Pipeline *p, AVFrame *frame);
 int pipeline_open_mux(Pipeline *p);
 int pipeline_drain_output(Pipeline *p);
 void pipeline_release_media_resources(Pipeline *p,AVFrame **receive_frame);
-void pipeline_complete_job(Pipeline *p,int ret,int stopped);
 
 #endif

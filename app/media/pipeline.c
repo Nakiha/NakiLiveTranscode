@@ -173,7 +173,7 @@ cleanup:
         pipeline_release_media_resources(&p,&frame);
         pipeline_input_destroy(&p);
         pipeline_branches_release(&p);
-        pipeline_complete_job(&p,ret,stopped);
+        naki_job_complete(p.job,ret,stopped,p.stage);
     }
     return NULL;
 }

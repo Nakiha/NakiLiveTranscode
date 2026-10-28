@@ -1,8 +1,16 @@
 #ifndef NAKI_INPUT_INTERNAL_H
 #define NAKI_INPUT_INTERNAL_H
+#define READER_CAPACITY 8
 #include "pipeline_internal.h"
+#include "platform/wakeup.h"
+#include <pthread.h>
+#include <libavformat/avformat.h>
 #include <libavformat/read_origin.h>
 #include "input_probe.h"
+#if !defined(AVFORMAT_LIVE_INPUT_POLL_VERSION) || AVFORMAT_LIVE_INPUT_POLL_VERSION != 1
+#error "The matching FFmpeg resumable live input poll API 1 is required"
+#endif
+
 /* One reader producer, one shared-pipeline consumer. All queued packet and
  * parameter references transfer together. Join before clearing/destroying. */
 typedef struct PipelineReader {

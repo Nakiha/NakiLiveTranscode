@@ -5,6 +5,7 @@
 #include "pipeline_internal.h"
 #include "control/identity.h"
 #include <libavutil/opt.h>
+#include <pthread.h>
 #define DESTINATIONS 4U
 #define PACKETS 16U
 /* Four writers: 16 queued + one executing + four live-mux references each.

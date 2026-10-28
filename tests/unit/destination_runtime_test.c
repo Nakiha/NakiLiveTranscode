@@ -3,21 +3,15 @@
  * after the owner poll, before its next IDR. No writer thread or I/O is needed. */
 #include "media/destination_runtime.c"
 #include <assert.h>
-void pipeline_input_free(InputItem *item){assert(!item->packet&&!item->params);}
-/* No protocol is opened by this admission-state test. Mux lifetime/cancel is
- * exercised against the real implementation by mux-lifetime. */
-void pipeline_mux_cancel(Pipeline *p){(void)p;}
-int pipeline_submit_mux(Pipeline *p,AVPacket *packet){(void)p;(void)packet;abort();}
-NakiFrameIdentity pipeline_frame_identity(Pipeline *p,const Stamp *s,int64_t pts,AVRational tb){
-    return (NakiFrameIdentity){.frame_id=s->frame_id,.source_pts=s->source_pts,.source_us=s->source_us,
-        .source_tb_num=p->input_tb.num,.source_tb_den=p->input_tb.den,.output_pts=pts,.output_tb_num=tb.num,.output_tb_den=tb.den};
-}
+/* An admission-only check must never reach protocol I/O. */
+void __wrap_pipeline_mux_cancel(Pipeline *p){(void)p;abort();}
+int __wrap_pipeline_submit_mux(Pipeline *p,AVPacket *packet){(void)p;(void)packet;abort();}
 int main(void){
     Job *job=calloc(1,sizeof(*job));Pipeline *p=calloc(1,sizeof(*p));assert(job&&p);
     job->operations=naki_operations_open(4,2*1024*1024,1000000);assert(job->operations);
     p->job=job;p->input_tb=(AVRational){1,25};AVCodecContext *encoder=avcodec_alloc_context3(NULL);assert(encoder);
     encoder->time_base=(AVRational){1,25};p->encoded=naki_encoded_seal(encoder);assert(p->encoded);
-    p->video.time_base=(AVRational){1,25};p->video.valid=1;
+    p->video.time_base=(AVRational){1,25};
     assert(!naki_destinations_open(p));NakiDestinations *m=p->destinations;m->activated=1;
     Destination *d=&m->slots[1];assert(!naki_dl_reserve(&d->life,0));assert(!naki_dl_started(&d->life));naki_writer_init(&d->writer);assert(!naki_writer_ready(&d->writer));d->mux=calloc(1,sizeof(Pipeline));assert(d->mux);
     NakiOperationIntent in={.kind=NAKI_OP_TOPOLOGY,.job_id="job",.output_id="main",.operation_id="ready-race",.origin_request_id="test",

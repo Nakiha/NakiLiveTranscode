@@ -1,4 +1,5 @@
 #include "input_internal.h"
+#include "branch_queue.h"
 
 /* Reader alone reads mutable input streams and snapshots audio parameters. */
 void pipeline_input_free(InputItem *item) {
