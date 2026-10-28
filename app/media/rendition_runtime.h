@@ -1,6 +1,10 @@
 #ifndef NAKI_RENDITION_RUNTIME_H
 #define NAKI_RENDITION_RUNTIME_H
-#include "worker/job.h"
+#include "worker/job_api.h"
+#include <stddef.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <libavutil/frame.h>
 struct Pipeline;
 struct InputItem;
 typedef struct NakiRenditions NakiRenditions;

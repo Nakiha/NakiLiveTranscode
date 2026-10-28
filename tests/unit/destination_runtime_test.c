@@ -3,6 +3,9 @@
 #include "media/destination_runtime.c"
 #include <assert.h>
 void pipeline_input_free(InputItem *item){assert(!item->packet&&!item->params);}
+/* No protocol is opened by this admission-state test. Mux lifetime/cancel is
+ * exercised against the real implementation by mux-lifetime. */
+void pipeline_mux_cancel(Pipeline *p){(void)p;}
 int pipeline_submit_mux(Pipeline *p,AVPacket *packet){(void)p;(void)packet;abort();}
 NakiFrameIdentity pipeline_frame_identity(Pipeline *p,const Stamp *s,int64_t pts,AVRational tb){
     return (NakiFrameIdentity){.frame_id=s->frame_id,.source_pts=s->source_pts,.source_us=s->source_us,

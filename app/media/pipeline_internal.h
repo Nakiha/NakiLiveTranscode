@@ -8,7 +8,7 @@
 #include "watermark.h"
 #include "video_filter.h"
 #include "live_rate.h"
-#include "codec_trace.h"
+#include "frame_trace.h"
 #include "branch_queue.h"
 #include "crash/crash.h"
 #include "media_hooks.h"
@@ -50,43 +50,16 @@
 #error "The matching FFmpeg resumable live input poll API 1 is required"
 #endif
 
-typedef struct Stamp {
-    AVLiveDecodeTrace decode_trace;
-    NakiEncoderTrace encode_trace;
-    int64_t network_first_read_us,network_complete_us,demux_finished_us,network_tag_position;
-    int encoder_future_frames,actual_slice_qp,decoder_tracked;
-    NakiRateDecision rate;
-    int64_t async_ready_us,decoder_owner_us,decoder_receive_us,submit_first_us;
-    int64_t sequence, read_us, ingress_us, submitted_us, decoded_us, filtered_us;
-    int64_t encoder_submit_us, encoder_accepted_us, scheduled_us, filter_started_us;
-    int picture_type, decoded_key, input_key, first_i;
-    int intra_reason, timestamp_source, tracked_packet;
-    int64_t frame_id, packet_pts, packet_dts, raw_pts, source_pts, source_us;
-    int64_t subscription_generation,source_rate_bps;
-    uint64_t watermark_revision;
-    NakiWatermark *delivery_owner;
-    NakiOperationHandle delivery_lease;
-    uint64_t branch_charge;
-    unsigned generation;
-    uint64_t timestamp_wraps;
-    int64_t branch_enqueued_us,branch_started_us;
-    uint32_t sei_size;
-} Stamp;
 typedef struct Interrupt { Job *job; atomic_int_fast64_t deadline; atomic_int cleanup; } Interrupt;
 typedef struct Ledger { int used; int64_t pts; Stamp stamp; AVBufferRef *owner; } Ledger;
 typedef struct MuxTrace { Job *fanout_job; Stamp stamp; AVBufferRef *owner; int64_t encoded_us, pts_us, hook_us; int bytes, picture_type; } MuxTrace;
-typedef struct AudioTrack {
-    int input_index, rejected, have_clock, pending_reported;
-    AVStream *output; AVBSFContext *bsf;
-    NakiAudioSignature accepted;
-    int64_t last_dts, next_input_dts, previous_input_dts;
-} AudioTrack;
 typedef struct DecodePump {
     pthread_mutex_t mutex;NakiWakeup wake;pthread_t thread;
     AVFrame *frame;InputItem audio;
     int occupied,prefer_video,done,error,started;
 } DecodePump;
 typedef struct Branch Branch;
+typedef struct NakiMux NakiMux;
 typedef struct Pipeline {
     Job *job;
     NakiMediaHooks hooks;
@@ -94,7 +67,8 @@ typedef struct Pipeline {
     void *destination_owner;
     int destination_copy;
     const char *stage;
-    AVFormatContext *input, *output;
+    AVFormatContext *input;
+    NakiMux *mux; /* Opaque, exclusively owned output state. */
     AVCodecContext *decoder, *encoder;
     AVCodecAsyncContext *async;
     AVFrame initial_input_properties; /* Immutable snapshot before async takes decoder ownership. */
@@ -104,7 +78,7 @@ typedef struct Pipeline {
     NakiWatermarkCompositor *watermark_compositor;
     uint64_t watermark_revision;
     AVStream *video;
-    int stream_index, header_written, custom_output_fd;
+    int stream_index;
     int input_width, input_height, input_format, seen_input_i;
     AVRational input_tb, frame_rate;
     NakiVideoRate video_rate;
@@ -118,10 +92,7 @@ typedef struct Pipeline {
     uint64_t rendition_frames;
     NakiTimeline timeline;
     NakiIntraState intra;
-    Interrupt read_interrupt, write_interrupt;
-    /* A migrated mux keeps the protocol's original interrupt address alive.
-     * The source Pipeline outlives all joined destination writers. */
-    Interrupt *output_interrupt;
+    Interrupt read_interrupt;
     PipelineReader reader;
     DecodePump pump;
     Ledger ledger[LEDGER_CAPACITY];
@@ -133,22 +104,12 @@ typedef struct Pipeline {
     int encoder_draining,encoder_poll_pending,encoder_polled_packet;
     int64_t first_encoder_pts, previous_key_pts;
     int seen_output_key;
-    int live_mux, video_started;
-    int64_t mux_max_dts_us;
-    AudioTrack audio[16];
-    int audio_count;
-    InputItem deferred_audio[128];
-    int deferred_count;
-    uint64_t deferred_bytes;
     Branch *branches;
     int branch_count;
     int64_t io_timeout_us;
     enum AVColorSpace input_colorspace;
     enum AVColorRange input_range;
 } Pipeline;
-static inline Interrupt *pipeline_output_interrupt(Pipeline *p) {
-    return p->output_interrupt?p->output_interrupt:&p->write_interrupt;
-}
 struct Branch {
     Pipeline pipeline;
     NakiBranchQueue queue;
@@ -186,6 +147,16 @@ int pipeline_validate_output_timestamps(Pipeline *p,const AVPacket *packet,AVRat
 int64_t pipeline_source_rate(Pipeline *p,int64_t now);
 int pipeline_encode_frame(Pipeline *p, AVFrame *frame);
 int pipeline_ledger_pending(Pipeline *p);
+
+/* Opaque mux ownership: handoff only while both owners are quiescent.
+ * The caller starts/joins its writer; move never copies callback storage. */
+int pipeline_mux_prepare(Pipeline *p);
+int pipeline_mux_move(Pipeline *from, Pipeline *to);
+void pipeline_mux_release(Pipeline *p);
+void pipeline_mux_retire_audio(Pipeline *p);
+int pipeline_mux_live(const Pipeline *p);
+uint64_t pipeline_mux_bytes(const Pipeline *p);
+void pipeline_mux_cancel(Pipeline *p);
 
 /* pipeline_mux.c */
 int pipeline_drain_mux(Pipeline *p, int force);

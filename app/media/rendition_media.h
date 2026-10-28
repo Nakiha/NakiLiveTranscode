@@ -1,6 +1,7 @@
 #ifndef NAKI_RENDITION_MEDIA_H
 #define NAKI_RENDITION_MEDIA_H
-#include "worker/job.h"
+#include "worker/job_api.h"
+#include "video_rate.h"
 #include "pipeline_reader.h"
 struct Pipeline;
 int naki_rendition_media_open(struct Pipeline **out,Job *job,const AVFrame *prototype,AVRational tb,NakiVideoRate rate,int wrap_bits,int io_timeout_ms);

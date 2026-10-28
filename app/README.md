@@ -1,5 +1,7 @@
 # Linux C 服务模块与所有权
 
+可执行的依赖门禁、稳定 mux 生命周期及按修改范围选择测试，见[组件边界](../docs/architecture.md)。`naki-control` 不依赖 FFmpeg；三个输出实现编译为 `naki-media-output`，其 `NakiMux` 状态不向调度与 destination 实现公开。
+
 | 目录 | 职责 |
 | --- | --- |
 | `controller/` | HTTP、worker 监管与恢复、状态投影 |
@@ -29,6 +31,9 @@
 - `media/pipeline_output.c`：每输出初始化、正常 drain、finalize、引用释放及终态；保留主错误，分别记录 trailer/flush/close。
 - `media/pipeline_encode.c`：每输出 encoder send/receive、256 项 PTS ledger 及 delivery 引用转交；缺映射/满额显式失败。
 - `media/pipeline_mux.c`：唯一 mux owner 的有界 live mux → av_write_frame → flush → 指标/首帧/写出结算；迟到音频丢弃计数。
+- `media/pipeline_audio.c`：同一 mux owner 的音频参数处理、追加音轨、时钟检查与起播前暂存。
+- `media/mux_internal.h`：仅上述 mux/audio 与 `pipeline_output.c` 可包含的稳定输出状态；原连接、FD、音轨及回调地址随同一个不透明对象移交，不逐字段复制。
+- `media/frame_trace.h`：帧谱系与本地追踪数据；wire codec 不再包含 Pipeline/Job 私有状态。
 - `media/pipeline_internal.h`：worker 私有 Stamp/Pipeline/Branch 与接口，不把原始帧/包放入 IPC。
 - `media/input_probe.c` / `media/input_probe.h`：带缓存的首条 H.264/HEVC 视频就绪探测；其他音轨/数据可继续晚发现，不在初始化阶段固定完整流集合。
 - `control/frame_policy.c` / `control/frame_policy.h`：纯策略核心，包含严格时间轴、接受后推进的 I 调度、因果选择和有界在途身份。

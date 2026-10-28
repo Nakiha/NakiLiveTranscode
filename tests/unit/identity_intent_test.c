@@ -13,6 +13,10 @@ int main(void) {
     assert(naki_id_valid(id,32)&&!naki_id_valid(id,31));
     assert(!naki_id_valid("",64)&&!naki_id_valid("../job",64)&&!naki_id_valid("job/path",64)&&!naki_id_valid("a b",64));
     assert(!fingerprint("{\"a\":1,\"b\":[null,\"x\"]}",a));
+    /* Frozen outputs of the pre-refactor AVSHA implementation. Existing
+     * operation replay/config identity must survive changing the hash provider. */
+    assert(!strcmp(a,"7d54c620490f3e9d3ac2482d40f91f0d0e2198703cec8ee66c9a3a5e75858af8"));
+    assert(!fingerprint("{}",b)&&!strcmp(b,"24bea9c03e2f9b21b162d9a39d59f73b85e032850784b8ffadf84a6f5f673648"));
     assert(!fingerprint("{\"b\":[null,\"x\"],\"a\":1.0}",b)&&!strcmp(a,b));
     assert(!fingerprint("{\"a\":1,\"b\":[\"x\",null]}",b)&&strcmp(a,b));
     assert(!fingerprint("{\"a\":\"1\",\"b\":[null,\"x\"]}",b)&&strcmp(a,b));

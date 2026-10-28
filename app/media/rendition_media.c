@@ -4,8 +4,7 @@
 int naki_rendition_media_open(Pipeline **out,Job *job,const AVFrame *prototype,AVRational tb,NakiVideoRate rate,int wrap_bits,int io_timeout_ms) {
     Pipeline *p=calloc(1,sizeof(*p));if(!p)return AVERROR(ENOMEM);*out=p;
     *p=(Pipeline){.job=job,.input_tb=tb,.frame_rate=rate.value,.video_rate=rate,.input_wrap_bits=wrap_bits,
-        .custom_output_fd=-1,.last_pts=AV_NOPTS_VALUE,.mux_max_dts_us=INT64_MIN,.stage="rendition prepare",.io_timeout_us=(int64_t)io_timeout_ms*1000};
-    p->write_interrupt.job=job;atomic_init(&p->write_interrupt.deadline,0);atomic_init(&p->write_interrupt.cleanup,0);
+        .last_pts=AV_NOPTS_VALUE,.stage="rendition prepare",.io_timeout_us=(int64_t)io_timeout_ms*1000};
     NakiMediaJobInfo info={.job_id=job->id,.request_id=job->request_id,.config=&job->config,.request_us=job->lifecycle.started_us,.output_id=job->output_id};
     int ret=naki_media_hooks_open(&info,&p->hooks);if(ret>0||(ret>=0&&p->hooks.api_version!=NAKI_MEDIA_HOOK_API))return AVERROR(EINVAL);
     if(ret>=0)ret=naki_watermark_wait(job->watermark);
@@ -35,8 +34,8 @@ int naki_rendition_media_audio(Pipeline *p,const InputItem *audio){return p->des
 int naki_rendition_media_poll(Pipeline *p) {
     int ret=p->destinations?naki_destinations_poll(p):0;if(ret<0)return ret;
     if(p->encoder_poll_pending)ret=pipeline_receive_encoded(p);
-    if(ret>=0&&!p->destinations&&p->live_mux)ret=pipeline_flush_deferred_audio(p);
-    if(ret>=0&&!p->destinations&&p->live_mux)ret=pipeline_drain_mux(p,0);
+    if(ret>=0&&!p->destinations&&pipeline_mux_live(p))ret=pipeline_flush_deferred_audio(p);
+    if(ret>=0&&!p->destinations&&pipeline_mux_live(p))ret=pipeline_drain_mux(p,0);
     return ret;
 }
 int naki_rendition_media_close(Pipeline **out,int error,int stopped) {

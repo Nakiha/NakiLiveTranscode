@@ -1,7 +1,11 @@
 #include "media/frame_wire.h"
 #include "media/shared_frame_pool.h"
-#include "media/pipeline_internal.h"
+#include "media/frame_trace.h"
+#include "media/sei.h"
+#include "control/resource_limits.h"
+#include <libavutil/error.h>
 #include <assert.h>
+#include <unistd.h>
 #include <libavutil/intreadwrite.h>
 #include <libavutil/imgutils.h>
 static void returned(void *opaque,uint8_t *data){(void)data;(*(int *)opaque)++;}

@@ -1,4 +1,4 @@
-#include "pipeline_internal.h"
+#include "mux_internal.h"
 
 /* Sole output owner: bounded live mux -> av_write_frame -> flush -> accounting.
  * Video latency ends at actual successful flush, including mux queue residence.
@@ -30,22 +30,22 @@ static void sample_groups(FrameGroups *g, const Stamp *s, int output_key, int fi
 
 static int write_packet_now(Pipeline *p, AVPacket *packet, int64_t *interleaved, int64_t *written) {
     Job *job=p->job;
-    int64_t dts_us=av_rescale_q(packet->dts,p->output->streams[packet->stream_index]->time_base,AV_TIME_BASE_Q);
+    int64_t dts_us=av_rescale_q(packet->dts,p->mux->output->streams[packet->stream_index]->time_base,AV_TIME_BASE_Q);
     p->stage="mux/write";
     pthread_mutex_lock(&job->mutex);
     job->progress.write_started_us=now_us(); job->progress.write_phase=NAKI_WRITE_PHASE_MUX_WRITE;
     pthread_mutex_unlock(&job->mutex);
-    atomic_store(&pipeline_output_interrupt(p)->deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
-    int ret=av_write_frame(p->output,packet);
+    atomic_store(&p->mux->interrupt.deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
+    int ret=av_write_frame(p->mux->output,packet);
     /* Flush TS audio PES too: AVIO flushing alone cannot release those bytes. */
-    if(ret>=0 && !strcmp(job->config.output_format,"mpegts")) ret=av_write_frame(p->output,NULL);
+    if(ret>=0 && !strcmp(job->config.output_format,"mpegts")) ret=av_write_frame(p->mux->output,NULL);
     *interleaved=now_us();
     pthread_mutex_lock(&job->mutex); job->progress.write_phase=NAKI_WRITE_PHASE_AVIO_FLUSH; pthread_mutex_unlock(&job->mutex);
-    avio_flush(p->output->pb); *written=now_us();
-    atomic_store(&pipeline_output_interrupt(p)->deadline,0);
+    avio_flush(p->mux->output->pb); *written=now_us();
+    atomic_store(&p->mux->interrupt.deadline,0);
     pthread_mutex_lock(&job->mutex); job->progress.write_started_us=0; job->progress.write_phase=NAKI_WRITE_PHASE_NONE; pthread_mutex_unlock(&job->mutex);
-    if(ret>=0 && p->output->pb->error<0)ret=p->output->pb->error;
-    if(ret>=0 && dts_us>p->mux_max_dts_us)p->mux_max_dts_us=dts_us;
+    if(ret>=0 && p->mux->output->pb->error<0)ret=p->mux->output->pb->error;
+    if(ret>=0 && dts_us>p->mux->mux_max_dts_us)p->mux->mux_max_dts_us=dts_us;
     return ret<0 ? ret : 0;
 }
 
@@ -53,7 +53,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     if(!packet->opaque_ref || packet->opaque_ref->size!=sizeof(MuxTrace)) return AVERROR_INVALIDDATA;
     MuxTrace *meta=(MuxTrace *)packet->opaque_ref->data;
     Stamp stamp=meta->stamp;
-    if(p->destination_copy){int64_t interleaved=0,written=0;int ret=write_packet_now(p,packet,&interleaved,&written);if(!ret){p->video_started=1;ret=naki_destinations_written(p,packet,written);}return ret;}
+    if(p->destination_copy){int64_t interleaved=0,written=0;int ret=write_packet_now(p,packet,&interleaved,&written);if(!ret){p->mux->video_started=1;ret=naki_destinations_written(p,packet,written);}return ret;}
 
     int bytes=meta->bytes;
     int64_t encoded=meta->encoded_us;
@@ -94,14 +94,14 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         if(output_key&&!parent->progress.first_key_output_us)parent->progress.first_key_output_us=written;
         pthread_mutex_unlock(&parent->mutex);
     }
-    p->video_started=1;
+    p->mux->video_started=1;
     double decode=(stamp.decoded_us-stamp.submitted_us)/1000.0;
     double filter=(stamp.filtered_us-stamp.filter_started_us)/1000.0;
     double encode=(encoded-stamp.encoder_submit_us)/1000.0;
     double mux=(written-mux_start)/1000.0;
     double total=(written-stamp.ingress_us)/1000.0;
     pthread_mutex_lock(&p->job->mutex);
-    p->job->stats.packets_out++; p->job->stats.bytes_out=(uint64_t)p->output->pb->bytes_written;
+    p->job->stats.packets_out++; p->job->stats.bytes_out=(uint64_t)p->mux->output->pb->bytes_written;
     int first_output=!p->job->progress.first_video_output_us;
     int first_output_key=output_key && !p->job->progress.first_key_output_us;
     if(first_output)p->job->progress.first_video_output_us=written;
@@ -270,17 +270,17 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
 }
 
 int pipeline_drain_mux(Pipeline *p, int force) {
-    if(!p->live_mux)return 0;
+    if(!pipeline_mux_live(p))return 0;
     AVPacket *packet=av_packet_alloc();
     if(!packet)return AVERROR(ENOMEM);
     int ret;
-    while((ret=avformat_live_mux_receive(p->output,packet,force))>0) {
+    while((ret=avformat_live_mux_receive(p->mux->output,packet,force))>0) {
         if(packet->stream_index==p->video->index)ret=write_video_packet(p,packet);
         else {
-            int64_t dts=av_rescale_q(packet->dts,p->output->streams[packet->stream_index]->time_base,AV_TIME_BASE_Q);
+            int64_t dts=av_rescale_q(packet->dts,p->mux->output->streams[packet->stream_index]->time_base,AV_TIME_BASE_Q);
             /* A stalled audio track may return behind already-emitted media.
                Drop its stale packets explicitly rather than rewinding output. */
-            if(dts<p->mux_max_dts_us) {
+            if(dts<p->mux->mux_max_dts_us) {
                 pthread_mutex_lock(&p->job->mutex);p->job->stats.audio_dropped++;pthread_mutex_unlock(&p->job->mutex);
                 ret=0;
             } else {
@@ -294,7 +294,7 @@ int pipeline_drain_mux(Pipeline *p, int force) {
     }
     av_packet_free(&packet);
     AVLiveMuxStats stats;
-    if(!avformat_live_mux_stats(p->output,&stats)) {
+    if(!avformat_live_mux_stats(p->mux->output,&stats)) {
         pthread_mutex_lock(&p->job->mutex);
         p->job->stats.mux_queued_packets=stats.queued_packets;p->job->stats.mux_queued_bytes=stats.queued_bytes;
         p->job->stats.mux_high_water=stats.high_water_packets;p->job->stats.mux_timeouts=stats.timeout_releases;p->job->stats.mux_pressure=stats.pressure_releases;
@@ -305,9 +305,9 @@ int pipeline_drain_mux(Pipeline *p, int force) {
 }
 
 int pipeline_submit_mux(Pipeline *p, AVPacket *packet) {
-    if(!p->live_mux)return write_video_packet(p,packet);
+    if(!p->mux->live_mux)return write_video_packet(p,packet);
     int ret;
-    while((ret=avformat_live_mux_send(p->output,packet))==AVERROR(EAGAIN))
+    while((ret=avformat_live_mux_send(p->mux->output,packet))==AVERROR(EAGAIN))
         if((ret=pipeline_drain_mux(p,1))<0)return ret;
     if(ret<0)return ret;
     return pipeline_drain_mux(p,0);

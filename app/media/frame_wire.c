@@ -1,5 +1,10 @@
 #include "frame_wire.h"
-#include "pipeline_internal.h"
+#include "frame_trace.h"
+#include "sei.h"
+#include "control/resource_limits.h"
+#include <errno.h>
+#include <libavutil/error.h>
+#include <libavutil/mem.h>
 #include "libavutil/intreadwrite.h"
 #include "libavutil/imgutils.h"
 #include <limits.h>

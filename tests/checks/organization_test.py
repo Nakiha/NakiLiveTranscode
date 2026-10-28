@@ -12,9 +12,56 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+_spec = importlib.util.spec_from_file_location('architecture_guard', ROOT / 'scripts/check-architecture.py')
+architecture_guard = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(architecture_guard)
 
 
 class Organization(unittest.TestCase):
+    def test_architecture(self):
+        self.assertEqual(architecture_guard.check(ROOT), [])
+
+    def test_architecture_rejects_boundary_violations(self):
+        cases = [
+            ('control/illegal.c', '#include <libavutil/sha.h>\n', 'native media SDK'),
+            ('control/illegal.c', '#include "../worker/job.h"\n', 'private header'),
+            ('controller/illegal.c', '#include <media/pipeline_internal.h>\n', 'private header'),
+            ('media/illegal.c', '#include "mux_internal.h"\n', 'private header'),
+            ('media/illegal.c', 'void f(void){av_write_frame(0,0);}', 'single-owner API'),
+            ('media/illegal.c', 'void f(void){av_interleaved_write_frame(0,0);}', 'single-owner API'),
+            ('media/illegal.c', '#include "pipeline_mux.c"\n', 'implementation include'),
+            ('media/illegal.c', '#define H "mux_internal.h"\n#include H\n', 'computed include'),
+            ('media/illegal.c', 'struct NakiMux { int secret; };', 'representation is private'),
+        ]
+        for name, source, expected in cases:
+            with self.subTest(name=name, expected=expected), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                for item in ('worker/job.h', 'media/pipeline_internal.h', 'media/mux_internal.h', 'media/pipeline_mux.c'):
+                    path = root / 'app' / item; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('')
+                path = root / 'app' / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(source)
+                (root / 'CMakeLists.txt').write_text('target_link_libraries(naki-control PUBLIC yyjson)')
+                self.assertTrue(any(expected in error for error in architecture_guard.check(root)))
+
+    def test_architecture_follows_wrappers_and_ignores_comments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            sources = {'controller/client.c': '#include "control/wrapper.h"\n',
+                       'control/wrapper.h': '#include "worker/job.h"\n', 'worker/job.h': ''}
+            for name, text in sources.items():
+                path = root / 'app' / name;path.parent.mkdir(parents=True, exist_ok=True);path.write_text(text)
+            (root / 'CMakeLists.txt').write_text('target_link_libraries(naki-control PUBLIC yyjson)')
+            self.assertTrue(any('controller/client.c: transitive private state' in e for e in architecture_guard.check(root)))
+            (root / 'app/control/wrapper.h').write_text('/* av_write_frame(0,0); */\n// #include "worker/job.h"\n')
+            self.assertEqual(architecture_guard.check(root), [])
+            (root / 'CMakeLists.txt').write_text('target_link_libraries(naki-control PUBLIC PkgConfig::FFMPEG)')
+            self.assertTrue(any('links media SDK' in e for e in architecture_guard.check(root)))
+
+    def test_all_control_sources_compile_without_media_sdk(self):
+        subprocess.run(['cc', '-std=c11', '-Werror', '-fsyntax-only',
+                        '-I' + str(ROOT / 'app'), '-I' + str(ROOT / 'third_party/yyjson/src'),
+                        *map(str, (ROOT / 'app/control').glob('*.c'))],
+                       capture_output=True, text=True, check=True)
+
     def test_no_imports_from_old_flat_test_layout_inside_functions(self):
         # Walk the whole AST, including function-local imports that a plain
         # import smoke cannot execute.

@@ -1,0 +1,44 @@
+# Application component boundaries
+
+This describes the implemented maintenance boundaries, not additional media capabilities. The service remains experimental Linux/WSL software. Existing fixed-output and explicit rendition backend contracts remain in force.
+
+## Enforced dependencies
+
+`scripts/check-architecture.py` runs without a native SDK, is an `ALL` build target required by `naki-control`, and runs inside the quick/full organization suite. It checks local dependencies (including angle and relative includes), enumerated private-header consumers, transitive leakage of mutable state, implementation-file includes, and the owners of output protocol/mux APIs. Tests inject illegal dependencies and packet writers to verify rejection.
+
+| Component | Contract |
+| --- | --- |
+| control | Plain C/yyjson policy, configuration, identity and operation state; no media SDK includes or link dependency. SHA256 uses OpenSSL Crypto; canonical intent bytes and fingerprints remain unchanged. |
+| controller | Control/status projections; never includes mutable worker or pipeline state, including through wrappers. Its existing SDK capability reporting remains an explicit dependency. |
+| worker | Task lifecycle, control loop and metrics publication; media calls go through the media interfaces. |
+| media orchestration | Input/decode and rendition scheduling; only enumerated implementations consume private Pipeline state. |
+| media output | `naki-media-output` owns output setup/finalization, packet write/flush, audio registration and audio clock state. |
+| media transport leaves | Shared pool, frame/audio wire codecs, messages and idle policy do not consume mutable Job/Pipeline state. |
+
+The checker protects normal maintenance mistakes. A contributor who changes the checker can change the policy; code review remains necessary for deliberate ownership changes. Source checks do not prove race freedom or replace runtime lifetime tests.
+
+## Stable mux lifetime
+
+`Pipeline` holds an opaque `NakiMux *`. Only `pipeline_output.c`, `pipeline_mux.c` and `pipeline_audio.c` see its representation. It contains the format context, exclusive local FD, header state, live interleaver state, output watermark, audio tracks/BSFs, deferred audio and protocol interrupt storage. Custom local AVIO callbacks receive this allocation, never a Pipeline address.
+
+Allocation precedes any output or deferred-audio ownership. Protocol/header setup remains on the output owner. For the existing lazy destination activation, the original owner stops using the mux and transfers the same allocation to the new primary writer. The immutable encoder timing descriptor is prepared before that writer starts. Thread-start failure transfers the object back; neither success nor rollback copies tracks, FD ownership, clocks or callback state. After a successful transfer, only the writer accesses the object until it joins. The orchestration Pipeline no longer needs to remain alive merely to keep an output callback address valid; existing join ordering is still required for all other shared encoder/job/delivery references.
+
+Close order is unchanged: drain if appropriate, trailer, AVIO flush, protocol/custom-FD close, publish each finalization error, then retire queued audio/BSF references. A destination allocates its mux before starting its thread and keeps the pointer and atomic interrupt storage stable through open, failure and completion. Only after join may the coordinator free that storage; concurrent cancellation can therefore still target a completed writer safely. `pipeline_mux_release` refuses to free an unclosed output. Normal empty-input and initialization-failure paths may have no mux. Cancellation requests an atomic I/O deadline and does not reclaim an active writer.
+
+This preserves the current direct-to-writer handoff. It does not introduce a permanently running writer thread into every output, alter interleaving budgets, or provide new destination/codec combinations.
+
+## Change and verification scope
+
+| Change | Required focused checks |
+| --- | --- |
+| Dependencies/public headers/build targets | Architecture + organization + service build; control sources compile without SDK flags |
+| Intent hashing/normalization | identity-intent + control-spec + update/recovery contracts; retain compatibility vectors |
+| Mux allocation/handoff/close | mux-lifetime; lifecycle-media, output-finalize, rendition destination/socket regressions |
+| Audio registration/clock ownership | audio-signatures, live-mux, live-input, rendition audio/SEI |
+| Shared pool/exit proof | Native pool/wire/guard tests and rendition lifecycle/fault/recovery |
+
+`mux-lifetime` links the real output implementation. It exercises conflicting owners, rollback, stable protocol and AVIO callback addresses, writing after the former Pipeline has been freed, FD close and exactly-once deferred-reference release. It uses an isolated local MPEG-TS writer; independent decode and actual network behavior remain integration-test responsibilities.
+
+Cross-cutting lifetime/ownership changes require full functional and application sanitizer regression. A local feature change can use the relevant focused checks once its dependency and ownership scope is established. Existing test suites remain authoritative; do not remove a boundary case merely because a module was reorganized. Performance and capacity claims require separate fresh measurements.
+
+Remaining debt: `Pipeline` and worker `Job` still expose broad private state to their enumerated implementations; rendition lifecycle has several orthogonal flags and does not yet have a complete typed transition model. The allowlists prevent adding consumers silently; they are not a claim that all internal coupling has been eliminated.

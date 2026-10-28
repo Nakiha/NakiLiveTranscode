@@ -1,5 +1,8 @@
 # 文档索引与当前状态
 
+长期维护的可执行组件边界与测试范围见[架构约束](architecture.md)。
+本轮修改和同源码分段回归结果见[2026-10-28 边界加固验证](validation-architecture-20261028.md)。
+
 编码分支进程隔离、动态增删、保活和多目标接入：见 [rendition 运行时](rendition-runtime.md)（实验功能；默认后端不变）；本轮结果见 [issue #4 本机验收](rendition-acceptance-20261026.md)。
 
 后续审计修复与当前合入检查见 [2026-10-27 审计复核](validation-rendition-audit-20261027.md)；原验收报告保留其历史源码窗口。

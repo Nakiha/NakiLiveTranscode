@@ -1,4 +1,35 @@
-#include "pipeline_internal.h"
+#include "mux_internal.h"
+
+int pipeline_mux_prepare(Pipeline *p) {
+    if(p->mux)return 0;
+    NakiMux *m=calloc(1,sizeof(*m));if(!m)return AVERROR(ENOMEM);
+    m->custom_output_fd=-1;m->mux_max_dts_us=INT64_MIN;
+    m->interrupt.job=p->job;atomic_init(&m->interrupt.deadline,0);atomic_init(&m->interrupt.cleanup,0);
+    p->mux=m;return 0;
+}
+int pipeline_mux_move(Pipeline *from,Pipeline *to) {
+    if(from==to||!from->mux||to->mux||from->job!=to->job)return AVERROR(EINVAL);
+    to->mux=from->mux;to->video=from->video;from->mux=NULL;
+    return 0;
+}
+int pipeline_mux_live(const Pipeline *p){return p->mux&&p->mux->live_mux;}
+uint64_t pipeline_mux_bytes(const Pipeline *p){return p->mux&&p->mux->output&&p->mux->output->pb?(uint64_t)p->mux->output->pb->bytes_written:0;}
+void pipeline_mux_cancel(Pipeline *p){if(p->mux)atomic_store(&p->mux->interrupt.deadline,now_us());}
+void pipeline_mux_retire_audio(Pipeline *p) {
+    if(!p->mux)return;
+    /* Finalize must close protocol callbacks before their storage is freed. */
+    if(p->mux->output||p->mux->custom_output_fd>=0)abort();
+    for(int i=0;i<p->mux->deferred_count;i++)pipeline_input_free(&p->mux->deferred_audio[i]);
+    for(int i=0;i<p->mux->audio_count;i++) {
+        av_bsf_free(&p->mux->audio[i].bsf);naki_audio_signature_clear(&p->mux->audio[i].accepted);
+    }
+    p->mux->deferred_count=0;p->mux->deferred_bytes=0;p->mux->audio_count=0;
+}
+void pipeline_mux_release(Pipeline *p) {
+    if(!p->mux)return;
+    pipeline_mux_retire_audio(p);
+    free(p->mux);p->mux=NULL;p->video=NULL;
+}
 
 /* Called only by the owning shared/branch pipeline thread. The orchestration
  * layer stops readers/async or aborts branch queues before releasing media.
@@ -8,19 +39,19 @@
 int pipeline_finalize_output(Pipeline *p,int primary,int stopped) {
     Job *job=p->job;int trailer=0,flush=0,closed=0;int64_t began=now_us();
     int64_t deadline=began+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US);
-    atomic_store(&pipeline_output_interrupt(p)->cleanup,1);atomic_store(&pipeline_output_interrupt(p)->deadline,deadline);
+    if(p->mux){atomic_store(&p->mux->interrupt.cleanup,1);atomic_store(&p->mux->interrupt.deadline,deadline);}
     pthread_mutex_lock(&job->mutex);job->progress.finalize_started_us=began;job->progress.finalize_deadline_us=deadline;
     job->progress.write_started_us=began;job->progress.write_phase=NAKI_WRITE_PHASE_OUTPUT_FINALIZE;pthread_mutex_unlock(&job->mutex);
-    if(p->header_written)trailer=av_write_trailer(p->output);
-    if(p->output&&p->output->pb) {
-        avio_flush(p->output->pb);flush=p->output->pb->error;
-        pthread_mutex_lock(&job->mutex);job->stats.bytes_out=p->output->pb->bytes_written;pthread_mutex_unlock(&job->mutex);
-        if(p->output->flags&AVFMT_FLAG_CUSTOM_IO) {av_freep(&p->output->pb->buffer);avio_context_free(&p->output->pb);}
-        else closed=avio_closep(&p->output->pb);
+    if(p->mux&&p->mux->header_written)trailer=av_write_trailer(p->mux->output);
+    if(p->mux&&p->mux->output&&p->mux->output->pb) {
+        avio_flush(p->mux->output->pb);flush=p->mux->output->pb->error;
+        pthread_mutex_lock(&job->mutex);job->stats.bytes_out=p->mux->output->pb->bytes_written;pthread_mutex_unlock(&job->mutex);
+        if(p->mux->output->flags&AVFMT_FLAG_CUSTOM_IO) {av_freep(&p->mux->output->pb->buffer);avio_context_free(&p->mux->output->pb);}
+        else closed=avio_closep(&p->mux->output->pb);
     }
-    if(p->custom_output_fd>=0) {
-        if(close(p->custom_output_fd)<0&&closed>=0)closed=AVERROR(errno);
-        p->custom_output_fd=-1;
+    if(p->mux&&p->mux->custom_output_fd>=0) {
+        if(close(p->mux->custom_output_fd)<0&&closed>=0)closed=AVERROR(errno);
+        p->mux->custom_output_fd=-1;
     }
     if(primary>=0&&!stopped) {
         if(trailer<0) {primary=trailer;p->stage="output trailer";}
@@ -38,14 +69,18 @@ int pipeline_finalize_output(Pipeline *p,int primary,int stopped) {
         else for(int i=0;i<job->config.output_count;i++)end.output_failures+=atomic_load(&job->outputs[i]->lifecycle.branch_failed);
         p->hooks.close(p->hooks.opaque,&end);p->hooks=(NakiMediaHooks){0};
     }
-    if(p->output) {avformat_free_context(p->output);p->output=NULL;}
-    atomic_store(&pipeline_output_interrupt(p)->deadline,0);return primary;
+    if(p->mux) {
+        if(p->mux->output) {avformat_free_context(p->mux->output);p->mux->output=NULL;}
+        p->mux->header_written=p->mux->live_mux=0;p->video=NULL;
+        atomic_store(&p->mux->interrupt.deadline,0);
+    }
+    return primary;
 }
 
 static int local_write(void *opaque, const uint8_t *buffer, int size) {
-    Pipeline *p=opaque; int offset=0;
+    NakiMux *m=opaque; int offset=0;
     while (offset<size) {
-        ssize_t n=write(p->custom_output_fd,buffer+offset,(size_t)(size-offset));
+        ssize_t n=write(m->custom_output_fd,buffer+offset,(size_t)(size-offset));
         if (n<0 && errno==EINTR) continue;
         if (n<=0) return AVERROR(n<0 ? errno : EIO);
         offset+=(int)n;
@@ -54,13 +89,14 @@ static int local_write(void *opaque, const uint8_t *buffer, int size) {
 }
 
 static int64_t local_seek(void *opaque, int64_t offset, int whence) {
-    Pipeline *p=opaque;
-    if (whence==AVSEEK_SIZE) {struct stat st; return fstat(p->custom_output_fd,&st) ? AVERROR(errno) : st.st_size;}
-    off_t pos=lseek(p->custom_output_fd,(off_t)offset,whence&~AVSEEK_FORCE);
+    NakiMux *m=opaque;
+    if (whence==AVSEEK_SIZE) {struct stat st; return fstat(m->custom_output_fd,&st) ? AVERROR(errno) : st.st_size;}
+    off_t pos=lseek(m->custom_output_fd,(off_t)offset,whence&~AVSEEK_FORCE);
     return pos<0 ? AVERROR(errno) : (int64_t)pos;
 }
 
 int pipeline_open_output(Pipeline *p, AVFrame *frame) {
+    int prepared=pipeline_mux_prepare(p);if(prepared<0)return prepared;
     const Config *cfg=&p->job->config;
     int vvc=!strcmp(cfg->encoder,"libvvenc");
     int byte_input=vvc&&cfg->encoder_input_bit_depth==8;
@@ -102,10 +138,10 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     p->encoder->color_range=av_buffersink_get_color_range(p->sink);
     p->encoder->color_primaries=frame->color_primaries;
     p->encoder->color_trc=frame->color_trc; p->encoder->colorspace=av_buffersink_get_colorspace(p->sink);
-    ret=avformat_alloc_output_context2(&p->output,NULL,cfg->output_format,cfg->output);
+    ret=avformat_alloc_output_context2(&p->mux->output,NULL,cfg->output_format,cfg->output);
     if (ret<0) return ret;
-    if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;
-    if (p->output->oformat->flags&AVFMT_GLOBALHEADER) p->encoder->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
+    if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->mux->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;
+    if (p->mux->output->oformat->flags&AVFMT_GLOBALHEADER) p->encoder->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
     AVDictionary *options=NULL;
     av_dict_set(&options,"preset",cfg->encoder_preset,0);
     if(cfg->cqf) {av_dict_set_int(&options,"qp",cfg->qp,0);av_dict_set(&options,"qpa","1",0);}
@@ -211,13 +247,7 @@ int pipeline_drain_output(Pipeline *p) {
  * decoder or receive frame. Keep their releases in this order: frame/codec/
  * filter references may still own watermark delivery leases and ledger stamps. */
 void pipeline_release_media_resources(Pipeline *p,AVFrame **receive_frame) {
-    for(int i=0;i<p->deferred_count;i++)pipeline_input_free(&p->deferred_audio[i]);
-    p->deferred_count=0;p->deferred_bytes=0;
-    for(int i=0;i<p->audio_count;i++) {
-        av_bsf_free(&p->audio[i].bsf);
-        naki_audio_signature_clear(&p->audio[i].accepted);
-    }
-    p->audio_count=0;
+    pipeline_mux_release(p);
     if(receive_frame)av_frame_free(receive_frame);
     avcodec_free_context(&p->decoder);
     avcodec_free_context(&p->encoder);
@@ -264,42 +294,43 @@ void pipeline_complete_job(Pipeline *p,int ret,int stopped) {
  * prepares an independent destination without opening a second encoder. */
 int pipeline_open_mux(Pipeline *p) {
     Config *cfg=&p->job->config;int ret;
-    if(!p->output){ret=avformat_alloc_output_context2(&p->output,NULL,cfg->output_format,cfg->output);if(ret<0)return ret;
-        if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;}
-    p->video=avformat_new_stream(p->output,NULL);
+    if((ret=pipeline_mux_prepare(p))<0)return ret;
+    if(!p->mux->output){ret=avformat_alloc_output_context2(&p->mux->output,NULL,cfg->output_format,cfg->output);if(ret<0)return ret;
+        if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->mux->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;}
+    p->video=avformat_new_stream(p->mux->output,NULL);
     if (!p->video) return AVERROR(ENOMEM);
     ret=avcodec_parameters_from_context(p->video->codecpar,p->encoder);
     if (ret<0) return ret;
     p->video->time_base=p->encoder->time_base; p->video->avg_frame_rate=p->output_rate.value;
-    p->output->flags|=AVFMT_FLAG_FLUSH_PACKETS;
-    p->output->max_delay=0; p->output->max_interleave_delta=0;
-    p->output->interrupt_callback=(AVIOInterruptCB){pipeline_interrupted,pipeline_output_interrupt(p)};
+    p->mux->output->flags|=AVFMT_FLAG_FLUSH_PACKETS;
+    p->mux->output->max_delay=0; p->mux->output->max_interleave_delta=0;
+    p->mux->output->interrupt_callback=(AVIOInterruptCB){pipeline_interrupted,&p->mux->interrupt};
     p->stage="output open/header";
-    atomic_store(&pipeline_output_interrupt(p)->deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
+    atomic_store(&p->mux->interrupt.deadline,now_us()+(p->io_timeout_us?p->io_timeout_us:IO_TIMEOUT_US));
     if (!strstr(cfg->output,"://") && !strchr(cfg->output,':')) {
-        p->custom_output_fd=open(cfg->output,O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0644);
-        if (p->custom_output_fd<0) return AVERROR(errno);
+        p->mux->custom_output_fd=open(cfg->output,O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC,0644);
+        if (p->mux->custom_output_fd<0) return AVERROR(errno);
         unsigned char *buffer=av_malloc(32768);
         if (!buffer) return AVERROR(ENOMEM);
-        p->output->pb=avio_alloc_context(buffer,32768,1,p,NULL,local_write,local_seek);
-        if (!p->output->pb) {av_free(buffer); return AVERROR(ENOMEM);}
-        p->output->flags|=AVFMT_FLAG_CUSTOM_IO;
+        p->mux->output->pb=avio_alloc_context(buffer,32768,1,p->mux,NULL,local_write,local_seek);
+        if (!p->mux->output->pb) {av_free(buffer); return AVERROR(ENOMEM);}
+        p->mux->output->flags|=AVFMT_FLAG_CUSTOM_IO;
     } else {
         AVDictionary *io_options=NULL;
         if(cfg->rtmp_tcp_nodelay&&!strncmp(cfg->output,"rtmp://",7))av_dict_set(&io_options,"tcp_nodelay","1",0);
-        ret=avio_open2(&p->output->pb,cfg->output,AVIO_FLAG_WRITE,&p->output->interrupt_callback,&io_options);
+        ret=avio_open2(&p->mux->output->pb,cfg->output,AVIO_FLAG_WRITE,&p->mux->output->interrupt_callback,&io_options);
         if(ret>=0&&av_dict_count(io_options))ret=AVERROR_OPTION_NOT_FOUND;
         av_dict_free(&io_options);
         if (ret<0) return ret;
     }
-    ret=avformat_write_header(p->output,NULL);
-    atomic_store(&pipeline_output_interrupt(p)->deadline,0);
+    ret=avformat_write_header(p->mux->output,NULL);
+    atomic_store(&p->mux->interrupt.deadline,0);
     if (ret<0) return ret;
-    p->header_written=1;
+    p->mux->header_written=1;
     if(strcmp(cfg->output_format,"mp4")) {
-        ret=avformat_live_mux_init(p->output,(int64_t)cfg->mux_wait_ms*1000,(p->destination_owner||p->job->remote_rendition==2)?4:256,4*1024*1024);
+        ret=avformat_live_mux_init(p->mux->output,(int64_t)cfg->mux_wait_ms*1000,(p->destination_owner||p->job->remote_rendition==2)?4:256,4*1024*1024);
         if(ret<0)return ret;
-        p->live_mux=1;
+        p->mux->live_mux=1;
     }
     return 0;
 }
