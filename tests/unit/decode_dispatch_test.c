@@ -1,4 +1,4 @@
-#include "media/pipeline_internal.h"
+#include "media/input_internal.h"
 #include <assert.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
@@ -50,7 +50,8 @@ static void audio(DecodePump *q,int64_t pts) {
 int main(void) {
     wakeups();
     Pipeline *p=calloc(1,sizeof(*p));assert(p);
-    DecodePump *q=&p->pump;pthread_mutex_init(&q->mutex,NULL);assert(!naki_wakeup_init(&q->wake,1));
+    p->in=calloc(1,sizeof(*p->in));assert(p->in);
+    DecodePump *q=&p->in->pump;pthread_mutex_init(&q->mutex,NULL);assert(!naki_wakeup_init(&q->wake,1));
     q->frame=av_frame_alloc();AVFrame *out=av_frame_alloc();assert(q->frame&&out);
     InputItem item={0};
     /* Audio doesn't occupy the video slot. Replenishing audio cannot starve an
@@ -73,6 +74,6 @@ int main(void) {
     q->done=0;q->error=0;
     assert(pipeline_decode_receive(p,out,&item)==AVERROR(EAGAIN));
     av_frame_free(&q->frame);av_frame_free(&out);
-    naki_wakeup_destroy(&q->wake);pthread_mutex_destroy(&q->mutex);free(p);
+    naki_wakeup_destroy(&q->wake);pthread_mutex_destroy(&q->mutex);free(p->in);free(p);
     return 0;
 }

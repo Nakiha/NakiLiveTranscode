@@ -1,0 +1,48 @@
+#ifndef NAKI_INPUT_INTERNAL_H
+#define NAKI_INPUT_INTERNAL_H
+#include "pipeline_internal.h"
+#include <libavformat/read_origin.h>
+#include "input_probe.h"
+/* One reader producer, one shared-pipeline consumer. All queued packet and
+ * parameter references transfer together. Join before clearing/destroying. */
+typedef struct PipelineReader {
+    InputItem ring[READER_CAPACITY];
+    int head, count, read_done, read_error;
+    struct {int64_t us,bits;} rate[1024];
+    int rate_head,rate_count;
+    int64_t rate_bits;
+    uint64_t reader_bytes;
+    pthread_mutex_t ring_mutex;
+    pthread_cond_t ring_space;
+    pthread_t thread;
+    int started;
+    int audio_subscribed;
+    int64_t subscription_generation;
+    struct {int64_t sequence,generation;} epochs[NAKI_INFLIGHT_CAPACITY];
+    int64_t sei_pending[NAKI_INFLIGHT_CAPACITY];
+} PipelineReader;
+typedef struct DecodePump {
+    pthread_mutex_t mutex;NakiWakeup wake;pthread_t thread;
+    AVFrame *frame;InputItem audio;
+    int occupied,prefer_video,done,error,started;
+} DecodePump;
+int pipeline_decode_init(Pipeline *p);
+void pipeline_decode_join(Pipeline *p);
+void pipeline_decode_destroy(Pipeline *p);
+void pipeline_refresh_auto(Pipeline *p);
+struct NakiInput {
+    AVFormatContext *input;
+    AVCodecContext *decoder;
+    AVCodecAsyncContext *async;
+    AVFrame initial_input_properties;
+    int64_t decoder_receive_us,next_frame_id,synthetic_pts,next_stats_us;
+    int stream_index,seen_input_i;
+    enum AVCodecID sei_codec;
+    int sei_length_size,sei_read_error;
+    NakiSeiConfig sei_input;
+    NakiTimeline timeline;
+    Interrupt read_interrupt;
+    PipelineReader reader;
+    DecodePump pump;
+};
+#endif

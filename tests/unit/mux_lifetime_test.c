@@ -20,9 +20,12 @@ int main(void) {
     char directory[]="/tmp/naki-mux-owner-XXXXXX";assert(mkdtemp(directory));
     snprintf(job->config.output,sizeof(job->config.output),"%s/output.ts",directory);
     strcpy(job->config.output_format,"mpegts");job->config.mux_wait_ms=50;
-    AVCodecContext *encoder=avcodec_alloc_context3(NULL);assert(encoder);source->encoder=encoder;
+    AVCodecContext *encoder=avcodec_alloc_context3(NULL);assert(encoder);
     encoder->codec_type=AVMEDIA_TYPE_VIDEO;encoder->codec_id=AV_CODEC_ID_H264;
     encoder->width=encoder->height=16;encoder->pix_fmt=AV_PIX_FMT_YUV420P;encoder->time_base=(AVRational){1,90000};
+    source->encoded=naki_encoded_seal(encoder);assert(source->encoded);
+    /* The writer owns a deep snapshot, independent of codec storage. */
+    avcodec_free_context(&encoder);writer->encoded=naki_encoded_ref(source->encoded);
     assert(!pipeline_open_mux(source));NakiMux *original=source->mux;
     void *interrupt=original->output->interrupt_callback.opaque,*avio=original->output->pb->opaque;
     int fd=original->custom_output_fd;assert(interrupt==&original->interrupt&&avio==original);
@@ -39,7 +42,7 @@ int main(void) {
     assert(original->mux_max_dts_us==1234&&original->deferred_count==1&&!releases);
     /* Model pthread_create failure: returning the object restores all resources. */
     assert(!pipeline_mux_move(writer,source));assert(source->mux==original&&!writer->mux&&!releases);
-    assert(!pipeline_mux_move(source,writer));free(source);
+    assert(!pipeline_mux_move(source,writer));naki_encoded_unref(&source->encoded);free(source);
     /* The protocol/local writer no longer depends on the old Pipeline's lifetime. */
     const uint8_t marker[]={1,2,3,4};avio_write(original->output->pb,marker,sizeof(marker));avio_flush(original->output->pb);
     assert(!original->output->pb->error&&pipeline_mux_bytes(writer)>=sizeof(marker));
@@ -51,7 +54,7 @@ int main(void) {
      * are gone but the atomic interrupt target must remain alive and stable. */
     pipeline_mux_cancel(writer);assert(atomic_load(&original->interrupt.deadline)>0);
     pipeline_mux_release(writer);assert(!writer->mux&&releases==1);pipeline_mux_release(writer);assert(releases==1);
-    avcodec_free_context(&encoder);assert(!unlink(job->config.output));assert(!rmdir(directory));
+    naki_encoded_unref(&writer->encoded);avcodec_free_context(&encoder);assert(!unlink(job->config.output));assert(!rmdir(directory));
     pthread_mutex_destroy(&job->mutex);free(writer);free(job);free(other);
     puts("PASS stable mux callbacks, exclusive move/rollback, close and exactly-once reference release");return 0;
 }

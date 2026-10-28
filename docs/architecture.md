@@ -11,11 +11,21 @@ This describes the implemented maintenance boundaries, not additional media capa
 | control | Plain C/yyjson policy, configuration, identity and operation state; no media SDK includes or link dependency. SHA256 uses OpenSSL Crypto; canonical intent bytes and fingerprints remain unchanged. |
 | controller | Control/status projections; never includes mutable worker or pipeline state, including through wrappers. Its existing SDK capability reporting remains an explicit dependency. |
 | worker | Task lifecycle, control loop and metrics publication; media calls go through the media interfaces. |
-| media orchestration | Input/decode and rendition scheduling; only enumerated implementations consume private Pipeline state. |
+| media orchestration | Holds opaque component handles and timing descriptions; schedules input, output and branches through explicit owner APIs. |
+| media input | `naki-media-input` owns demux, reader ring, decoder/async transfer, dispatch pump, source lineage/timeline and their synchronization. |
+| media video | `naki-media-video` owns filter generations, compositor, encoder, PTS ledger and rate feedback. |
 | media output | `naki-media-output` owns output setup/finalization, packet write/flush, audio registration and audio clock state. |
 | media transport leaves | Shared pool, frame/audio wire codecs, messages and idle policy do not consume mutable Job/Pipeline state. |
 
 The checker protects normal maintenance mistakes. A contributor who changes the checker can change the policy; code review remains necessary for deliberate ownership changes. Source checks do not prove race freedom or replace runtime lifetime tests.
+
+## Input, video and immutable output descriptions
+
+`NakiInput` is private to input initialization, reader and decode implementation. `NakiVideo` is private to video/filter and encode implementation. Fixed branch slots and their queues/threads are private to `pipeline_branches.c`. A Pipeline consumer cannot inspect any of these representations: compile-negative checks exercise decoder, encoder, mux, branch and encoded-description access. Native input open/read, encoder send/receive and parameter sealing APIs have enumerated source owners as well as private-header constraints.
+
+Input captures only scalar initial frame properties before transferring the decoder to async ownership. Orchestration polls/feeds through input APIs, retaining the existing pending-packet/EAGAIN behavior. Cleanup wakes and joins the pump/reader, observes final decoder statistics, then frees async before destroying notification FDs. After mux finalization, the explicit release sequence retains receive-frame, synchronous-decoder, encoder/filter/compositor, demux and ledger retirement order. An output-only Pipeline owns no input state; empty and partial-initialization cleanup accepts absent components.
+
+Once codec open succeeds, `NakiEncodedDescription` seals a deep copy of codec parameters and timing. Every destination holds its own reference until its writer joins. The mux copies those parameters and publishes scalar stream timing after header negotiation; no `AVStream *` or native encoder context crosses to a destination writer. Primary mux transfer retains scalar timing on the encoding side and no longer allocates a fake format context/stream. Mux-owned key-grid history travels with the same mux allocation. IDR requests and actual-write rate feedback return through video-owner APIs; their calling thread and existing capability restrictions remain in force.
 
 ## Stable mux lifetime
 
@@ -47,4 +57,4 @@ Cross-cutting lifetime/ownership changes require full functional and application
 
 `job_remote.h` keeps remote slot allocation, child/destination factories and status projection inside worker implementation. Slot allocation rolls back a partially allocated batch; factory roles reject a mismatched destructor. Adapters still prove holder exit/thread join before retiring jobs. Compiler checks reject `sizeof(Job)`, direct field access and external mutex access; native tests cover observations, bounded admission, cancellation and allocation rollback.
 
-Remaining debt: `Pipeline` still exposes broad private state to its enumerated implementations; rendition lifecycle has several orthogonal flags and does not yet have a complete typed transition model. The allowlists prevent adding consumers silently; they are not a claim that all internal coupling has been eliminated. The remaining completion checklist is in `architecture-completion.md`.
+Remaining debt: rendition and destination lifecycle still have several orthogonal flags and do not yet have a complete typed transition model. The allowlists prevent adding consumers silently; they are not a claim that all internal coupling has been eliminated. The remaining completion checklist is in `architecture-completion.md`.

@@ -1,7 +1,7 @@
-#include "pipeline_internal.h"
+#include "input_internal.h"
 
 int pipeline_decode_receive(Pipeline *p,AVFrame *frame,InputItem *audio) {
-    DecodePump *q=&p->pump;int ret=AVERROR(EAGAIN);
+    DecodePump *q=&p->in->pump;int ret=AVERROR(EAGAIN);
     pthread_mutex_lock(&q->mutex);
     /* Alternate when both lanes are ready: neither late audio nor video may
      * starve the other. All stream registration/mux work stays with this owner. */

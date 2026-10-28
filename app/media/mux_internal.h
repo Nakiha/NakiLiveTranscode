@@ -4,6 +4,7 @@
  * address from allocation through close, including an owner handoff. Protocol
  * interrupts and custom AVIO callbacks never point into a Pipeline. */
 #include "pipeline_internal.h"
+#include <libavcodec/bsf.h>
 
 typedef struct AudioTrack {
     int input_index, rejected, have_clock, pending_reported;
@@ -15,6 +16,8 @@ typedef struct AudioTrack {
 
 struct NakiMux {
     AVFormatContext *output;
+    int seen_output_key;
+    int64_t previous_key_pts;
     Interrupt interrupt;
     int header_written, custom_output_fd, live_mux, video_started;
     int64_t mux_max_dts_us;

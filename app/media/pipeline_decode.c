@@ -1,4 +1,4 @@
-#include "pipeline_internal.h"
+#include "input_internal.h"
 
 /* Optional direct-output pump: this thread alone calls async send/receive and
  * stats while active. One video slot and one immutable audio/control slot,
@@ -7,18 +7,18 @@
 void pipeline_decode_notify(void *opaque) {
     Pipeline *p=opaque;
     wake_job(p->job);
-    naki_wakeup_notify(&p->pump.wake);
+    naki_wakeup_notify(&p->in->pump.wake);
 }
 int pipeline_decode_init(Pipeline *p) {
-    pthread_mutex_init(&p->pump.mutex,NULL);
-    return naki_wakeup_init(&p->pump.wake,naki_job_config(p->job)->decoder_pump);
+    pthread_mutex_init(&p->in->pump.mutex,NULL);
+    return naki_wakeup_init(&p->in->pump.wake,naki_job_config(p->job)->decoder_pump);
 }
 static void decoded_stamp_free(void *opaque,uint8_t *data) {
     AVBufferRef *origin=opaque;
     av_buffer_unref(&origin);av_free(data);
 }
 static void *decode_main(void *opaque) {
-    (void)crash_thread_init();Pipeline *p=opaque;DecodePump *q=&p->pump;
+    (void)crash_thread_init();Pipeline *p=opaque;DecodePump *q=&p->in->pump;
     AVFrame *frame=av_frame_alloc();InputItem pending={0};
     int ret=frame?0:AVERROR(ENOMEM),eof_sent=0;int64_t next_stats=0;
     while(ret>=0&&!naki_job_cancelled(p->job)) {
@@ -26,8 +26,8 @@ static void *decode_main(void *opaque) {
         int progress=0,available;
         pthread_mutex_lock(&q->mutex);available=!q->occupied;pthread_mutex_unlock(&q->mutex);
         if(available) {
-            ret=avcodec_async_receive_frame(p->async,frame);
-            if(ret>=0)p->decoder_receive_us=now_us();
+            ret=avcodec_async_receive_frame(p->in->async,frame);
+            if(ret>=0)p->in->decoder_receive_us=now_us();
             if(ret==AVERROR_EOF){ret=0;break;}
             if(ret>=0) {
                 if(!pipeline_stamp_valid(frame->opaque_ref)){ret=AVERROR_INVALIDDATA;break;}
@@ -80,7 +80,7 @@ static void *decode_main(void *opaque) {
                 stamp->submitted_us=now_us();
                 if(!stamp->submit_first_us)stamp->submit_first_us=stamp->submitted_us;
             }
-            ret=avcodec_async_send_packet(p->async,pending.packet);
+            ret=avcodec_async_send_packet(p->in->async,pending.packet);
             if(!ret) {if(pending.packet)pipeline_input_free(&pending);else eof_sent=1;progress=1;}
             else if(ret==AVERROR(EAGAIN))ret=0;
             else break;
@@ -100,19 +100,19 @@ static void *decode_main(void *opaque) {
 int pipeline_decode_start(Pipeline *p) {
     int rate=naki_video_rate_output(&p->video_rate,naki_job_config(p->job)->output_fps,&p->output_rate,&p->rate_divisor);
     if(rate<0)return rate;
-    p->pump.frame=av_frame_alloc();if(!p->pump.frame)return AVERROR(ENOMEM);
-    int ret=pthread_create(&p->pump.thread,NULL,decode_main,p);
+    p->in->pump.frame=av_frame_alloc();if(!p->in->pump.frame)return AVERROR(ENOMEM);
+    int ret=pthread_create(&p->in->pump.thread,NULL,decode_main,p);
     if(ret)return AVERROR(ret);
-    p->pump.started=1;return 0;
+    p->in->pump.started=1;return 0;
 }
 void pipeline_decode_join(Pipeline *p) {
-    if(p->pump.started) {naki_wakeup_notify(&p->pump.wake);pthread_join(p->pump.thread,NULL);p->pump.started=0;}
+    if(p->in->pump.started) {naki_wakeup_notify(&p->in->pump.wake);pthread_join(p->in->pump.thread,NULL);p->in->pump.started=0;}
 }
 void pipeline_decode_destroy(Pipeline *p) {
-    if(p->pump.frame&&p->pump.frame->opaque_ref) {
-        Stamp *s=(Stamp *)p->pump.frame->opaque_ref->data;
+    if(p->in->pump.frame&&p->in->pump.frame->opaque_ref) {
+        Stamp *s=(Stamp *)p->in->pump.frame->opaque_ref->data;
         if(s->decoder_tracked)naki_policy_untrack(p->job,NAKI_TRACK_FRAME,(uint64_t)s->frame_id);
     }
-    av_frame_free(&p->pump.frame);pipeline_input_free(&p->pump.audio);
-    naki_wakeup_destroy(&p->pump.wake);pthread_mutex_destroy(&p->pump.mutex);
+    av_frame_free(&p->in->pump.frame);pipeline_input_free(&p->in->pump.audio);
+    naki_wakeup_destroy(&p->in->pump.wake);pthread_mutex_destroy(&p->in->pump.mutex);
 }

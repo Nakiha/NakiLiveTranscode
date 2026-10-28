@@ -1,4 +1,4 @@
-#include "pipeline_internal.h"
+#include "input_internal.h"
 
 /* Reader alone reads mutable input streams and snapshots audio parameters. */
 void pipeline_input_free(InputItem *item) {
@@ -7,12 +7,12 @@ void pipeline_input_free(InputItem *item) {
 
 int pipeline_reader_sei_obligation(Pipeline *p,int64_t sequence,int add) {
     int result=AVERROR_INVALIDDATA;
-    pthread_mutex_lock(&p->reader.ring_mutex);
+    pthread_mutex_lock(&p->in->reader.ring_mutex);
     if(add) {
         result=AVERROR(ENOBUFS);
-        for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(!p->reader.sei_pending[i]) {p->reader.sei_pending[i]=sequence+1;result=0;break;}
-    } else for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(p->reader.sei_pending[i]==sequence+1) {p->reader.sei_pending[i]=0;result=0;break;}
-    pthread_mutex_unlock(&p->reader.ring_mutex);return result;
+        for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(!p->in->reader.sei_pending[i]) {p->in->reader.sei_pending[i]=sequence+1;result=0;break;}
+    } else for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(p->in->reader.sei_pending[i]==sequence+1) {p->in->reader.sei_pending[i]=0;result=0;break;}
+    pthread_mutex_unlock(&p->in->reader.ring_mutex);return result;
 }
 
 static void packet_stamp_free(void *opaque, uint8_t *data) {
@@ -28,19 +28,19 @@ static void *reader_main(void *opaque) {
     while (!naki_job_cancelled(job)) {
         /* Reserve reader space before consuming network bytes. One producer;
          * a consumer can only make more space while this read is in progress. */
-        pthread_mutex_lock(&p->reader.ring_mutex);
-        while(p->reader.count>=naki_job_config(job)->reader_queue_capacity&&!naki_job_cancelled(job))
-            pthread_cond_wait(&p->reader.ring_space,&p->reader.ring_mutex);
-        pthread_mutex_unlock(&p->reader.ring_mutex);
+        pthread_mutex_lock(&p->in->reader.ring_mutex);
+        while(p->in->reader.count>=naki_job_config(job)->reader_queue_capacity&&!naki_job_cancelled(job))
+            pthread_cond_wait(&p->in->reader.ring_space,&p->in->reader.ring_mutex);
+        pthread_mutex_unlock(&p->in->reader.ring_mutex);
         if(naki_job_cancelled(job))break;
         AVPacket *packet=av_packet_alloc();
         if (!packet) {ret=AVERROR(ENOMEM); break;}
         if(!read_started)read_started=now_us();
         int64_t began=read_started;
-        atomic_store(&p->read_interrupt.deadline,began+IO_TIMEOUT_US);
-        ret=av_read_frame(p->input,packet);
+        atomic_store(&p->in->read_interrupt.deadline,began+IO_TIMEOUT_US);
+        ret=av_read_frame(p->in->input,packet);
         int64_t finished=now_us();
-        if(ret!=AVERROR(EAGAIN)) {atomic_store(&p->read_interrupt.deadline,0);read_started=0;}
+        if(ret!=AVERROR(EAGAIN)) {atomic_store(&p->in->read_interrupt.deadline,0);read_started=0;}
         if (ret<0) {
             av_packet_free(&packet);
             if (ret==AVERROR(EAGAIN)) {av_usleep(1000); continue;}
@@ -48,13 +48,13 @@ static void *reader_main(void *opaque) {
         }
         if (packet->size<=0) {av_packet_free(&packet); continue;}
         if((unsigned)packet->size>NAKI_INPUT_PACKET_BYTES) {av_packet_free(&packet);ret=AVERROR(ENOBUFS);break;}
-        pthread_mutex_lock(&p->reader.ring_mutex);
-        int audio_subscribed=p->reader.audio_subscribed;int64_t subscription_generation=p->reader.subscription_generation;NakiSeiConfig sei_snapshot=p->sei_input;
-        pthread_mutex_unlock(&p->reader.ring_mutex);
-        int video=packet->stream_index==p->stream_index;
+        pthread_mutex_lock(&p->in->reader.ring_mutex);
+        int audio_subscribed=p->in->reader.audio_subscribed;int64_t subscription_generation=p->in->reader.subscription_generation;NakiSeiConfig sei_snapshot=p->in->sei_input;
+        pthread_mutex_unlock(&p->in->reader.ring_mutex);
+        int video=packet->stream_index==p->in->stream_index;
         InputItem item={.packet=packet,.tb=p->input_tb,.demuxed_us=finished};
         if (!video) {
-            AVStream *stream=p->input->streams[packet->stream_index];
+            AVStream *stream=p->in->input->streams[packet->stream_index];
             int deliver=audio_subscribed && (naki_job_config(job)->output_count||strcmp(naki_job_config(job)->output_format,"mp4"));
             if (stream->codecpar->codec_type!=AVMEDIA_TYPE_AUDIO || (!deliver && !p->hooks.audio_packet)) {
                 pipeline_input_free(&item); continue;
@@ -91,24 +91,24 @@ static void *reader_main(void *opaque) {
             AVReadOrigin source_origin=origin?*origin:(AVReadOrigin){0};
             if(naki_job_config(job)->network_trace&&!origin) {pipeline_input_free(&item);ret=AVERROR_INVALIDDATA;break;}
             if(naki_job_config(job)->source_rate_limit) {
-                pthread_mutex_lock(&p->reader.ring_mutex);
-                while(p->reader.rate_count&&p->reader.rate[p->reader.rate_head].us<=finished-1000000) {
-                    p->reader.rate_bits-=p->reader.rate[p->reader.rate_head].bits;
-                    p->reader.rate_head=(p->reader.rate_head+1)%1024;p->reader.rate_count--;
+                pthread_mutex_lock(&p->in->reader.ring_mutex);
+                while(p->in->reader.rate_count&&p->in->reader.rate[p->in->reader.rate_head].us<=finished-1000000) {
+                    p->in->reader.rate_bits-=p->in->reader.rate[p->in->reader.rate_head].bits;
+                    p->in->reader.rate_head=(p->in->reader.rate_head+1)%1024;p->in->reader.rate_count--;
                 }
-                int full=p->reader.rate_count==1024;
+                int full=p->in->reader.rate_count==1024;
                 if(!full) {
-                    int pos=(p->reader.rate_head+p->reader.rate_count++)%1024;
-                    int64_t bits=8*((int64_t)packet->size+(seq==0?p->input->streams[p->stream_index]->codecpar->extradata_size:0));
-                    p->reader.rate[pos].us=source_origin.complete_us;p->reader.rate[pos].bits=bits;p->reader.rate_bits+=bits;
+                    int pos=(p->in->reader.rate_head+p->in->reader.rate_count++)%1024;
+                    int64_t bits=8*((int64_t)packet->size+(seq==0?p->in->input->streams[p->in->stream_index]->codecpar->extradata_size:0));
+                    p->in->reader.rate[pos].us=source_origin.complete_us;p->in->reader.rate[pos].bits=bits;p->in->reader.rate_bits+=bits;
                 }
-                pthread_mutex_unlock(&p->reader.ring_mutex);
+                pthread_mutex_unlock(&p->in->reader.ring_mutex);
                 if(full){pipeline_input_free(&item);ret=AVERROR(ENOBUFS);break;}
             }
             av_buffer_unref(&packet->opaque_ref);
             NakiSeiBundle *sei=NULL;
-            ret=naki_sei_extract(packet,p->sei_codec,p->sei_length_size,&sei_snapshot,&sei);
-            if(ret<0) {p->sei_read_error=1;pipeline_input_free(&item);break;}
+            ret=naki_sei_extract(packet,p->in->sei_codec,p->in->sei_length_size,&sei_snapshot,&sei);
+            if(ret<0) {p->in->sei_read_error=1;pipeline_input_free(&item);break;}
             size_t sei_size=naki_sei_bundle_size(sei);
             {
                 uint8_t *data=av_mallocz(sizeof(Stamp)+sei_size);
@@ -126,7 +126,7 @@ static void *reader_main(void *opaque) {
             if(naki_job_config(job)->network_trace) {
                 yyjson_mut_doc *event=new_event("input_video_packet",job);
                 json_int(event,"sequence",seq);json_int(event,"bytes",packet->size);
-                json_int(event,"config_bytes",seq==0?p->input->streams[p->stream_index]->codecpar->extradata_size:0);
+                json_int(event,"config_bytes",seq==0?p->in->input->streams[p->in->stream_index]->codecpar->extradata_size:0);
                 json_int(event,"first_read_monotonic_us",source_origin.first_read_us);
                 json_int(event,"rtmp_complete_monotonic_us",source_origin.complete_us);
                 json_int(event,"demux_finished_monotonic_us",finished);
@@ -149,9 +149,9 @@ static void *reader_main(void *opaque) {
             if(ret<0) {pipeline_input_free(&item); break;}
             stamp->tracked_packet=1;
             if(naki_job_renditions(job)){
-                int registered=0;pthread_mutex_lock(&p->reader.ring_mutex);
-                for(unsigned k=0;k<NAKI_INFLIGHT_CAPACITY;k++)if(!p->reader.epochs[k].sequence){p->reader.epochs[k].sequence=stamp->sequence+1;p->reader.epochs[k].generation=subscription_generation;registered=1;break;}
-                pthread_mutex_unlock(&p->reader.ring_mutex);
+                int registered=0;pthread_mutex_lock(&p->in->reader.ring_mutex);
+                for(unsigned k=0;k<NAKI_INFLIGHT_CAPACITY;k++)if(!p->in->reader.epochs[k].sequence){p->in->reader.epochs[k].sequence=stamp->sequence+1;p->in->reader.epochs[k].generation=subscription_generation;registered=1;break;}
+                pthread_mutex_unlock(&p->in->reader.ring_mutex);
                 if(!registered){pipeline_input_free(&item);ret=AVERROR(ENOBUFS);break;}
             }
             naki_job_checkpoint(job,NAKI_CP_FIRST_PACKET,0);
@@ -162,98 +162,99 @@ static void *reader_main(void *opaque) {
         ret=naki_branch_item_charge(&accounting);
         if(ret<0||accounting.charged_bytes>NAKI_INPUT_RETAINED_ITEM_BYTES) {pipeline_input_free(&item);if(ret>=0)ret=AVERROR(ENOBUFS);break;}
         item.retained_bytes=accounting.charged_bytes;
-        pthread_mutex_lock(&p->reader.ring_mutex);
-        while ((p->reader.count==READER_CAPACITY||item.retained_bytes>NAKI_READER_RETAINED_BYTES-p->reader.reader_bytes) && !naki_job_cancelled(job)) pthread_cond_wait(&p->reader.ring_space,&p->reader.ring_mutex);
-        if (naki_job_cancelled(job)) {pthread_mutex_unlock(&p->reader.ring_mutex); pipeline_input_free(&item); break;}
-        p->reader.ring[(p->reader.head+p->reader.count)%READER_CAPACITY]=item; p->reader.count++;p->reader.reader_bytes+=item.retained_bytes;
-        pthread_mutex_unlock(&p->reader.ring_mutex);
+        pthread_mutex_lock(&p->in->reader.ring_mutex);
+        while ((p->in->reader.count==READER_CAPACITY||item.retained_bytes>NAKI_READER_RETAINED_BYTES-p->in->reader.reader_bytes) && !naki_job_cancelled(job)) pthread_cond_wait(&p->in->reader.ring_space,&p->in->reader.ring_mutex);
+        if (naki_job_cancelled(job)) {pthread_mutex_unlock(&p->in->reader.ring_mutex); pipeline_input_free(&item); break;}
+        p->in->reader.ring[(p->in->reader.head+p->in->reader.count)%READER_CAPACITY]=item; p->in->reader.count++;p->in->reader.reader_bytes+=item.retained_bytes;
+        pthread_mutex_unlock(&p->in->reader.ring_mutex);
         naki_job_input_received(job,video,0,now_us());
         pipeline_decode_notify(p);
     }
-    pthread_mutex_lock(&p->reader.ring_mutex);
-    p->reader.read_done=1; p->reader.read_error=ret==AVERROR_EOF ? 0 : ret;
-    pthread_mutex_unlock(&p->reader.ring_mutex);
+    pthread_mutex_lock(&p->in->reader.ring_mutex);
+    p->in->reader.read_done=1; p->in->reader.read_error=ret==AVERROR_EOF ? 0 : ret;
+    pthread_mutex_unlock(&p->in->reader.ring_mutex);
     pipeline_decode_notify(p); return NULL;
 }
 
 InputItem pipeline_reader_pop(Pipeline *p, int *done, int *error) {
     InputItem item={0};
-    pthread_mutex_lock(&p->reader.ring_mutex);
-    if (p->reader.count) {
-        item=p->reader.ring[p->reader.head]; p->reader.ring[p->reader.head]=(InputItem){0};
-        p->reader.head=(p->reader.head+1)%READER_CAPACITY; p->reader.count--;p->reader.reader_bytes-=item.retained_bytes;
-        pthread_cond_signal(&p->reader.ring_space);
+    pthread_mutex_lock(&p->in->reader.ring_mutex);
+    if (p->in->reader.count) {
+        item=p->in->reader.ring[p->in->reader.head]; p->in->reader.ring[p->in->reader.head]=(InputItem){0};
+        p->in->reader.head=(p->in->reader.head+1)%READER_CAPACITY; p->in->reader.count--;p->in->reader.reader_bytes-=item.retained_bytes;
+        pthread_cond_signal(&p->in->reader.ring_space);
     }
-    *done=p->reader.read_done && !p->reader.count && !item.packet; *error=p->reader.read_error;
-    pthread_mutex_unlock(&p->reader.ring_mutex);
+    *done=p->in->reader.read_done && !p->in->reader.count && !item.packet; *error=p->in->reader.read_error;
+    pthread_mutex_unlock(&p->in->reader.ring_mutex);
     return item;
 }
 
 void pipeline_reader_init(Pipeline *p) {
-    pthread_mutex_init(&p->reader.ring_mutex,NULL);
-    pthread_cond_init(&p->reader.ring_space,NULL);
+    pthread_mutex_init(&p->in->reader.ring_mutex,NULL);
+    pthread_cond_init(&p->in->reader.ring_space,NULL);
 }
 int pipeline_reader_start(Pipeline *p) {
-    int ret=pthread_create(&p->reader.thread,NULL,reader_main,p);
-    if(!ret)p->reader.started=1;
+    int ret=pthread_create(&p->in->reader.thread,NULL,reader_main,p);
+    if(!ret)p->in->reader.started=1;
     return ret;
 }
 void pipeline_reader_wake(Pipeline *p) {
-    pthread_mutex_lock(&p->reader.ring_mutex);
-    pthread_cond_broadcast(&p->reader.ring_space);
-    pthread_mutex_unlock(&p->reader.ring_mutex);
+    if(!p->in)return;
+    pthread_mutex_lock(&p->in->reader.ring_mutex);
+    pthread_cond_broadcast(&p->in->reader.ring_space);
+    pthread_mutex_unlock(&p->in->reader.ring_mutex);
 }
 void pipeline_reader_join(Pipeline *p) {
-    if(p->reader.started) {
-        pthread_join(p->reader.thread,NULL);
-        p->reader.started=0;
+    if(p->in->reader.started) {
+        pthread_join(p->in->reader.thread,NULL);
+        p->in->reader.started=0;
     }
 }
 void pipeline_reader_clear(Pipeline *p) {
-    for(int i=0;i<READER_CAPACITY;i++)pipeline_input_free(&p->reader.ring[i]);
+    for(int i=0;i<READER_CAPACITY;i++)pipeline_input_free(&p->in->reader.ring[i]);
 }
 void pipeline_reader_destroy(Pipeline *p) {
-    pthread_cond_destroy(&p->reader.ring_space);
-    pthread_mutex_destroy(&p->reader.ring_mutex);
+    pthread_cond_destroy(&p->in->reader.ring_space);
+    pthread_mutex_destroy(&p->in->reader.ring_mutex);
 }
 int pipeline_reader_pending_sei(Pipeline *p) {
     int pending=0;
-    pthread_mutex_lock(&p->reader.ring_mutex);
-    for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(p->reader.sei_pending[i]) {pending=1;break;}
-    pthread_mutex_unlock(&p->reader.ring_mutex);
+    pthread_mutex_lock(&p->in->reader.ring_mutex);
+    for(unsigned i=0;i<NAKI_INFLIGHT_CAPACITY;i++)if(p->in->reader.sei_pending[i]) {pending=1;break;}
+    pthread_mutex_unlock(&p->in->reader.ring_mutex);
     return pending;
 }
 
 int64_t pipeline_source_rate(Pipeline *p,int64_t now) {
     if(naki_job_remote(p->job)==2)return naki_job_source_rate(p->job);
-    pthread_mutex_lock(&p->reader.ring_mutex);
-    while(p->reader.rate_count&&p->reader.rate[p->reader.rate_head].us<=now-1000000) {
-        p->reader.rate_bits-=p->reader.rate[p->reader.rate_head].bits;
-        p->reader.rate_head=(p->reader.rate_head+1)%1024;p->reader.rate_count--;
+    pthread_mutex_lock(&p->in->reader.ring_mutex);
+    while(p->in->reader.rate_count&&p->in->reader.rate[p->in->reader.rate_head].us<=now-1000000) {
+        p->in->reader.rate_bits-=p->in->reader.rate[p->in->reader.rate_head].bits;
+        p->in->reader.rate_head=(p->in->reader.rate_head+1)%1024;p->in->reader.rate_count--;
     }
     int64_t bits=0;
-    for(int i=0;i<p->reader.rate_count;i++) {
-        int pos=(p->reader.rate_head+i)%1024;
-        if(p->reader.rate[pos].us<=now)bits+=p->reader.rate[pos].bits;
+    for(int i=0;i<p->in->reader.rate_count;i++) {
+        int pos=(p->in->reader.rate_head+i)%1024;
+        if(p->in->reader.rate[pos].us<=now)bits+=p->in->reader.rate[pos].bits;
     }
-    pthread_mutex_unlock(&p->reader.ring_mutex);return bits;
+    pthread_mutex_unlock(&p->in->reader.ring_mutex);return bits;
 }
 
 int pipeline_reader_subscribe(Pipeline *p,const NakiSeiConfig *sei,int audio,int64_t *generation) {
-    pthread_mutex_lock(&p->reader.ring_mutex);int ret=0;
-    if(audio!=p->reader.audio_subscribed||sei->count!=p->sei_input.count||memcmp(sei->types,p->sei_input.types,sei->count*sizeof(sei->types[0]))) {
-        if(p->reader.subscription_generation==INT64_MAX)ret=AVERROR(EOVERFLOW);
-        else {p->sei_input=*sei;p->reader.audio_subscribed=audio;p->reader.subscription_generation++;}
+    pthread_mutex_lock(&p->in->reader.ring_mutex);int ret=0;
+    if(audio!=p->in->reader.audio_subscribed||sei->count!=p->in->sei_input.count||memcmp(sei->types,p->in->sei_input.types,sei->count*sizeof(sei->types[0]))) {
+        if(p->in->reader.subscription_generation==INT64_MAX)ret=AVERROR(EOVERFLOW);
+        else {p->in->sei_input=*sei;p->in->reader.audio_subscribed=audio;p->in->reader.subscription_generation++;}
     }
-    *generation=p->reader.subscription_generation;pthread_mutex_unlock(&p->reader.ring_mutex);return ret;
+    *generation=p->in->reader.subscription_generation;pthread_mutex_unlock(&p->in->reader.ring_mutex);return ret;
 }
 int pipeline_reader_epoch_consumed(Pipeline *p,int64_t sequence) {
-    int ret=AVERROR_INVALIDDATA;pthread_mutex_lock(&p->reader.ring_mutex);
-    for(unsigned k=0;k<NAKI_INFLIGHT_CAPACITY;k++)if(p->reader.epochs[k].sequence==sequence+1){p->reader.epochs[k].sequence=0;ret=0;break;}
-    pthread_mutex_unlock(&p->reader.ring_mutex);return ret;
+    int ret=AVERROR_INVALIDDATA;pthread_mutex_lock(&p->in->reader.ring_mutex);
+    for(unsigned k=0;k<NAKI_INFLIGHT_CAPACITY;k++)if(p->in->reader.epochs[k].sequence==sequence+1){p->in->reader.epochs[k].sequence=0;ret=0;break;}
+    pthread_mutex_unlock(&p->in->reader.ring_mutex);return ret;
 }
 int pipeline_reader_epoch_ready(Pipeline *p,int64_t generation) {
-    int ready=1;pthread_mutex_lock(&p->reader.ring_mutex);
-    for(unsigned k=0;k<NAKI_INFLIGHT_CAPACITY;k++)if(p->reader.epochs[k].sequence&&p->reader.epochs[k].generation<generation){ready=0;break;}
-    pthread_mutex_unlock(&p->reader.ring_mutex);return ready;
+    int ready=1;pthread_mutex_lock(&p->in->reader.ring_mutex);
+    for(unsigned k=0;k<NAKI_INFLIGHT_CAPACITY;k++)if(p->in->reader.epochs[k].sequence&&p->in->reader.epochs[k].generation<generation){ready=0;break;}
+    pthread_mutex_unlock(&p->in->reader.ring_mutex);return ready;
 }

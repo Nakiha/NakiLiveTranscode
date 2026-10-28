@@ -20,9 +20,13 @@ LAYERS = {
     'media': {'media', 'control', 'platform', 'observability', 'crash', 'worker'},
 }
 PRIVATE = {
+    'media/input_internal.h': {'media/pipeline_input.c','media/pipeline_reader.c','media/pipeline_decode.c','media/pipeline_decode_queue.c'},
+    'media/video_internal.h': {'media/pipeline_video.c','media/pipeline_encode.c'},
     'media/mux_internal.h': {'media/pipeline_output.c', 'media/pipeline_audio.c', 'media/pipeline_mux.c'},
     'media/pipeline_internal.h': {
         'media/pipeline.c', 'media/pipeline_reader.c', 'media/pipeline_encode.c',
+        'media/pipeline_input.c','media/pipeline_video.c','media/pipeline_branches.c',
+        'media/input_internal.h','media/video_internal.h',
         'media/pipeline_decode.c', 'media/pipeline_decode_queue.c', 'media/mux_internal.h',
         'media/rendition_runtime.c', 'media/rendition_runtime_internal.h',
         'media/rendition_child.c', 'media/rendition_media.c', 'media/destination_runtime.c',
@@ -34,6 +38,15 @@ PRIVATE = {
         'controller/service_supervisor.c', 'controller/service_projection.c'},
 }
 OWNERS = {
+    'avformat_open_input': {'media/pipeline_input.c'},
+    'avformat_close_input': {'media/pipeline_input.c'},
+    'av_read_frame': {'media/pipeline_reader.c'},
+    'avcodec_send_frame': {'media/pipeline_encode.c'},
+    'avcodec_receive_packet': {'media/pipeline_encode.c'},
+    'avcodec_async_free': {'media/pipeline_input.c'},
+    'avcodec_async_receive_frame': {'media/pipeline_decode.c','media/decode_backend.h'},
+    'avcodec_async_send_packet': {'media/pipeline_decode.c','media/decode_backend.h'},
+    'avcodec_parameters_from_context': {'media/encoded_description.c'},
     'av_write_frame': {'media/pipeline_mux.c'},
     'av_interleaved_write_frame': set(),
     'avformat_live_add_audio': {'media/pipeline_audio.c'},
@@ -118,6 +131,10 @@ def check(root):
         code = code_only(text)
         if name != 'media/mux_internal.h' and re.search(r'\bstruct\s+NakiMux\s*\{', code):
             fail(name, 'mux representation is private')
+        for typename, owner in [('NakiInput','media/input_internal.h'),('NakiVideo','media/video_internal.h'),
+                                ('NakiEncodedDescription','media/encoded_description.c'),('NakiBranches','media/pipeline_branches.c')]:
+            if name != owner and re.search(r'\bstruct\s+'+typename+r'\s*\{', code):
+                fail(name, typename+' representation is private')
         if not name.startswith('worker/') and re.search(r'\bstruct\s+Job\s*\{', code):
             fail(name, 'worker Job representation is private')
         for symbol, owners in OWNERS.items():

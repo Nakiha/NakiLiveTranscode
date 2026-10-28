@@ -201,11 +201,12 @@ static int poll_locked(Pipeline *p,int finishing) {
 int naki_renditions_open(Pipeline *p) {
     NakiRenditions *m=naki_job_renditions(p->job);if(!m)return -EINVAL;
     for(unsigned i=0;i<m->initial_count;i++)if(naki_job_config(p->job)->rendition_backend==1&&!strncmp(m->slots[i].spec.output,"srt://",6)){p->stage="process holder v1 denies sendmsg; SRT requires legacy/thread backend";return -ENOTSUP;}
-    if(p->initial_input_properties.format!=AV_PIX_FMT_YUV420P&&p->initial_input_properties.format!=AV_PIX_FMT_YUV420P10LE){p->stage="shared frame v2 supports planar YUV420 8/10-bit only";return -ENOTSUP;}
+    AVFrame properties=pipeline_input_properties(p);
+    if(properties.format!=AV_PIX_FMT_YUV420P&&properties.format!=AV_PIX_FMT_YUV420P10LE){p->stage="shared frame v2 supports planar YUV420 8/10-bit only";return -ENOTSUP;}
     int ret=naki_pool_open(&m->video,1+NAKI_OUTPUT_MAX*NAKI_RENDITION_VIDEO_CREDIT,naki_frame_wire_capacity(NAKI_INPUT_MAX_PIXELS),UINT64_C(4)*1024*1024*1024);
     if(!ret)ret=naki_pool_open(&m->audio,1+NAKI_OUTPUT_MAX*NAKI_RENDITION_AUDIO_CREDIT,NAKI_AUDIO_WIRE_CAPACITY,UINT64_C(640)*1024*1024);
     if(ret<0)return ret;
-    property_copy(&m->prototype,&p->initial_input_properties);
+    property_copy(&m->prototype,&properties);
     yyjson_doc *public=yyjson_read(naki_job_public_config(p->job),strlen(naki_job_public_config(p->job)),0);if(!public)return -EINVAL;yyjson_val *outputs=yyjson_obj_get(yyjson_doc_get_root(public),"outputs");
     for(unsigned i=0;i<m->initial_count;i++){Rendition *r=&m->slots[i];char error[256]={0};r->config_json=naki_rendition_config_json(naki_job_public_config(p->job),strlen(naki_job_public_config(p->job)),yyjson_arr_get(outputs,i),error,sizeof(error));if(!r->config_json){ret=-EINVAL;break;}ret=naki_rendition_spawn(p,i);if(ret<0)break;}
     yyjson_doc_free(public);if(ret<0)return ret;

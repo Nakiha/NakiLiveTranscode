@@ -32,6 +32,12 @@ class Organization(unittest.TestCase):
             ('media/illegal.c', '#include "pipeline_mux.c"\n', 'implementation include'),
             ('media/illegal.c', '#define H "mux_internal.h"\n#include H\n', 'computed include'),
             ('media/illegal.c', 'struct NakiMux { int secret; };', 'representation is private'),
+            ('media/illegal.c', 'struct NakiInput { int secret; };', 'representation is private'),
+            ('media/illegal.c', 'struct NakiVideo { int secret; };', 'representation is private'),
+            ('media/illegal.c', '#include "input_internal.h"\n', 'private header'),
+            ('media/illegal.c', '#include "video_internal.h"\n', 'private header'),
+            ('media/illegal.c', 'void f(void){av_read_frame(0,0);}', 'single-owner API'),
+            ('media/illegal.c', 'void f(void){avcodec_send_frame(0,0);}', 'single-owner API'),
             ('media/illegal.c', 'struct Job { int secret; };', 'representation is private'),
             ('media/illegal.c', 'void f(void){naki_job_frame_written(0,0);}', 'unauthorized Job publisher'),
             ('media/illegal.c', 'void f(void){naki_job_child_free(0);}', 'unauthorized Job publisher'),
@@ -39,7 +45,7 @@ class Organization(unittest.TestCase):
         for name, source, expected in cases:
             with self.subTest(name=name, expected=expected), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
-                for item in ('worker/job.h', 'media/pipeline_internal.h', 'media/mux_internal.h', 'media/pipeline_mux.c'):
+                for item in ('worker/job.h', 'media/pipeline_internal.h', 'media/mux_internal.h', 'media/pipeline_mux.c', 'media/input_internal.h', 'media/video_internal.h'):
                     path = root / 'app' / item; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('')
                 path = root / 'app' / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(source)
                 (root / 'CMakeLists.txt').write_text('target_link_libraries(naki-control PUBLIC yyjson)')
@@ -74,6 +80,17 @@ class Organization(unittest.TestCase):
         self.assertEqual(good.returncode, 0, good.stderr)
         for expression in ('sizeof(Job)', 'j->stats.packets_out', 'sizeof(j->mutex)'):
             bad = subprocess.run(command, input=headers+'int f(Job *j){return (int)('+expression+');}\n', text=True, capture_output=True)
+            self.assertNotEqual(bad.returncode, 0, expression)
+
+    def test_orchestration_cannot_inspect_component_state(self):
+        prefix = pathlib.Path(os.environ.get('NAKI_BUILD_ROOT', pathlib.Path.home()/'.cache/naki-live-transcode-n9')) / 'install'
+        command = ['cc', '-std=c11', '-Werror', '-fsyntax-only', '-x', 'c',
+                   '-I'+str(ROOT/'app'), '-I'+str(ROOT/'third_party/yyjson/src'), '-I'+str(prefix/'include'), '-']
+        headers = '#include "media/pipeline_internal.h"\n'
+        good = subprocess.run(command, input=headers+'int f(Pipeline *p){return p->video.time_base.den;}\n', text=True, capture_output=True)
+        self.assertEqual(good.returncode, 0, good.stderr)
+        for expression in ('sizeof(NakiInput)', 'p->in->decoder', 'p->v->encoder', 'p->mux->output', 'p->branches->count', 'p->encoded->parameters'):
+            bad = subprocess.run(command, input=headers+'int f(Pipeline *p){return (int)('+expression+');}\n', text=True, capture_output=True)
             self.assertNotEqual(bad.returncode, 0, expression)
 
     def test_no_imports_from_old_flat_test_layout_inside_functions(self):

@@ -36,20 +36,20 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
     int64_t hook_us=meta->hook_us;
     int pts_gop=!naki_job_config(p->job)->policy.intra && !strcmp(naki_job_config(p->job)->encoder,"libvvenc") && strcmp(naki_job_config(p->job)->encoder_profile,"reference");
     int64_t key_target=0, key_interval=0;
-    int had_output_key=p->seen_output_key;
+    int had_output_key=p->mux->seen_output_key;
     if (output_key && pts_gop) {
-        int64_t origin=av_rescale_q(p->first_encoder_pts,p->encoder->time_base,AV_TIME_BASE_Q);
+        int64_t origin=av_rescale_q(p->first_encoder_pts,naki_encoded_info(p->encoded).time_base,AV_TIME_BASE_Q);
         key_target=origin+((pts_us-origin)/2000000)*2000000;
-        key_interval=pts_us-p->previous_key_pts;
-        p->previous_key_pts=pts_us; p->seen_output_key=1;
+        key_interval=pts_us-p->mux->previous_key_pts;
+        p->mux->previous_key_pts=pts_us; p->mux->seen_output_key=1;
     }
     int64_t mux_start=encoded, write_begin=now_us(), interleaved=0, written=0;
-    NakiFrameIdentity identity=pipeline_frame_identity(p,&stamp,packet->pts,p->video->time_base);
+    NakiFrameIdentity identity=pipeline_frame_identity(p,&stamp,packet->pts,p->video.time_base);
     int ret=write_packet_now(p,packet,&interleaved,&written);
     if(ret<0)return ret;
     if(naki_job_config(p->job)->constrained_crf) {
-        int64_t bits=8*((int64_t)bytes+(pts_us==av_rescale_q(p->first_encoder_pts,p->encoder->time_base,AV_TIME_BASE_Q)?p->encoder->extradata_size:0));
-        if(naki_rate_written(&p->rate,av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q),written,bits)<0)return AVERROR_INVALIDDATA;
+        int64_t bits=8*((int64_t)bytes+(pts_us==av_rescale_q(p->first_encoder_pts,naki_encoded_info(p->encoded).time_base,AV_TIME_BASE_Q)?naki_encoded_info(p->encoded).extradata_size:0));
+        if(pipeline_video_written(p,av_rescale_q(packet->dts,p->video.time_base,AV_TIME_BASE_Q),written,bits)<0)return AVERROR_INVALIDDATA;
     }
     naki_job_count(p->job,NAKI_COUNT_SEI_WRITTEN,naki_sei_count(pipeline_stamp_sei(meta->owner),&naki_job_config(p->job)->sei));
     if(!p->destination_owner&&stamp.delivery_lease&&(ret=naki_watermark_written(stamp.delivery_owner,stamp.delivery_lease,&identity,written))<0)return ret;
@@ -93,7 +93,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         json_num(doc,"decoder_submit_to_receive_ms",(stamp.decoder_receive_us-stamp.submitted_us)/1000.0);
         json_num(doc,"decoder_receive_to_prepare_ms",(stamp.decoded_us-stamp.decoder_receive_us)/1000.0);
     }
-    json_int(doc,"output_dts_us",av_rescale_q(packet->dts,p->video->time_base,AV_TIME_BASE_Q));
+    json_int(doc,"output_dts_us",av_rescale_q(packet->dts,p->video.time_base,AV_TIME_BASE_Q));
     json_int(doc,"encoded_bytes",bytes);
     if(naki_job_config(p->job)->network_trace) {
         json_int(doc,"network_first_read_monotonic_us",stamp.network_first_read_us);
@@ -110,7 +110,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         json_int(doc,"mux_write_begin_monotonic_us",write_begin);
         json_num(doc,"network_to_mux_ms",(written-stamp.network_first_read_us)/1000.0);
         json_int(doc,"deadline_300ms_exceeded",written-stamp.network_first_read_us>300000);
-        json_int(doc,"video_config_bytes",first_output?p->encoder->extradata_size:0);
+        json_int(doc,"video_config_bytes",first_output?naki_encoded_info(p->encoded).extradata_size:0);
         json_num(doc,"network_assembly_ms",(stamp.network_complete_us-stamp.network_first_read_us)/1000.0);
         json_num(doc,"demux_buffer_ms",(stamp.demux_finished_us-stamp.network_complete_us)/1000.0);
         json_num(doc,"demux_to_ingress_ms",(stamp.ingress_us-stamp.demux_finished_us)/1000.0);
@@ -191,7 +191,7 @@ static int write_video_packet(Pipeline *p, AVPacket *packet) {
         json_num(first,"dispatch_to_worker_ms",(startup.worker_received_us-startup.assigned_us)/1000.0);
         json_num(first,"worker_to_packet_ingress_ms",(stamp.ingress_us-startup.worker_received_us)/1000.0);
         json_num(first,"request_to_mux_ms",(written-naki_job_started_us(p->job))/1000.0);
-        if(p->destination_owner)yyjson_mut_obj_add_null(first,yyjson_mut_doc_get_root(first),"encoder_api_wall_to_output_ms");else json_num(first,"encoder_api_wall_to_output_ms",p->encoder_api_us/1000.0);
+        if(p->destination_owner)yyjson_mut_obj_add_null(first,yyjson_mut_doc_get_root(first),"encoder_api_wall_to_output_ms");else json_num(first,"encoder_api_wall_to_output_ms",pipeline_video_api_us(p)/1000.0);
         json_int(first,"encoder_submitted_frames_at_output",submitted);
         yyjson_mut_doc *service_status=job_snapshot(p->job);
         yyjson_mut_val *startup_json=yyjson_mut_obj_get(yyjson_mut_doc_get_root(service_status),"startup");
@@ -211,7 +211,7 @@ int pipeline_drain_mux(Pipeline *p, int force) {
     if(!packet)return AVERROR(ENOMEM);
     int ret;
     while((ret=avformat_live_mux_receive(p->mux->output,packet,force))>0) {
-        if(packet->stream_index==p->video->index)ret=write_video_packet(p,packet);
+        if(packet->stream_index==p->video.index)ret=write_video_packet(p,packet);
         else {
             int64_t dts=av_rescale_q(packet->dts,p->mux->output->streams[packet->stream_index]->time_base,AV_TIME_BASE_Q);
             /* A stalled audio track may return behind already-emitted media.

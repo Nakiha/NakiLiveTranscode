@@ -7,6 +7,16 @@ int pipeline_mux_prepare(Pipeline *p) {
     m->interrupt.job=p->job;atomic_init(&m->interrupt.deadline,0);atomic_init(&m->interrupt.cleanup,0);
     p->mux=m;return 0;
 }
+int pipeline_mux_format(Pipeline *p,int *global_header) {
+    int ret=pipeline_mux_prepare(p);if(ret<0)return ret;
+    const Config *cfg=naki_job_config(p->job);
+    if(!p->mux->output) {
+        ret=avformat_alloc_output_context2(&p->mux->output,NULL,cfg->output_format,cfg->output);
+        if(ret<0)return ret;
+        if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->mux->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;
+    }
+    *global_header=!!(p->mux->output->oformat->flags&AVFMT_GLOBALHEADER);return 0;
+}
 int pipeline_mux_move(Pipeline *from,Pipeline *to) {
     if(from==to||!from->mux||to->mux||from->job!=to->job)return AVERROR(EINVAL);
     to->mux=from->mux;to->video=from->video;from->mux=NULL;
@@ -28,7 +38,7 @@ void pipeline_mux_retire_audio(Pipeline *p) {
 void pipeline_mux_release(Pipeline *p) {
     if(!p->mux)return;
     pipeline_mux_retire_audio(p);
-    free(p->mux);p->mux=NULL;p->video=NULL;
+    free(p->mux);p->mux=NULL;p->video.valid=0;
 }
 
 /* Called only by the owning shared/branch pipeline thread. The orchestration
@@ -66,7 +76,7 @@ int pipeline_finalize_output(Pipeline *p,int primary,int stopped) {
     }
     if(p->mux) {
         if(p->mux->output) {avformat_free_context(p->mux->output);p->mux->output=NULL;}
-        p->mux->header_written=p->mux->live_mux=0;p->video=NULL;
+        p->mux->header_written=p->mux->live_mux=0;p->video.valid=0;
         atomic_store(&p->mux->interrupt.deadline,0);
     }
     return primary;
@@ -90,168 +100,6 @@ static int64_t local_seek(void *opaque, int64_t offset, int whence) {
     return pos<0 ? AVERROR(errno) : (int64_t)pos;
 }
 
-int pipeline_open_output(Pipeline *p, AVFrame *frame) {
-    int prepared=pipeline_mux_prepare(p);if(prepared<0)return prepared;
-    const Config *cfg=naki_job_config(p->job);
-    int vvc=!strcmp(cfg->encoder,"libvvenc");
-    int byte_input=vvc&&cfg->encoder_input_bit_depth==8;
-    enum AVPixelFormat output_pixels=vvc&&!byte_input?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_YUV420P;
-    const char *pixel_format=output_pixels==AV_PIX_FMT_YUV420P10LE?"yuv420p10le":"yuv420p";
-    char chain[256];
-    if(cfg->width)snprintf(chain,sizeof(chain),"scale=%d:%d:flags=bilinear,format=pix_fmts=%s",cfg->width,cfg->height,pixel_format);
-    else snprintf(chain,sizeof(chain),"null,format=pix_fmts=%s",pixel_format);
-    int ret;
-    p->stage="filter initialization";
-    ret=naki_video_filter_prepare(&p->graph,&p->source,&p->sink,frame,p->input_tb,
-        cfg->width,cfg->height,output_pixels);
-    if(ret<0)return ret;
-    p->input_width=frame->width; p->input_height=frame->height; p->input_format=frame->format;
-    p->input_colorspace=frame->colorspace;p->input_range=frame->color_range;
-    p->filter_generation=naki_job_filter_generation(p->job,1);
-
-    p->stage="encoder initialization";
-    naki_job_checkpoint(p->job,NAKI_CP_ENCODER_OPEN_STARTED,0);
-    const AVCodec *codec=avcodec_find_encoder_by_name(cfg->encoder);
-    if (!codec) return AVERROR_ENCODER_NOT_FOUND;
-    p->encoder=avcodec_alloc_context3(codec);
-    if (!p->encoder) return AVERROR(ENOMEM);
-    p->encoder->width=av_buffersink_get_w(p->sink);
-    p->encoder->height=av_buffersink_get_h(p->sink);
-    naki_job_output_size_set(p->job,p->encoder->width,p->encoder->height);
-    p->encoder->sample_aspect_ratio=av_buffersink_get_sample_aspect_ratio(p->sink);
-    p->encoder->pix_fmt=output_pixels;
-    /* The live VVenC fork preserves PTS at 90 kHz and generates DTS from the
-       input timestamp FIFO. The reference profile retains upstream timing. */
-    int pts_gop=vvc && strcmp(cfg->encoder_profile,"reference");
-    p->encoder->time_base=vvc && !pts_gop ? av_inv_q(p->output_rate.value) : (AVRational){1,90000};
-    p->encoder->framerate=p->output_rate.value;
-    p->encoder->bit_rate=cfg->bitrate;
-    if(cfg->cqf&&!cfg->constrained_crf)p->encoder->rc_max_rate=cfg->maxrate;
-    p->encoder->thread_count=cfg->encoder_threads;
-    p->encoder->thread_type=FF_THREAD_SLICE;
-    p->encoder->gop_size=p->output_rate.nominal_gop_frames; p->encoder->max_b_frames=0;
-    p->encoder->color_range=av_buffersink_get_color_range(p->sink);
-    p->encoder->color_primaries=frame->color_primaries;
-    p->encoder->color_trc=frame->color_trc; p->encoder->colorspace=av_buffersink_get_colorspace(p->sink);
-    ret=avformat_alloc_output_context2(&p->mux->output,NULL,cfg->output_format,cfg->output);
-    if (ret<0) return ret;
-    if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->mux->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;
-    if (p->mux->output->oformat->flags&AVFMT_GLOBALHEADER) p->encoder->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
-    AVDictionary *options=NULL;
-    av_dict_set(&options,"preset",cfg->encoder_preset,0);
-    if(cfg->cqf) {av_dict_set_int(&options,"qp",cfg->qp,0);av_dict_set(&options,"qpa","1",0);}
-    if(cfg->constrained_crf)av_dict_set(&options,"live-qp-feedback","1",0);
-    if(cfg->codec_trace)av_dict_set(&options,"live-frame-trace","1",0);
-    if(cfg->encoder_max_future_frames)av_dict_set_int(&options,"live-max-future",cfg->encoder_max_future_frames,0);
-    char vvenc_params[2048]="";
-    int intra_frames=0;
-    if (vvc && strcmp(cfg->encoder_profile,"reference")) {
-        int temporal_filter=strcmp(cfg->encoder_profile,"live_3b_2s_no_mctf")!=0;
-        intra_frames=p->output_rate.nominal_gop_frames;
-        if (intra_frames<4) return AVERROR(EINVAL);
-        p->encoder->gop_size=intra_frames; p->encoder->max_b_frames=3;
-        /* Display order I B B B P ... ; coding order P4 B2 B1 B3. The
-           nominal frame period remains an RC hint; CTS schedules CRA.
-           Frame-parallel=0 keeps intra-frame threading and avoids the extra
-           stage queue. LookAhead stays enabled for single-pass bitrate RC.
-           BIM=1 with this P-anchor layout + MCTF reproducibly aborts v1.14
-           on the 320x180 10-bit regression; keep BIM off independently. */
-        snprintf(vvenc_params,sizeof(vvenc_params),
-            "GOPSize=4:IntraPeriod=%d:RefreshSec=2:POC0IDR=1:STA=0:MaxParallelFrames=0:"
-            "MCTF=%d:BIM=0:MCTFFutureReference=0:"
-            "Frame1=P 4 0 0 0 0 0 1.0 0 0 0 0 0 0 0 1 1 4 0 0:"
-            "Frame2=B 2 1 0 0 0 0 1.0 0 0 0 0 0 0 1 1 1 2 1 1 -2:"
-            "Frame3=B 1 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1:"
-            "Frame4=B 3 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1",
-            intra_frames,temporal_filter);
-        int minimum=!strcmp(cfg->encoder_profile,"live_3b_2s_qt8")?8:(!strcmp(cfg->encoder_profile,"live_3b_2s_qt16")||!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0"))?16:0;
-        if(minimum) {
-            size_t used=strlen(vvenc_params);
-            int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,
-                ":MinQTISlice=%d:MinQTNonISlice=%d:MinQTChromaISliceInChromaSamples=%d:SearchRange=64:MinSearchWindow=32:FastIntraTools=2",
-                minimum,minimum,minimum/2);
-            if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
-        }
-        if(!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0")) {
-            size_t used=strlen(vvenc_params);const char *extra=!strcmp(cfg->encoder_profile,"live_3b_2s_speed")?":RDOQ=0:SelectiveRDOQ=0:ALF=0:CCALF=0":":RDOQ=0:SelectiveRDOQ=0";
-            if(used+strlen(extra)>=sizeof(vvenc_params))return AVERROR(ENOBUFS);
-            strcat(vvenc_params,extra);
-        }
-        av_dict_set(&options,"vvenc-params",vvenc_params,0);
-        av_dict_set(&options,"live-pts-gop","1",0);
-    }
-    else if (vvc) av_dict_set(&options,"period","2",0);
-    else av_dict_set(&options,"tune","zerolatency",0);
-    /* Input precision is selected explicitly; 10-bit input preserves the
-       precision-only baseline, byte input uses the matching fork bridge. */
-    if(vvc) {
-        size_t used=strlen(vvenc_params);
-        int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,"%sInternalBitDepth=%d:LiveNative8Ref=%d",used?":":"",cfg->encoder_bit_depth,cfg->encoder_native8_reference);
-        if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
-        av_dict_set(&options,"vvenc-params",vvenc_params,0);
-    }
-    if(cfg->policy.intra)av_dict_set(&options,"live-frame-intra","1",0);
-    ret=avcodec_open2(p->encoder,codec,&options);
-    if (ret>=0 && av_dict_count(options)) ret=AVERROR_OPTION_NOT_FOUND;
-    av_dict_free(&options);
-    if (ret<0) return ret;
-    naki_job_checkpoint(p->job,NAKI_CP_ENCODER_OPEN_DONE,0);
-    ret=pipeline_open_mux(p);if(ret<0)return ret;
-    naki_job_checkpoint(p->job,NAKI_CP_OUTPUT_HEADER_DONE,0);
-    yyjson_mut_doc *doc=new_event("pipeline_ready",p->job);
-    json_int(doc,"input_width",frame->width); json_int(doc,"input_height",frame->height);
-    json_int(doc,"output_width",p->encoder->width); json_int(doc,"output_height",p->encoder->height);
-    json_str(doc,"encoder",cfg->encoder); json_str(doc,"encoder_preset",cfg->encoder_preset);
-    json_str(doc,"encoder_profile",cfg->encoder_profile);
-    json_str(doc,"rate_control",cfg->constrained_crf?"constrained_crf":(cfg->cqf?"cqf":"bitrate"));json_int(doc,"target_bitrate",cfg->bitrate);
-    if(cfg->constrained_crf) {json_int(doc,"crf",cfg->qp);json_int(doc,"source_rate_limit",cfg->source_rate_limit);json_int(doc,"rate_window_ms",1000);}
-    if(cfg->cqf) {json_int(doc,"qp",cfg->qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",cfg->maxrate);}
-    json_int(doc,"output_rate_num",p->output_rate.value.num);json_int(doc,"output_rate_den",p->output_rate.value.den);
-    json_int(doc,"rate_decimation_divisor",p->rate_divisor);
-    if (vvc) {
-        json_str(doc,"vvenc_params",vvenc_params);
-        json_int(doc,"rate_control_intra_period_frames",intra_frames);
-        json_str(doc,"keyframe_schedule",cfg->policy.intra?"frame_policy":pts_gop?"pts_grid":"reference_frames");
-        if (pts_gop && !cfg->policy.intra) json_int(doc,"keyframe_period_ms",2000);
-    }
-    json_str(doc,"pixel_format",pixel_format); json_str(doc,"filter",chain);
-    json_int(doc,"encoder_time_base_num",p->encoder->time_base.num);
-    json_int(doc,"encoder_time_base_den",p->encoder->time_base.den);
-    json_int(doc,"trace_ledger_capacity",LEDGER_CAPACITY);
-    json_num(doc,"startup_ms",(now_us()-naki_job_started_us(p->job))/1000.0);
-    logger_submit(naki_job_logger(p->job),NULL,doc); return 0;
-}
-
-int pipeline_drain_output(Pipeline *p) {
-    /* Called once at normal EOF by the output owner, never on cancellation.
-     * The caller retains its existing media_phase publication boundary. */
-    if(!p->graph) {p->stage="empty video";return AVERROR(ENODATA);}
-    p->stage="filter drain";int ret=av_buffersrc_add_frame_flags(p->source,NULL,0);
-    if(ret<0||(ret=pipeline_filter_output(p))<0)return ret;
-    p->stage="encoder drain";p->encoder_draining=1;
-    while((ret=pipeline_encoder_send(p,NULL))==AVERROR(EAGAIN)) {
-        if((ret=pipeline_receive_encoded(p))<0)return ret;
-    }
-    if(ret<0||(ret=pipeline_receive_encoded(p))<0)return ret;
-    if(!p->destinations&&((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0))return ret;
-    return (pipeline_ledger_pending(p)||(naki_job_config(p->job)->constrained_crf&&p->rate.pending_bits))?AVERROR_INVALIDDATA:0;
-}
-
-/* Call after reader/async shutdown (shared owner) or queue abort (branch owner),
- * and after finalize_output has closed the mux and hook. A branch has no input,
- * decoder or receive frame. Keep their releases in this order: frame/codec/
- * filter references may still own watermark delivery leases and ledger stamps. */
-void pipeline_release_media_resources(Pipeline *p,AVFrame **receive_frame) {
-    pipeline_mux_release(p);
-    if(receive_frame)av_frame_free(receive_frame);
-    avcodec_free_context(&p->decoder);
-    avcodec_free_context(&p->encoder);
-    avfilter_graph_free(&p->graph);
-    naki_watermark_compositor_free(&p->watermark_compositor);
-    avformat_close_input(&p->input);
-    pipeline_ledger_clear(p);
-}
-
 /* Publish only after owned media references are released. Branch failure has
  * priority over parent cancellation; the shared owner keeps its captured stop
  * classification, including the existing overload override. Only the shared
@@ -263,13 +111,12 @@ void pipeline_complete_job(Pipeline *p,int ret,int stopped){naki_job_complete(p-
 int pipeline_open_mux(Pipeline *p) {
     const Config *cfg=naki_job_config(p->job);int ret;
     if((ret=pipeline_mux_prepare(p))<0)return ret;
-    if(!p->mux->output){ret=avformat_alloc_output_context2(&p->mux->output,NULL,cfg->output_format,cfg->output);if(ret<0)return ret;
-        if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->mux->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;}
-    p->video=avformat_new_stream(p->mux->output,NULL);
-    if (!p->video) return AVERROR(ENOMEM);
-    ret=avcodec_parameters_from_context(p->video->codecpar,p->encoder);
+    int global_header=0;if((ret=pipeline_mux_format(p,&global_header))<0)return ret;
+    AVStream *video=avformat_new_stream(p->mux->output,NULL);
+    if (!video) return AVERROR(ENOMEM);
+    ret=naki_encoded_parameters(p->encoded,video->codecpar);
     if (ret<0) return ret;
-    p->video->time_base=p->encoder->time_base; p->video->avg_frame_rate=p->output_rate.value;
+    video->time_base=naki_encoded_info(p->encoded).time_base;video->avg_frame_rate=p->output_rate.value;
     p->mux->output->flags|=AVFMT_FLAG_FLUSH_PACKETS;
     p->mux->output->max_delay=0; p->mux->output->max_interleave_delta=0;
     p->mux->output->interrupt_callback=(AVIOInterruptCB){pipeline_interrupted,&p->mux->interrupt};
@@ -294,6 +141,7 @@ int pipeline_open_mux(Pipeline *p) {
     ret=avformat_write_header(p->mux->output,NULL);
     atomic_store(&p->mux->interrupt.deadline,0);
     if (ret<0) return ret;
+    p->video.time_base=video->time_base;p->video.avg_frame_rate=video->avg_frame_rate;p->video.index=video->index;p->video.valid=1;
     p->mux->header_written=1;
     if(strcmp(cfg->output_format,"mp4")) {
         ret=avformat_live_mux_init(p->mux->output,(int64_t)cfg->mux_wait_ms*1000,(p->destination_owner||naki_job_remote(p->job)==2)?4:256,4*1024*1024);
