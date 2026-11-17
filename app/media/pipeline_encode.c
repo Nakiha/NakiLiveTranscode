@@ -1,4 +1,5 @@
 #include "pipeline_internal.h"
+#include <libavutil/intreadwrite.h>
 
 /* One output owner sends/receives encoder data. Ledger entries retain one
  * delivery reference until the corresponding PTS is transferred to a mux
@@ -16,12 +17,12 @@ void pipeline_ledger_clear(Pipeline *p) {
 }
 
 int pipeline_encoder_send(Pipeline *p, const AVFrame *frame) {
-    int64_t began=now_us(); int ret=avcodec_send_frame(p->encoder,frame);
+    int64_t began=now_us(); int ret=p->uvg ? naki_uvg_send(p->uvg,frame,p->uvg_qp) : avcodec_send_frame(p->encoder,frame);
     p->encoder_api_us+=now_us()-began; if(ret!=AVERROR(EAGAIN)&&p->destinations&&!strcmp(p->job->config.encoder,"libx264"))av_opt_set_int(p->encoder->priv_data,"forced-idr",0,0);return ret;
 }
 
 static int encoder_receive(Pipeline *p, AVPacket *packet) {
-    int64_t began=now_us(); int ret=avcodec_receive_packet(p->encoder,packet);
+    int64_t began=now_us(); int ret=p->uvg ? naki_uvg_receive(p->uvg,packet) : avcodec_receive_packet(p->encoder,packet);
     p->encoder_api_us+=now_us()-began; return ret;
 }
 
@@ -91,6 +92,10 @@ int pipeline_receive_encoded(Pipeline *p) {
             mapped->encoder_future_frames=(int)depth;
         }
         size_t picture_size=0; const uint8_t *picture_stats=av_packet_get_side_data(packet,AV_PKT_DATA_QUALITY_STATS,&picture_size);
+        if(p->uvg && p->job->config.constrained_crf) {
+            if(picture_size<8) {ret=AVERROR_INVALIDDATA;break;}
+            mapped->actual_slice_qp=(int)(AV_RL32(picture_stats)/FF_QP2LAMBDA);
+        }
         int output_type=picture_size>=5 ? picture_stats[4] : AV_PICTURE_TYPE_NONE;
         if(mapped->intra_reason) {
             size_t size=0; const uint8_t *stats=av_packet_get_side_data(packet,AV_PKT_DATA_QUALITY_STATS,&size);
@@ -183,7 +188,9 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     int ret;
     AVBufferRef *owner=av_buffer_ref(frame->opaque_ref);
     if(!owner)return AVERROR(ENOMEM);
+    p->uvg_qp=-1;
     if(p->job->config.constrained_crf) {
+        p->rate.low_delay=!!p->uvg;
         int64_t began=now_us();
         int byte_input=frame->format==AV_PIX_FMT_YUV420P;
         if(!byte_input&&frame->format!=AV_PIX_FMT_YUV420P10LE) {av_buffer_unref(&owner);return AVERROR_INVALIDDATA;}
@@ -195,7 +202,8 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
             source,began,pts_us,period,frame->width*frame->height,!!stamp.intra_reason,complexity,&stamp.rate)<0) {
             av_buffer_unref(&owner);return AVERROR_INVALIDDATA;
         }
-        if(av_dict_set_int(&frame->metadata,"naki_qp_offset",stamp.rate.qp-p->job->config.qp,0)<0) {av_buffer_unref(&owner);return AVERROR(ENOMEM);}
+        if(p->uvg) p->uvg_qp=stamp.rate.qp;
+        else if(av_dict_set_int(&frame->metadata,"naki_qp_offset",stamp.rate.qp-p->job->config.qp,0)<0) {av_buffer_unref(&owner);return AVERROR(ENOMEM);}
     }
     stamp.encoder_submit_us=now_us();
     pipeline_checkpoint(p,&p->job->progress.first_encoder_submit_us);

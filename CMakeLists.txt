@@ -22,6 +22,20 @@ pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavfi
 pkg_check_modules(EVENT REQUIRED IMPORTED_TARGET libevent>=2.1.12)
 pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl>=7.85)
 pkg_check_modules(UNWIND REQUIRED IMPORTED_TARGET libunwind-ptrace)
+# The encoder uses top-level CMake paths internally. Build it as a separate
+# C project and link the pinned 8-bit library into worker executables.
+include(ExternalProject)
+set(UVG_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/uvg266")
+set(UVG_BUILD "${CMAKE_CURRENT_BINARY_DIR}/uvg266")
+ExternalProject_Add(naki-uvg-build SOURCE_DIR "${UVG_SOURCE}" BINARY_DIR "${UVG_BUILD}"
+    CMAKE_ARGS -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+        -DUVG_SYNC_SUBMODULES=OFF -DUVG_BUILD_TESTS=OFF -DUVG_BUILD_EXECUTABLE=OFF -DUVG_BIT_DEPTH=8
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --target libuvg266_static --parallel 4
+    BUILD_ALWAYS TRUE BUILD_BYPRODUCTS "${UVG_BUILD}/lib/libuvg266.a" INSTALL_COMMAND "")
+add_library(naki-uvg STATIC IMPORTED GLOBAL)
+set_target_properties(naki-uvg PROPERTIES IMPORTED_LOCATION "${UVG_BUILD}/lib/libuvg266.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${UVG_SOURCE}/src")
+add_dependencies(naki-uvg naki-uvg-build)
 add_library(yyjson STATIC third_party/yyjson/src/yyjson.c)
 target_include_directories(yyjson PUBLIC third_party/yyjson/src)
 set(NAKI_CONTROL_SOURCES app/control/component_update.c app/control/operation_store.c)
@@ -39,7 +53,7 @@ set(NAKI_SERVICE_SOURCES
 add_executable(naki-live ${NAKI_SERVICE_SOURCES} app/control/operation_cache.c app/platform/ipc.c
     app/platform/runtime.c app/worker/job.c app/observability/metrics.c app/worker/job_report.c app/observability/logger.c app/observability/netstats.c app/crash/crash_client.c ${NAKI_POLICY_SOURCES})
 set(NAKI_PIPELINE_SOURCES
-    app/media/pipeline.c app/media/pipeline_reader.c app/media/pipeline_output.c
+    app/media/uvg_live.c app/media/pipeline.c app/media/pipeline_reader.c app/media/pipeline_output.c
     app/media/pipeline_mux.c app/media/pipeline_encode.c app/media/pipeline_decode.c app/media/pipeline_decode_queue.c)
 set(NAKI_WORKER_SOURCES
     app/worker/worker.c app/media/rendition_runtime.c app/media/rendition_control.c app/media/rendition_child.c app/media/rendition_media.c app/media/destination_runtime.c
@@ -48,7 +62,7 @@ set(NAKI_WORKER_SOURCES
     app/media/input_probe.c app/media/audio_signature.c app/media/sei.c ${NAKI_PIPELINE_SOURCES}
     app/platform/runtime.c app/worker/job.c app/observability/metrics.c app/worker/job_report.c app/observability/logger.c app/observability/netstats.c app/crash/crash_client.c ${NAKI_POLICY_SOURCES})
 add_executable(naki-live-worker ${NAKI_WORKER_SOURCES})
-target_link_libraries(naki-live-worker PRIVATE PkgConfig::CURL)
+target_link_libraries(naki-live-worker PRIVATE PkgConfig::CURL naki-uvg)
 set(NAKI_MEDIA_HOOK_SOURCE "" CACHE FILEPATH "Private media hook factory source; empty uses no-op implementation")
 if(NAKI_MEDIA_HOOK_SOURCE)
     target_sources(naki-live-worker PRIVATE "${NAKI_MEDIA_HOOK_SOURCE}")
@@ -81,7 +95,7 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(naki-rendition-fault-worker ${NAKI_WORKER_SOURCES} tests/fixtures/rendition_fault_hooks.c)
     target_link_options(naki-rendition-fault-worker PRIVATE -Wl,--wrap=naki_rendition_send -Wl,--wrap=naki_frame_wire_unpack -Wl,--wrap=av_write_trailer)
-    target_link_libraries(naki-rendition-fault-worker PRIVATE PkgConfig::CURL)
+    target_link_libraries(naki-rendition-fault-worker PRIVATE PkgConfig::CURL naki-uvg)
     naki_configure_service(naki-rendition-fault-worker)
     set_target_properties(naki-rendition-fault-worker PROPERTIES OUTPUT_NAME naki-live-worker RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/rendition-faults")
     add_dependencies(naki-rendition-fault-worker naki-live naki-crash-collector)
@@ -305,7 +319,7 @@ set_target_properties(naki-read-origin-probe PROPERTIES BUILD_RPATH "${NAKI_FFMP
             pthread_create naki_branch_queue_init_limits)
         target_link_options(naki-live-hook-worker PRIVATE "-Wl,--wrap=${symbol}")
     endforeach()
-    target_link_libraries(naki-live-hook-worker PRIVATE PkgConfig::CURL)
+    target_link_libraries(naki-live-hook-worker PRIVATE PkgConfig::CURL naki-uvg)
     naki_configure_service(naki-live-hook-worker)
     target_compile_options(naki-live-hook-worker PRIVATE -UNDEBUG)
     add_executable(naki-crash-fixture tests/fixtures/crash_fixture.c app/crash/crash_client.c)

@@ -28,6 +28,7 @@ COPY out/expected-sdk.json /src/expected-sdk.json
 COPY CMakeLists.txt ./
 COPY app/ app/
 COPY third_party/yyjson/src/ third_party/yyjson/src/
+COPY third_party/uvg266/ third_party/uvg266/
 COPY tests/unit/ tests/unit/
 COPY tests/fixtures/ tests/fixtures/
 COPY tests/support/ tests/support/
@@ -87,6 +88,7 @@ COPY scripts/maintain-logs.py /usr/local/lib/naki/maintain-logs.py
 COPY scripts/service-launcher.py /usr/local/lib/naki/service-launcher.py
 COPY third_party/yyjson/LICENSE /usr/share/doc/naki/yyjson-LICENSE
 COPY third_party/vvenc/LICENSE.txt /usr/share/doc/naki/vvenc-LICENSE
+COPY third_party/uvg266/LICENSE /usr/share/doc/naki/uvg266-LICENSE
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/COPYING* /usr/share/doc/naki/
 USER 10001:10001
 WORKDIR /data

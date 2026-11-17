@@ -7,3 +7,7 @@
 [submodule "third_party/vvenc"]
 	path = third_party/vvenc
 	url = https://github.com/Nakiha/vvenc.git
+[submodule "third_party/uvg266"]
+	path = third_party/uvg266
+	url = https://github.com/Nakiha/uvg266.git
+	branch = naki-live

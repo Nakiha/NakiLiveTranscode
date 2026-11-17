@@ -1,0 +1,20 @@
+{
+  "input": "/tmp/sample.mp4",
+  "output": "/tmp/uvg-live.ts",
+  "output_format": "mpegts",
+  "encoder": "libuvg266",
+  "encoder_profile": "live_ld",
+  "width": 540,
+  "height": 960,
+  "output_fps": 30,
+  "encoder_threads": 4,
+  "pace": true,
+  "audio_copy": false,
+  "rate_control": "constrained_crf",
+  "crf": 32,
+  "maxrate": 1100000,
+  "timestamps": {"mode": "source_all"},
+  "intra": {"mode": "follow_source"},
+  "frame_log": true,
+  "frame_log_every": 1
+}

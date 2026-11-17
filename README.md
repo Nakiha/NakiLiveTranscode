@@ -37,6 +37,8 @@ H.264 快出只在满足 HRD/CFR 等排序依据时自动生效，无声明、�
 
 ## 运行服务（Linux / WSL）
 
+540×960@30 的 uvg266 C 后端、实验受限 CRF 配置、强机复测命令和里程碑见 [uvg266 直播分支](docs/uvg266-live.md)。
+
 ```sh
 sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev libevent-dev libcurl4-openssl-dev libunwind-dev python3
 git submodule update --init --recursive

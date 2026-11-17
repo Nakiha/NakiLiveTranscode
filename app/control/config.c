@@ -125,6 +125,10 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if(naki_watermark_config(yyjson_obj_get(root,"watermark"),&c.watermark,error,cap))goto end;
     if(!multi&&naki_sei_config(yyjson_obj_get(root,"sei"),&c.sei,error,cap))goto end;
     int vvc=!strcmp(c.encoder,"libvvenc");
+    int uvg=!strcmp(c.encoder,"libuvg266");
+    if(uvg && (c.qp>51 || c.width!=540 || c.height!=960 || c.output_fps!=30)) {
+        bad(error,cap,"libuvg266 live requires 540x960, output_fps=30 and crf <= 51");goto end;
+    }
     if(c.encoder_input_bit_depth!=8&&c.encoder_input_bit_depth!=10) {bad(error,cap,"encoder_input_bit_depth must be 8 or 10");goto end;}
     if(yyjson_obj_get(root,"encoder_input_bit_depth")&&!vvc) {bad(error,cap,"encoder_input_bit_depth requires libvvenc");goto end;}
     if(c.encoder_input_bit_depth==8&&(c.encoder_bit_depth!=8||!c.cqf||!c.encoder_max_future_frames||!strcmp(c.encoder_profile,"reference"))) {
@@ -141,32 +145,34 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     }
     if(c.codec_trace&&(!c.encoder_max_future_frames||!vvc)) {bad(error,cap,"codec_trace requires direct live VVenC with future guard; native HEVC input is checked on open");goto end;}
     if(c.constrained_crf) {
-        if(!vvc||c.policy.intra!=NAKI_INTRA_SOURCE||!c.encoder_max_future_frames||!c.output_fps||yyjson_obj_get(root,"qp")||yyjson_obj_get(root,"bitrate")||
+        if((uvg&&!c.policy.intra)||(!uvg&&(!vvc||c.policy.intra!=NAKI_INTRA_SOURCE||!c.encoder_max_future_frames))||!c.output_fps||yyjson_obj_get(root,"qp")||yyjson_obj_get(root,"bitrate")||
             (!c.maxrate&&!c.source_rate_limit)||(c.source_rate_limit&&!c.network_trace)) {
-            bad(error,cap,"constrained_crf requires follow_source, live VVenC, output_fps, future guard and maxrate and/or traced source_rate_limit; use crf, not qp/bitrate");goto end;
+            bad(error,cap,"constrained_crf needs a live frame policy, output_fps and maxrate or traced source limit; VVenC also needs follow_source and future guard");goto end;
         }
         c.bitrate=0;
     } else if(yyjson_obj_get(root,"crf")||c.source_rate_limit) {bad(error,cap,"crf/source_rate_limit require constrained_crf");goto end;}
     if(c.cqf) {
-        if(!vvc || (!c.maxrate&&!c.constrained_crf) || yyjson_obj_get(root,"bitrate")) {
+        if((!vvc&&!(uvg&&c.constrained_crf)) || (!c.maxrate&&!c.constrained_crf) || yyjson_obj_get(root,"bitrate")) {
             bad(error,cap,"cqf requires libvvenc and explicit maxrate, and excludes target bitrate");goto end;
         }
         c.bitrate=0;
     } else if(yyjson_obj_get(root,"qp") || yyjson_obj_get(root,"maxrate")) {
         bad(error,cap,"qp and maxrate require rate_control=cqf");goto end;
     }
-    if (!vvc && strcmp(c.encoder,"libx264")) {bad(error,cap,"encoder must be libx264 or libvvenc"); goto end;}
-    if(!*c.encoder_profile) strcpy(c.encoder_profile,vvc ? "live_3b_2s" : "default");
+    if (!uvg && !vvc && strcmp(c.encoder,"libx264")) {bad(error,cap,"encoder must be libx264, libvvenc or libuvg266"); goto end;}
+    if(!*c.encoder_profile) strcpy(c.encoder_profile,uvg ? "live_ld" : vvc ? "live_3b_2s" : "default");
     if(vvc && c.policy.timestamps==NAKI_TS_SOURCE_ALL && !strcmp(c.encoder_profile,"reference")) {
         bad(error,cap,"source_all requires a live VVenC profile; reference uses a nominal frame time base"); goto end;
     }
     if ((vvc && strcmp(c.encoder_profile,"reference") && strcmp(c.encoder_profile,"live_3b_2s") && strcmp(c.encoder_profile,"live_3b_2s_no_mctf") && strcmp(c.encoder_profile,"live_3b_2s_qt8") && strcmp(c.encoder_profile,"live_3b_2s_qt16") && strcmp(c.encoder_profile,"live_3b_2s_speed") && strcmp(c.encoder_profile,"live_3b_2s_rdoq0")) ||
-        (!vvc && strcmp(c.encoder_profile,"default"))) {bad(error,cap,"Invalid encoder_profile for selected encoder"); goto end;}
+        (uvg && strcmp(c.encoder_profile,"live_ld") && strcmp(c.encoder_profile,"live_ld_tools")) ||
+        (!uvg && !vvc && strcmp(c.encoder_profile,"default"))) {bad(error,cap,"Invalid encoder_profile for selected encoder"); goto end;}
     if((!strcmp(c.encoder_profile,"live_3b_2s_qt8")||!strcmp(c.encoder_profile,"live_3b_2s_qt16")||!strcmp(c.encoder_profile,"live_3b_2s_speed")||!strcmp(c.encoder_profile,"live_3b_2s_rdoq0"))&&!c.cqf) {bad(error,cap,"reduced search profiles require CQF/constrained_crf");goto end;}
-    if (!*c.encoder_preset) strcpy(c.encoder_preset,vvc ? "faster" : "veryfast");
-    const char *presets=vvc ? "|faster|fast|medium|slow|slower|" : "|ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|";
+    if (!*c.encoder_preset) strcpy(c.encoder_preset,uvg ? "ultrafast" : vvc ? "faster" : "veryfast");
+    const char *presets=uvg ? "|ultrafast|" : vvc ? "|faster|fast|medium|slow|slower|" : "|ultrafast|superfast|veryfast|faster|fast|medium|slow|slower|veryslow|";
     char preset_key[20]; snprintf(preset_key,sizeof(preset_key),"|%s|",c.encoder_preset);
     if (strchr(c.encoder_preset,'|') || !strstr(presets,preset_key)) {bad(error,cap,"Invalid preset for selected encoder"); goto end;}
+    if (uvg) c.encoder_bit_depth=c.encoder_input_bit_depth=8;
     if (c.min_threads>c.max_threads || (!!c.width != !!c.height) || c.width%2 || c.height%2) {bad(error,cap,"Invalid thread limits or dimensions (use two even dimensions)"); goto end;}
     if((uint64_t)c.width*c.height>NAKI_INPUT_MAX_PIXELS) {bad(error,cap,"live-4k-v1 output canvas exceeds 4096x2160 pixels");goto end;}
     if(naki_output_validate(c.output,c.output_format,error,cap))goto end;

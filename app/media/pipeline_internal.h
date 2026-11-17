@@ -8,6 +8,7 @@
 #include "watermark.h"
 #include "video_filter.h"
 #include "live_rate.h"
+#include "uvg_live.h"
 #include "codec_trace.h"
 #include "branch_queue.h"
 #include "crash/crash.h"
@@ -96,6 +97,8 @@ typedef struct Pipeline {
     const char *stage;
     AVFormatContext *input, *output;
     AVCodecContext *decoder, *encoder;
+    NakiUvg *uvg;
+    int uvg_qp;
     AVCodecAsyncContext *async;
     AVFrame initial_input_properties; /* Immutable snapshot before async takes decoder ownership. */
     int64_t decoder_receive_us; /* receive return, written only by decoder frontend owner */

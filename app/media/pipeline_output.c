@@ -62,6 +62,7 @@ static int64_t local_seek(void *opaque, int64_t offset, int whence) {
 
 int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     const Config *cfg=&p->job->config;
+    int uvg=!strcmp(cfg->encoder,"libuvg266");
     int vvc=!strcmp(cfg->encoder,"libvvenc");
     int byte_input=vvc&&cfg->encoder_input_bit_depth==8;
     enum AVPixelFormat output_pixels=vvc&&!byte_input?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_YUV420P;
@@ -81,9 +82,13 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     p->stage="encoder initialization";
     pipeline_checkpoint(p,&p->job->progress.encoder_open_started_us);
     const AVCodec *codec=avcodec_find_encoder_by_name(cfg->encoder);
-    if (!codec) return AVERROR_ENCODER_NOT_FOUND;
+    if (!uvg && !codec) return AVERROR_ENCODER_NOT_FOUND;
     p->encoder=avcodec_alloc_context3(codec);
     if (!p->encoder) return AVERROR(ENOMEM);
+    if (uvg) {
+        p->encoder->codec_type=AVMEDIA_TYPE_VIDEO;
+        p->encoder->codec_id=AV_CODEC_ID_VVC;
+    }
     p->encoder->width=av_buffersink_get_w(p->sink);
     p->encoder->height=av_buffersink_get_h(p->sink);
     pthread_mutex_lock(&p->job->mutex);p->job->progress.fixed_output_width=p->encoder->width;p->job->progress.fixed_output_height=p->encoder->height;pthread_mutex_unlock(&p->job->mutex);
@@ -106,63 +111,69 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     if (ret<0) return ret;
     if(cfg->policy.timestamps==NAKI_TS_SOURCE_ALL)p->output->avoid_negative_ts=AVFMT_AVOID_NEG_TS_DISABLED;
     if (p->output->oformat->flags&AVFMT_GLOBALHEADER) p->encoder->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
-    AVDictionary *options=NULL;
-    av_dict_set(&options,"preset",cfg->encoder_preset,0);
-    if(cfg->cqf) {av_dict_set_int(&options,"qp",cfg->qp,0);av_dict_set(&options,"qpa","1",0);}
-    if(cfg->constrained_crf)av_dict_set(&options,"live-qp-feedback","1",0);
-    if(cfg->codec_trace)av_dict_set(&options,"live-frame-trace","1",0);
-    if(cfg->encoder_max_future_frames)av_dict_set_int(&options,"live-max-future",cfg->encoder_max_future_frames,0);
-    char vvenc_params[2048]="";
     int intra_frames=0;
-    if (vvc && strcmp(cfg->encoder_profile,"reference")) {
-        int temporal_filter=strcmp(cfg->encoder_profile,"live_3b_2s_no_mctf")!=0;
-        intra_frames=p->output_rate.nominal_gop_frames;
-        if (intra_frames<4) return AVERROR(EINVAL);
-        p->encoder->gop_size=intra_frames; p->encoder->max_b_frames=3;
-        /* Display order I B B B P ... ; coding order P4 B2 B1 B3. The
-           nominal frame period remains an RC hint; CTS schedules CRA.
-           Frame-parallel=0 keeps intra-frame threading and avoids the extra
-           stage queue. LookAhead stays enabled for single-pass bitrate RC.
-           BIM=1 with this P-anchor layout + MCTF reproducibly aborts v1.14
-           on the 320x180 10-bit regression; keep BIM off independently. */
-        snprintf(vvenc_params,sizeof(vvenc_params),
-            "GOPSize=4:IntraPeriod=%d:RefreshSec=2:POC0IDR=1:STA=0:MaxParallelFrames=0:"
-            "MCTF=%d:BIM=0:MCTFFutureReference=0:"
-            "Frame1=P 4 0 0 0 0 0 1.0 0 0 0 0 0 0 0 1 1 4 0 0:"
-            "Frame2=B 2 1 0 0 0 0 1.0 0 0 0 0 0 0 1 1 1 2 1 1 -2:"
-            "Frame3=B 1 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1:"
-            "Frame4=B 3 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1",
-            intra_frames,temporal_filter);
-        int minimum=!strcmp(cfg->encoder_profile,"live_3b_2s_qt8")?8:(!strcmp(cfg->encoder_profile,"live_3b_2s_qt16")||!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0"))?16:0;
-        if(minimum) {
+    char vvenc_params[2048]="";
+    if (uvg) {
+        ret=naki_uvg_open(&p->uvg,p->encoder,cfg->qp,cfg->policy.intra,
+                          !strcmp(cfg->encoder_profile,"live_ld_tools"));
+    } else {
+        AVDictionary *options=NULL;
+        av_dict_set(&options,"preset",cfg->encoder_preset,0);
+        if(cfg->cqf) {av_dict_set_int(&options,"qp",cfg->qp,0);av_dict_set(&options,"qpa","1",0);}
+        if(cfg->constrained_crf)av_dict_set(&options,"live-qp-feedback","1",0);
+        if(cfg->codec_trace)av_dict_set(&options,"live-frame-trace","1",0);
+        if(cfg->encoder_max_future_frames)av_dict_set_int(&options,"live-max-future",cfg->encoder_max_future_frames,0);
+
+        if (vvc && strcmp(cfg->encoder_profile,"reference")) {
+            int temporal_filter=strcmp(cfg->encoder_profile,"live_3b_2s_no_mctf")!=0;
+            intra_frames=p->output_rate.nominal_gop_frames;
+            if (intra_frames<4) return AVERROR(EINVAL);
+            p->encoder->gop_size=intra_frames; p->encoder->max_b_frames=3;
+            /* Display order I B B B P ... ; coding order P4 B2 B1 B3. The
+               nominal frame period remains an RC hint; CTS schedules CRA.
+               Frame-parallel=0 keeps intra-frame threading and avoids the extra
+               stage queue. LookAhead stays enabled for single-pass bitrate RC.
+               BIM=1 with this P-anchor layout + MCTF reproducibly aborts v1.14
+               on the 320x180 10-bit regression; keep BIM off independently. */
+            snprintf(vvenc_params,sizeof(vvenc_params),
+                "GOPSize=4:IntraPeriod=%d:RefreshSec=2:POC0IDR=1:STA=0:MaxParallelFrames=0:"
+                "MCTF=%d:BIM=0:MCTFFutureReference=0:"
+                "Frame1=P 4 0 0 0 0 0 1.0 0 0 0 0 0 0 0 1 1 4 0 0:"
+                "Frame2=B 2 1 0 0 0 0 1.0 0 0 0 0 0 0 1 1 1 2 1 1 -2:"
+                "Frame3=B 1 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1:"
+                "Frame4=B 3 2 0 0 0 0 1.0 0 0 0 0 0 0 2 1 1 1 1 1 -1",
+                intra_frames,temporal_filter);
+            int minimum=!strcmp(cfg->encoder_profile,"live_3b_2s_qt8")?8:(!strcmp(cfg->encoder_profile,"live_3b_2s_qt16")||!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0"))?16:0;
+            if(minimum) {
+                size_t used=strlen(vvenc_params);
+                int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,
+                    ":MinQTISlice=%d:MinQTNonISlice=%d:MinQTChromaISliceInChromaSamples=%d:SearchRange=64:MinSearchWindow=32:FastIntraTools=2",
+                    minimum,minimum,minimum/2);
+                if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
+            }
+            if(!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0")) {
+                size_t used=strlen(vvenc_params);const char *extra=!strcmp(cfg->encoder_profile,"live_3b_2s_speed")?":RDOQ=0:SelectiveRDOQ=0:ALF=0:CCALF=0":":RDOQ=0:SelectiveRDOQ=0";
+                if(used+strlen(extra)>=sizeof(vvenc_params))return AVERROR(ENOBUFS);
+                strcat(vvenc_params,extra);
+            }
+            av_dict_set(&options,"vvenc-params",vvenc_params,0);
+            av_dict_set(&options,"live-pts-gop","1",0);
+        }
+        else if (vvc) av_dict_set(&options,"period","2",0);
+        else av_dict_set(&options,"tune","zerolatency",0);
+        /* Input precision is selected explicitly; 10-bit input preserves the
+           precision-only baseline, byte input uses the matching fork bridge. */
+        if(vvc) {
             size_t used=strlen(vvenc_params);
-            int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,
-                ":MinQTISlice=%d:MinQTNonISlice=%d:MinQTChromaISliceInChromaSamples=%d:SearchRange=64:MinSearchWindow=32:FastIntraTools=2",
-                minimum,minimum,minimum/2);
+            int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,"%sInternalBitDepth=%d:LiveNative8Ref=%d",used?":":"",cfg->encoder_bit_depth,cfg->encoder_native8_reference);
             if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
+            av_dict_set(&options,"vvenc-params",vvenc_params,0);
         }
-        if(!strcmp(cfg->encoder_profile,"live_3b_2s_speed")||!strcmp(cfg->encoder_profile,"live_3b_2s_rdoq0")) {
-            size_t used=strlen(vvenc_params);const char *extra=!strcmp(cfg->encoder_profile,"live_3b_2s_speed")?":RDOQ=0:SelectiveRDOQ=0:ALF=0:CCALF=0":":RDOQ=0:SelectiveRDOQ=0";
-            if(used+strlen(extra)>=sizeof(vvenc_params))return AVERROR(ENOBUFS);
-            strcat(vvenc_params,extra);
-        }
-        av_dict_set(&options,"vvenc-params",vvenc_params,0);
-        av_dict_set(&options,"live-pts-gop","1",0);
+        if(cfg->policy.intra)av_dict_set(&options,"live-frame-intra","1",0);
+        ret=avcodec_open2(p->encoder,codec,&options);
+        if (ret>=0 && av_dict_count(options)) ret=AVERROR_OPTION_NOT_FOUND;
+        av_dict_free(&options);
     }
-    else if (vvc) av_dict_set(&options,"period","2",0);
-    else av_dict_set(&options,"tune","zerolatency",0);
-    /* Input precision is selected explicitly; 10-bit input preserves the
-       precision-only baseline, byte input uses the matching fork bridge. */
-    if(vvc) {
-        size_t used=strlen(vvenc_params);
-        int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,"%sInternalBitDepth=%d:LiveNative8Ref=%d",used?":":"",cfg->encoder_bit_depth,cfg->encoder_native8_reference);
-        if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
-        av_dict_set(&options,"vvenc-params",vvenc_params,0);
-    }
-    if(cfg->policy.intra)av_dict_set(&options,"live-frame-intra","1",0);
-    ret=avcodec_open2(p->encoder,codec,&options);
-    if (ret>=0 && av_dict_count(options)) ret=AVERROR_OPTION_NOT_FOUND;
-    av_dict_free(&options);
     if (ret<0) return ret;
     pipeline_checkpoint(p,&p->job->progress.encoder_open_done_us);
     ret=pipeline_open_mux(p);if(ret<0)return ret;
@@ -174,7 +185,7 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     json_str(doc,"encoder_profile",cfg->encoder_profile);
     json_str(doc,"rate_control",cfg->constrained_crf?"constrained_crf":(cfg->cqf?"cqf":"bitrate"));json_int(doc,"target_bitrate",cfg->bitrate);
     if(cfg->constrained_crf) {json_int(doc,"crf",cfg->qp);json_int(doc,"source_rate_limit",cfg->source_rate_limit);json_int(doc,"rate_window_ms",1000);}
-    if(cfg->cqf) {json_int(doc,"qp",cfg->qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",cfg->maxrate);}
+    if(cfg->cqf) {json_int(doc,"qp",cfg->qp);json_int(doc,"qpa",!uvg);json_int(doc,"maxrate",cfg->maxrate);}
     json_int(doc,"output_rate_num",p->output_rate.value.num);json_int(doc,"output_rate_den",p->output_rate.value.den);
     json_int(doc,"rate_decimation_divisor",p->rate_divisor);
     if (vvc) {
@@ -220,6 +231,7 @@ void pipeline_release_media_resources(Pipeline *p,AVFrame **receive_frame) {
     p->audio_count=0;
     if(receive_frame)av_frame_free(receive_frame);
     avcodec_free_context(&p->decoder);
+    naki_uvg_close(&p->uvg);
     avcodec_free_context(&p->encoder);
     avfilter_graph_free(&p->graph);
     naki_watermark_compositor_free(&p->watermark_compositor);

@@ -17,7 +17,7 @@ typedef struct NakiLiveRate {
     /* Normal I / P / B / startup IDR have separate requested-QP models. */
     double coefficient[4];
     uint16_t previous[4096];
-    int samples;
+    int samples,low_delay;
 } NakiLiveRate;
 typedef struct NakiRateDecision {
     int qp,kind,saturated;
@@ -58,7 +58,7 @@ static inline int naki_rate_select(NakiLiveRate *r,int crf,int maxrate,int sourc
     }
     int64_t rate=maxrate>0?maxrate:100000000;
     if(source_limit&&source_bps<rate)rate=source_bps;
-    int kind=intra?(first?3:0):((r->since_i+1)%4==0?1:2);
+    int kind=intra?(first?3:0):(r->low_delay?2:((r->since_i+1)%4==0?1:2));
     if(intra)r->since_i=0;else r->since_i=(r->since_i+1)%4;
     if(intra)r->frames_since_i=0;else if(r->frames_since_i<8)r->frames_since_i++;
     /* Input display PTS is ahead of the next coded DTS with 3B. Advancing a
@@ -76,7 +76,7 @@ static inline int naki_rate_select(NakiLiveRate *r,int crf,int maxrate,int sourc
         if(e->dts>media-1000000)media_bits+=e->bits;
         if(e->wall>now-1000000)wall_bits+=e->bits;
     }
-    double weight=intra?6:kind==1?3.2:.2;
+    double weight=intra?6:r->low_delay?1:kind==1?3.2:.2;
     double target=fmax(1,rate*.82*period/1000000.0*weight);
     double room=fmin(rate*.95-media_bits,rate*.95-wall_bits)-r->pending_bits;
     /* Refresh and the next reference anchor share the available window.
@@ -89,11 +89,12 @@ static inline int naki_rate_select(NakiLiveRate *r,int crf,int maxrate,int sourc
     double quality=naki_rate_clip(0,63,crf+naki_rate_clip(-3,3,1.5*log2(complexity)));
     double at32=r->coefficient[kind]*pixels*complexity;
     double needed=32+6*log2(fmax(1,at32)/allowance);
-    int qp=(int)ceil(naki_rate_clip(0,63,fmax(quality,needed)));
+    int max_qp=r->low_delay?51:63;
+    int qp=(int)ceil(naki_rate_clip(0,max_qp,fmax(quality,needed)));
     int64_t predicted=(int64_t)ceil(fmax(1,at32*exp2((32-qp)/6.0)));
     if(predicted>1000000000||r->pending_bits>INT64_MAX-predicted)return -1;
     r->pending_bits+=predicted;
-    *d=(NakiRateDecision){.qp=qp,.kind=kind,.saturated=needed>63,.source_bps=source_bps,
+    *d=(NakiRateDecision){.qp=qp,.kind=kind,.saturated=needed>max_qp,.source_bps=source_bps,
         .effective_bps=rate,.predicted_bits=predicted,.decision_us=now,.media_clock_us=media,.complexity=complexity,
         .quality_qp=quality,.allowance_bits=allowance,.model_coefficient=r->coefficient[kind],.window_room_bits=room,
         .followup_reserve_bits=followup};
