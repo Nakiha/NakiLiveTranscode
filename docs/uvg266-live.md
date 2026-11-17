@@ -34,6 +34,10 @@ ffprobe -v error -select_streams v:0 -show_frames \
 
 示例使用 `rate_control=constrained_crf`、CRF 32、maxrate 1100000 bit/s。控制器按复杂度与过去一秒的已写和待写字节选择逐帧 QP，并记录请求 QP 和实际 slice QP。跟随源 I 的档位首帧 IDR，后续请求生成普通 I slice，保留 PTS 与参考历史。普通 I 不提供随机接入。需要周期随机接入的对照可用原生 bitrate 路径并省略 intra 策略。实验档 `live_ld_tools` 在同一过去参考结构上同时打开 AMVR、依赖量化和一层 MTT，可用于功能对照。
 
+## 接入回归记录
+
+Linux amd64 功能回放使用实拍素材派生的 60 帧 H.264 文件，服务以示例 CCRF 参数完成 MPEG-TS 写出。FFmpeg 全量解码得到 60 帧，逐帧 PTS 与输入一致。源 I 位于第 0、7、9、51 帧，输出对应首帧 IDR 和三个普通 I；60 帧请求 QP 均与实际 slice QP 一致。按服务写包日志中的视频 AU 字节与输出 DTS 计算，滑动一秒峰值为 925256 bit，配置为 1100000 bit/s。此短样本仅作功能回归，目标机长跑负责性能与码控验收。
+
 ## 里程碑
 
 | 阶段 | 状态与验收 |
