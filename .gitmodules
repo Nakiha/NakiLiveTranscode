@@ -6,4 +6,4 @@
 	url = https://github.com/ibireme/yyjson.git
 [submodule "third_party/vvenc"]
 	path = third_party/vvenc
-	url = https://github.com/Nakiha/vvenc.git
+	url = https://github.com/Nakiha/libvvenc_naki.git

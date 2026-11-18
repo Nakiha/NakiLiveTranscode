@@ -1,6 +1,8 @@
 # VVenC 实验链路
 
-源码为 [Nakiha/vvenc](https://github.com/Nakiha/vvenc)，上游 [fraunhoferhhi/vvenc](https://github.com/fraunhoferhhi/vvenc)。独立子模块 `third_party/vvenc` 基于 v1.14.0；精确提交由 gitlink 固定。0.7.0 在公开 fork 独立实现 PTS 调度，不使用内网 patch；FFmpeg n9.0.2 fork 的 wrapper 同时增加显式启用选项与 VFR DTS 处理。
+源码位于私有仓库 [Nakiha/libvvenc_naki](https://github.com/Nakiha/libvvenc_naki)，上游 [fraunhoferhhi/vvenc](https://github.com/fraunhoferhhi/vvenc)。独立子模块 `third_party/vvenc` 基于 v1.14.0；精确提交由 gitlink 固定。0.7.0 在公开 fork 独立实现 PTS 调度，不使用内网 patch；FFmpeg n9.0.2 fork 的 wrapper 同时增加显式启用选项与 VFR DTS 处理。
+
+首次检出子模块需要私仓读取权限。已有工作区先运行 `git submodule sync -- third_party/vvenc` 以更新本地 origin，再运行 `git submodule update --init -- third_party/vvenc` 检出主工程固定的提交。
 
 构建保留 VVenC 默认的内部 nlohmann JSON 支持：v1.14.0 的单遍码控前瞻缓存依赖该路径，关闭后即使不写 stats 文件也会在排空时失败。它仅是编码库内部依赖，服务的 HTTP/日志 JSON 继续使用 yyjson。
 
