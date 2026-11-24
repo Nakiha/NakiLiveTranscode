@@ -17,6 +17,8 @@
 
 控制器在输入时预留比特。组角色确认后按两个在途组的可用额度确定最终 QP。服务在注入保留 SEI 和媒体 hook 处理后，按编码序提交实际包大小及最终封装时间基的 DTS。真正写包并 flush 后才释放这笔额度，EOF 在编码和音视频队列都排空后核对余额。限码观察包含 150 个 AU 和 5 秒时间窗，短时突发和复杂场景需用实际输出测量。
 
+Linux 送测包的默认启动器加载通用服务 SDK。在支持 x86-64-v3 的 CPU 上，可设置 `NAKI_R28_NATIVE=1` 加载同一源码的 PGO 库。送测驱动支持按实际帧数裁取输入、指定物理核、比较工作线程和并行图数量，也可重放所选 QP 对照 R26。构建和配置指纹见 [R28 SDK 记录](../experiments/vvc-tool-screen/r28-live-rc-sdk.json)。
+
 ## 编码精度
 
 `encoder_bit_depth`仅接受8或10，默认10，仅用于libvvenc；固定输出分支也可各自设置。它传入VVenC原生`InternalBitDepth`，改变内部编码精度与码流位深。显式`encoder_input_bit_depth`默认10，8选择YUV420P字节filter及匹配fork的只读packed-byte接口，要求编码精度8、live CQF与future guard；当前guard仅支持直接输出。wrapper不修改输入平面、不分配全帧16bit暂存；VVenC接收时一次零扩展到自有工作缓冲。字节输入的外部QP活动度归一到10bit尺度。默认关闭字节参考开关时，原图、重建图和热点均保留旧工作存储路径。8bit输出仍可声明Main10 profile，实际精度以SPS和独立解码pix_fmt确认。

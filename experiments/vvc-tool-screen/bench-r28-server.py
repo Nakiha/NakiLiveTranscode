@@ -2,6 +2,7 @@
 """Compare R28 closed-loop encoding and R26 at the resulting per-picture QPs."""
 import argparse
 import csv
+from contextlib import contextmanager
 import hashlib
 import json
 import math
@@ -16,6 +17,25 @@ import tempfile
 def digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+@contextmanager
+def selected_clip(source, frames):
+    required = frames * 540 * 960 * 3 // 2
+    if source.stat().st_size == required:
+        yield source
+        return
+    with tempfile.TemporaryDirectory(prefix="r28-input-") as temp:
+        clip = Path(temp) / "input.i420"
+        with source.open("rb") as inp, clip.open("wb") as out:
+            remaining = required
+            while remaining:
+                data = inp.read(min(remaining, 1024 * 1024))
+                if not data:
+                    raise ValueError("input ended while extracting the requested frames")
+                out.write(data)
+                remaining -= len(data)
+        yield clip
 
 
 def run_case(directory, binary, library, command, cpus):
@@ -84,34 +104,36 @@ def main():
                   burst_ms=args.burst_ms, clock="paced_wall" if args.paced else "unpaced_program_clock",
                   results=[])
     base = (kit / "profiles" / (args.tier+".cfg")).read_text()
-    for threads in args.threads:
-        for pictures in args.pictures:
-            name = f"{threads}t-{pictures}p"
-            profile = directory / (name+".cfg")
-            profile.write_text(base.replace("Threads=8", f"Threads={threads}")
-                               .replace("MaxParallelFrames=4", f"MaxParallelFrames={pictures}").rstrip()
-                               + "\nLiveGopPipeline=3\nLiveNative8Rows=1\n")
-            cmd = [src, profile, args.crf, args.frames, "1" if args.paced else "feedback-fps",
-                   args.maxrate, "measure", "-", "5", "anchor-feedback", "0.4", "--ccrf=balanced",
-                   f"--burst-ms={args.burst_ms}", "--history-ms=0", "--reserve-groups=0", "--anchor-margin-pct=0"]
-            rows, result = run_case(directory/name, kit/"native/bin/vvenc-live-bench",
-                                    kit/"native/lib", cmd, args.cpus)
-            result.update(threads=threads, pictures=pictures, arm="r28")
-            report["results"].append(result)
-            print(name, "R28", round(result["fps"], 2), "fps", flush=True)
-            if args.with_r26:
-                trace = directory / (name+"-qps.txt")
-                trace.write_text("".join(x["requested_qp"]+"\n" for x in sorted(rows,key=lambda x:int(x["frame"]))))
-                previous = directory / (name+"-r26.cfg")
-                previous.write_text(base.replace("Threads=8", f"Threads={threads}"))
-                replay = [src, previous, int(args.crf), args.frames, 0, 0, "--qp-replay="+str(trace)]
-                _, baseline = run_case(directory/(name+"-r26"), kit/"r26/bin/vvenc-live-bench",
-                                       kit/"r26/lib", replay, args.cpus)
-                baseline.update(threads=threads, pictures=4, arm="r26_qp_replay",
-                                paired_r28=name, identical_stream=baseline["stream_sha256"]==result["stream_sha256"])
-                report["results"].append(baseline)
-                print(name, "R26 replay", round(baseline["fps"],2), "fps, identical stream", baseline["identical_stream"], flush=True)
-            (directory/"summary.json").write_text(json.dumps(report, indent=2)+"\n")
+    with selected_clip(src, args.frames) as clip:
+        report["selected_input_sha256"] = digest(clip)
+        for threads in args.threads:
+            for pictures in args.pictures:
+                name = f"{threads}t-{pictures}p"
+                profile = directory / (name+".cfg")
+                profile.write_text(base.replace("Threads=8", f"Threads={threads}")
+                                   .replace("MaxParallelFrames=4", f"MaxParallelFrames={pictures}").rstrip()
+                                   + "\nLiveGopPipeline=3\nLiveNative8Rows=1\n")
+                cmd = [clip, profile, args.crf, args.frames, "1" if args.paced else "feedback-fps",
+                       args.maxrate, "measure", "-", "5", "anchor-feedback", "0.4", "--ccrf=balanced",
+                       f"--burst-ms={args.burst_ms}", "--history-ms=0", "--reserve-groups=0", "--anchor-margin-pct=0"]
+                rows, result = run_case(directory/name, kit/"native/bin/vvenc-live-bench",
+                                        kit/"native/lib", cmd, args.cpus)
+                result.update(threads=threads, pictures=pictures, arm="r28")
+                report["results"].append(result)
+                print(name, "R28", round(result["fps"], 2), "fps", flush=True)
+                if args.with_r26:
+                    trace = directory / (name+"-qps.txt")
+                    trace.write_text("".join(x["requested_qp"]+"\n" for x in sorted(rows,key=lambda x:int(x["frame"]))))
+                    previous = directory / (name+"-r26.cfg")
+                    previous.write_text(base.replace("Threads=8", f"Threads={threads}"))
+                    replay = [clip, previous, int(args.crf), args.frames, 0, 0, "--qp-replay="+str(trace)]
+                    _, baseline = run_case(directory/(name+"-r26"), kit/"r26/bin/vvenc-live-bench",
+                                           kit/"r26/lib", replay, args.cpus)
+                    baseline.update(threads=threads, pictures=4, arm="r26_qp_replay",
+                                    paired_r28=name, identical_stream=baseline["stream_sha256"]==result["stream_sha256"])
+                    report["results"].append(baseline)
+                    print(name, "R26 replay", round(baseline["fps"],2), "fps, identical stream", baseline["identical_stream"], flush=True)
+                (directory/"summary.json").write_text(json.dumps(report, indent=2)+"\n")
     print(directory/"summary.json")
 
 

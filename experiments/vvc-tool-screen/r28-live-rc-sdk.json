@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "vvenc": "13e69a43d8703736a075f3fa6cf23c984afe3a98",
+  "ffmpeg": "1323a30133d8131520b32e61d3d8913a74efcf6c",
+  "service_dependency_key": "d08056611d702eb1ea308588",
+  "service_source_identity": "b80afd8824734302d1d3f5bcab8eb09d845bafad73e908838c45ba4c93637e4e",
+  "native_build_key": "d99e2fa01e9a2ca037fbf175ad442286da615a3b65ba952c17c3dbe91ee26fed",
+  "native_build_id": "e57edd3369315e2df00a433aa6c8b89e6773343a",
+  "service_vvenc_build_id": "f7250b557dc9d25aaa1f6efa5078eb46434ee364",
+  "service_worker_build_id": "db14c1d6f056af396b7fa5d233d970fe96cb3b92",
+  "native_library_sha256": "47c19b6e6365268bef602590244a095d9260c2c6ca8c0066153ed567ed6bb0f6",
+  "native_driver_sha256": "1895e91f45a29115d9f1f49138c7d68979564b39ec129c3870facba14e269e93",
+  "service_library_sha256": "e0eee0ae2398c97b46948564daa21c5e1be745dbdc7d2295de6b18c23ac73556",
+  "service_worker_sha256": "bc76e3709c08073c17c366cbceaef584505ed57728a369e34f1a107b0aea5e2c",
+  "native_recipe_sha256": "a32b6d282fcc7c387be1798b4cad85e904c896822d332b50908fa7932e7e7284",
+  "native_pgo_sha256": "fbfbff8c65bd634558d9f27e5f3d817c5a89e81407ccb3436f8f88dd66c390d4",
+  "native_pgo_source": "R27 representative training profile reused on the identical hot codec paths",
+  "service_recipes": {
+    "Dockerfile.ffmpeg": "481688d1f2260f1aeb7a3bc233c3ab2f4904a387f297eda461476c0bded940e1",
+    "scripts/archive-symbols.py": "a855bd3569d1f46157fde13aeb8a59eebb481d917938c90ed4d43f3f21ffcd87",
+    "scripts/build-ffmpeg.sh": "ce2c00e945253540f5b272db2f79c0bedbaade96e2cb14b811cf85ecf943ecbe",
+    "scripts/build-vvenc.sh": "2a54031b8260a3269fda1d18eb88c6247b0ff7e4ce29b8158b4ec89bb0cdfb12",
+    "scripts/sdk-identity.py": "013ea701cf930bd4325f340747473c1b4093fdf520f6117016bef441ffa142ae"
+  },
+  "profiles": {
+    "live": "00b4d130205c24238e135c60129dce911728b90036fc5e63a7e20e938e223f7b",
+    "quality": "8ec4d2d33f65d7fbc6bed7c15bb23b8d798e076d531d4c4139deafb711e9d615"
+  },
+  "baseline": {
+    "vvenc": "17495d8a",
+    "lib_sha256": "386dad5a08c126cfa3f15d712088ebea5a7b50bce7b2445f45d655d7a6254583"
+  },
+  "targets": {
+    "service": "Ubuntu 24.04 Linux amd64, system libx264/libsrt/libevent/libcurl/libunwind/OpenSSL",
+    "native": "Linux x86-64-v3, Clang 18, ThinLTO with sealed R27 PGO"
+  },
+  "entrypoints": {
+    "http": "examples/r28-live.json",
+    "sdk": "native/include/vvenc/vvencLiveRate.h",
+    "build": "scripts/build-service.sh",
+    "bench": "experiments/vvc-tool-screen/bench-r28-server.py"
+  },
+  "service_runtime": {
+    "default": "service SDK library",
+    "opt_in_pgo": "NAKI_R28_NATIVE=1",
+    "public_api": "vvenc_live_rate_profile/create/submit/coded/written/pending/free"
+  },
+  "branch": "codex/r28-live-rc",
+  "application_base": "20fec897869d2cbf90df122f7607b5baf4c62e5a",
+  "application_implementation": "4d29fef67940b38ba407885e1ccf5b352170f05d",
+  "closed_loop": {
+    "mode": 3,
+    "parallel_pictures": [
+      4,
+      8
+    ],
+    "worker_range": [
+      2,
+      64
+    ],
+    "default_workers": 8,
+    "default_pictures": 4,
+    "future_input_guard": 10,
+    "signalled_reorder": 2,
+    "window_seconds": 5,
+    "trace": "real AU bits after hooks and actual mux write/flush"
+  },
+  "evidence": {
+    "run": "out/vvenc-r28-live-rc-20261124-01",
+    "summary_sha256": "8b17ab2ed78c78f5c83ab676e91c64d1eca31f354eabf33eb7dea51623ad30d7",
+    "coverage_sha256": "54886f685bfe2a2e028dddc565fc3fe8cd4a938fbb07f4aeeada002e1703e09c",
+    "vtm_streams": 14,
+    "vtm_frames": 4200,
+    "idr_intervals": 70,
+    "raw_pixel_crosschecks": true,
+    "originals": {
+      "S1": "10bc364bc9d8fdc16ff5fb34c99f54d39c36ebecae0037304ccbbbe91ecb7d7b",
+      "S4": "d4eac60facdbe3c89f86ca77ae0c1fc5fe1c460cd8b34c7f88625690b170b93d",
+      "mini8": "f3f1eeda9a12bb428398d5b07ee13ac53b2ccca10820aa550282ccaeaaa3b195"
+    }
+  },
+  "benchmark": {
+    "driver": "experiments/vvc-tool-screen/bench-r28-server.py",
+    "launcher": "experiments/vvc-tool-screen/run-r28-kit.sh",
+    "linux_native_recipe": "tools/live-gpb-r26/build-native.sh",
+    "native_recipe_components": {
+      "tools/live-gpb-r26/build-native.sh": "a32b6d282fcc7c387be1798b4cad85e904c896822d332b50908fa7932e7e7284",
+      "tools/live-gpb-r12/build.sh": "9f3eee0f4aeeb23d3127c8653bcff778366b922086afb93b9d4f4f4b89619bef",
+      "tools/live-gpb-r3/driver/bench.c": "30b8492af4a9bc46fc62a6d1cf29fdc314db0eb90deda7eab23347cd04ae5dd6"
+    },
+    "hardware_scope": "Ryzen 7 9700X / WSL2 / Ubuntu 24.04",
+    "target_server_tested": false
+  }
+}
