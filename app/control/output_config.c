@@ -68,6 +68,7 @@ int naki_outputs_parse(yyjson_val *root,Config *out,char *e,size_t n) {
         if(fail||!*o->id)return bad(e,n,"invalid/duplicate branch field or missing id");
         if(allocation_failed)return bad(e,n,"allocation failed");
         if(ret)return -1;
+        if(sub.encoder_parallel_frames)return bad(e,n,"R28 requires a direct output");
         for(unsigned k=0;k<count;k++)if(!strcmp(o->id,outputs[k].id)||!strcmp(sub.output,outputs[k].output))return bad(e,n,"duplicate id or destination");
         if((uint64_t)sub.width*sub.height>4096U*2160)return bad(e,n,"output canvas exceeds 4096x2160 pixels");
         if(!count)first=sub;

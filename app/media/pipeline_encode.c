@@ -127,7 +127,18 @@ int pipeline_receive_encoded(Pipeline *p) {
              * forecast. The pending reservation survives until real flush. */
             int64_t output_dts=av_rescale_q(packet->dts,p->v->encoder->time_base,p->video.time_base);
             int64_t media_us=av_rescale_q(output_dts,p->video.time_base,AV_TIME_BASE_Q);
-            if(naki_rate_feedback(&p->v->rate,&mapped->rate,p->v->encoder->width*p->v->encoder->height,bits,kind,media_us)<0) {ret=AVERROR_INVALIDDATA;break;}
+            if(naki_job_config(p->job)->encoder_parallel_frames) {
+                AVVvencLiveDecision d;
+                ret=av_vvenc_live_coded(p->v->encoder,packet->pts,media_us,bits,&d);
+                if(ret<0) break;
+                mapped->rate=(NakiRateDecision){
+                    .qp=d.qp,.kind=d.model_kind,.predicted_bits=d.predicted_bits,.complexity=d.complexity,
+                    .effective_bps=naki_job_config(p->job)->maxrate,.decision_us=d.decision_us,
+                    .saturated=d.saturated,.media_clock_us=d.media_us,.quality_qp=d.quality_qp,
+                    .allowance_bits=d.allowance_bits,.model_coefficient=d.coefficient,
+                    .window_room_bits=d.room_bits,.followup_reserve_bits=d.followup_bits
+                };
+            } else if(naki_rate_feedback(&p->v->rate,&mapped->rate,p->v->encoder->width*p->v->encoder->height,bits,kind,media_us)<0) {ret=AVERROR_INVALIDDATA;break;}
         }
         MuxTrace *meta=av_malloc(sizeof(*meta));
         AVBufferRef *reference=meta?av_buffer_create((uint8_t *)meta,sizeof(*meta),mux_trace_free,NULL,0):NULL;
@@ -182,7 +193,7 @@ int pipeline_encode_frame(Pipeline *p, AVFrame *frame) {
     int ret;
     AVBufferRef *owner=av_buffer_ref(frame->opaque_ref);
     if(!owner)return AVERROR(ENOMEM);
-    if(naki_job_config(p->job)->constrained_crf) {
+    if(naki_job_config(p->job)->constrained_crf && !naki_job_config(p->job)->encoder_parallel_frames) {
         int64_t began=now_us();
         int byte_input=frame->format==AV_PIX_FMT_YUV420P;
         if(!byte_input&&frame->format!=AV_PIX_FMT_YUV420P10LE) {av_buffer_unref(&owner);return AVERROR_INVALIDDATA;}

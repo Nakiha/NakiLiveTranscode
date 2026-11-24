@@ -19,6 +19,8 @@ int pipeline_video_force_idr(Pipeline *p) {
     return p->v&&p->v->encoder?av_opt_set_int(p->v->encoder->priv_data,"forced-idr",1,0):AVERROR(EINVAL);
 }
 int pipeline_video_written(Pipeline *p,int64_t media_us,int64_t written_us,int64_t bits) {
+    if(p->v && naki_job_config(p->job)->encoder_parallel_frames)
+        return av_vvenc_live_written(p->v->encoder,media_us,written_us,bits);
     return p->v?naki_rate_written(&p->v->rate,media_us,written_us,bits):AVERROR_INVALIDDATA;
 }
 int64_t pipeline_video_api_us(const Pipeline *p){return p->v?p->v->encoder_api_us:0;}
@@ -168,12 +170,24 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     enum AVPixelFormat output_pixels=vvc&&!byte_input?AV_PIX_FMT_YUV420P10LE:AV_PIX_FMT_YUV420P;
     const char *pixel_format=output_pixels==AV_PIX_FMT_YUV420P10LE?"yuv420p10le":"yuv420p";
     char chain[256];
-    if(cfg->width)snprintf(chain,sizeof(chain),"scale=%d:%d:flags=bilinear,format=pix_fmts=%s",cfg->width,cfg->height,pixel_format);
-    else snprintf(chain,sizeof(chain),"null,format=pix_fmts=%s",pixel_format);
     int ret;
     p->stage="filter initialization";
-    ret=naki_video_filter_prepare(&p->v->graph,&p->v->source,&p->v->sink,frame,p->input_tb,
-        cfg->width,cfg->height,output_pixels);
+    if(cfg->encoder_parallel_frames &&
+       (frame->colorspace!=AVCOL_SPC_BT709 || frame->color_range==AVCOL_RANGE_JPEG)) {
+        /* The packaged VUI signals limited BT.709. Convert incoming samples
+           using the same source-matrix fallback as the ordinary filter. */
+        int width=cfg->width?cfg->width:frame->width;
+        int height=cfg->height?cfg->height:frame->height;
+        snprintf(chain,sizeof(chain),"scale=%d:%d:flags=bilinear:out_color_matrix=bt709:out_range=tv,format=pix_fmts=%s",
+                 width,height,pixel_format);
+        ret=naki_video_filter_prepare_fixed(&p->v->graph,&p->v->source,&p->v->sink,frame,p->input_tb,
+            width,height,output_pixels,AVCOL_SPC_BT709,AVCOL_RANGE_MPEG);
+    } else {
+        if(cfg->width)snprintf(chain,sizeof(chain),"scale=%d:%d:flags=bilinear,format=pix_fmts=%s",cfg->width,cfg->height,pixel_format);
+        else snprintf(chain,sizeof(chain),"null,format=pix_fmts=%s",pixel_format);
+        ret=naki_video_filter_prepare(&p->v->graph,&p->v->source,&p->v->sink,frame,p->input_tb,
+            cfg->width,cfg->height,output_pixels);
+    }
     if(ret<0)return ret;
     p->v->input_width=frame->width; p->v->input_height=frame->height; p->v->input_format=frame->format;
     p->v->input_colorspace=frame->colorspace;p->v->input_range=frame->color_range;
@@ -196,7 +210,7 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     p->v->encoder->time_base=vvc && !pts_gop ? av_inv_q(p->output_rate.value) : (AVRational){1,90000};
     p->v->encoder->framerate=p->output_rate.value;
     p->v->encoder->bit_rate=cfg->bitrate;
-    if(cfg->cqf&&!cfg->constrained_crf)p->v->encoder->rc_max_rate=cfg->maxrate;
+    if(cfg->cqf&&(!cfg->constrained_crf||cfg->encoder_parallel_frames))p->v->encoder->rc_max_rate=cfg->maxrate;
     p->v->encoder->thread_count=cfg->encoder_threads;
     p->v->encoder->thread_type=FF_THREAD_SLICE;
     p->v->encoder->gop_size=p->output_rate.nominal_gop_frames; p->v->encoder->max_b_frames=0;
@@ -208,12 +222,19 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     AVDictionary *options=NULL;
     av_dict_set(&options,"preset",cfg->encoder_preset,0);
     if(cfg->cqf) {av_dict_set_int(&options,"qp",cfg->qp,0);av_dict_set(&options,"qpa","1",0);}
-    if(cfg->constrained_crf)av_dict_set(&options,"live-qp-feedback","1",0);
+    if(cfg->constrained_crf&&!cfg->encoder_parallel_frames)av_dict_set(&options,"live-qp-feedback","1",0);
     if(cfg->codec_trace)av_dict_set(&options,"live-frame-trace","1",0);
     if(cfg->encoder_max_future_frames)av_dict_set_int(&options,"live-max-future",cfg->encoder_max_future_frames,0);
     char vvenc_params[2048]="";
     int intra_frames=0;
-    if (vvc && strcmp(cfg->encoder_profile,"reference")) {
+    if (cfg->encoder_parallel_frames) {
+        intra_frames=60;
+        p->v->encoder->gop_size=60; p->v->encoder->max_b_frames=3;
+        av_dict_set(&options,"live-pts-gop","1",0);
+        av_dict_set_int(&options,"live-r28-tier",!strcmp(cfg->encoder_profile,"r28_live")?1:2,0);
+        av_dict_set_int(&options,"live-r28-pictures",cfg->encoder_parallel_frames,0);
+        av_dict_set_int(&options,"live-r28-burst-ms",cfg->rate_burst_ms,0);
+    } else if (vvc && strcmp(cfg->encoder_profile,"reference")) {
         int temporal_filter=strcmp(cfg->encoder_profile,"live_3b_2s_no_mctf")!=0;
         intra_frames=p->output_rate.nominal_gop_frames;
         if (intra_frames<4) return AVERROR(EINVAL);
@@ -252,7 +273,7 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     else av_dict_set(&options,"tune","zerolatency",0);
     /* Input precision is selected explicitly; 10-bit input preserves the
        precision-only baseline, byte input uses the matching fork bridge. */
-    if(vvc) {
+    if(vvc && !cfg->encoder_parallel_frames) {
         size_t used=strlen(vvenc_params);
         int added=snprintf(vvenc_params+used,sizeof(vvenc_params)-used,"%sInternalBitDepth=%d:LiveNative8Ref=%d",used?":":"",cfg->encoder_bit_depth,cfg->encoder_native8_reference);
         if(added<0||(size_t)added>=sizeof(vvenc_params)-used)return AVERROR(ENOBUFS);
@@ -273,12 +294,15 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     json_str(doc,"encoder",cfg->encoder); json_str(doc,"encoder_preset",cfg->encoder_preset);
     json_str(doc,"encoder_profile",cfg->encoder_profile);
     json_str(doc,"rate_control",cfg->constrained_crf?"constrained_crf":(cfg->cqf?"cqf":"bitrate"));json_int(doc,"target_bitrate",cfg->bitrate);
-    if(cfg->constrained_crf) {json_int(doc,"crf",cfg->qp);json_int(doc,"source_rate_limit",cfg->source_rate_limit);json_int(doc,"rate_window_ms",1000);}
+    if(cfg->constrained_crf) {json_int(doc,"crf",cfg->qp);json_int(doc,"source_rate_limit",cfg->source_rate_limit);json_int(doc,"rate_window_ms",cfg->encoder_parallel_frames?5000:1000);}
     if(cfg->cqf) {json_int(doc,"qp",cfg->qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",cfg->maxrate);}
     json_int(doc,"output_rate_num",p->output_rate.value.num);json_int(doc,"output_rate_den",p->output_rate.value.den);
     json_int(doc,"rate_decimation_divisor",p->rate_divisor);
     if (vvc) {
-        json_str(doc,"vvenc_params",vvenc_params);
+        if(cfg->encoder_parallel_frames) {
+            json_int(doc,"encoder_parallel_frames",cfg->encoder_parallel_frames);
+            json_int(doc,"rate_burst_ms",cfg->rate_burst_ms);
+        } else json_str(doc,"vvenc_params",vvenc_params);
         json_int(doc,"rate_control_intra_period_frames",intra_frames);
         json_str(doc,"keyframe_schedule",cfg->policy.intra?"frame_policy":pts_gop?"pts_grid":"reference_frames");
         if (pts_gop && !cfg->policy.intra) json_int(doc,"keyframe_period_ms",2000);
@@ -302,5 +326,7 @@ int pipeline_drain_output(Pipeline *p) {
     }
     if(ret<0||(ret=pipeline_receive_encoded(p))<0)return ret;
     if(!p->destinations&&((ret=pipeline_flush_deferred_audio(p))<0||(ret=pipeline_drain_mux(p,1))<0))return ret;
+    if(naki_job_config(p->job)->encoder_parallel_frames && av_vvenc_live_pending(p->v->encoder)!=0)
+        return AVERROR_INVALIDDATA;
     return (pipeline_ledger_pending(p)||(naki_job_config(p->job)->constrained_crf&&p->v->rate.pending_bits))?AVERROR_INVALIDDATA:0;
 }

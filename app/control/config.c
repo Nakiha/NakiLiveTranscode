@@ -7,6 +7,33 @@
 #include <string.h>
 #include <limits.h>
 static int bad(char *error, size_t cap, const char *message) { snprintf(error, cap, "%s", message); return -1; }
+static int r28_defaults(yyjson_val *root, Config *c, char *error, size_t cap) {
+    const int live=!strcmp(c->encoder_profile,"r28_live");
+    if(!live && strcmp(c->encoder_profile,"r28_quality")) {
+        if(c->encoder_threads>16 || c->encoder_max_future_frames>4 ||
+           yyjson_obj_get(root,"encoder_parallel_frames") || yyjson_obj_get(root,"rate_burst_ms"))
+            return bad(error,cap,"R28 options require r28_live or r28_quality");
+        return 0;
+    }
+    if(strcmp(c->encoder,"libvvenc") || !c->constrained_crf || !c->maxrate || c->source_rate_limit ||
+       c->rendition_backend || yyjson_obj_get(root,"outputs"))
+        return bad(error,cap,"R28 requires a single direct libvvenc output, constrained_crf and maxrate");
+    if(!yyjson_obj_get(root,"encoder_threads")) c->encoder_threads=8;
+    if(!yyjson_obj_get(root,"encoder_max_future_frames")) c->encoder_max_future_frames=10;
+    if(!yyjson_obj_get(root,"encoder_bit_depth")) c->encoder_bit_depth=8;
+    if(!yyjson_obj_get(root,"encoder_input_bit_depth")) c->encoder_input_bit_depth=8;
+    if(!yyjson_obj_get(root,"encoder_native8_reference")) c->encoder_native8_reference=1;
+    if(!yyjson_obj_get(root,"encoder_parallel_frames")) c->encoder_parallel_frames=4;
+    if(!yyjson_obj_get(root,"rate_burst_ms")) c->rate_burst_ms=300;
+    if(!yyjson_obj_get(root,"output_fps")) c->output_fps=30;
+    const char *preset=live?"faster":"medium";
+    if(!*c->encoder_preset) strcpy(c->encoder_preset,preset);
+    if(c->encoder_threads<2 || c->encoder_max_future_frames!=10 || c->encoder_bit_depth!=8 ||
+       c->encoder_input_bit_depth!=8 || !c->encoder_native8_reference || c->output_fps!=30 ||
+       (c->encoder_parallel_frames!=4 && c->encoder_parallel_frames!=8) || strcmp(c->encoder_preset,preset))
+        return bad(error,cap,"R28 requires its packaged preset, 30 fps, 8-bit input/output, native8, future guard 10 and 4 or 8 parallel pictures");
+    return 0;
+}
 int config_parse(const char *body, size_t size, Config *out, char *error, size_t cap) {
     yyjson_doc *doc = yyjson_read(body, size, 0);
     if (!doc) return bad(error, cap, "Invalid JSON");
@@ -88,14 +115,16 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         else if (!strcmp(name,"reader_queue_capacity")) {field=&c.reader_queue_capacity; min=1; max=8;}
         else if (!strcmp(name,"crf")) {field=&c.qp; max=63;}
         else if (!strcmp(name,"queue_capacity")) {field=&c.queue_capacity; min=1; max=64;}
-        else if (!strcmp(name,"encoder_threads")) {field=&c.encoder_threads; min=1; max=16;}
+        else if (!strcmp(name,"encoder_threads")) {field=&c.encoder_threads; min=1; max=64;}
         else if (!strcmp(name,"encoder_bit_depth")) {field=&c.encoder_bit_depth; min=8; max=10;}
         else if (!strcmp(name,"encoder_input_bit_depth")) {field=&c.encoder_input_bit_depth; min=8; max=10;}
         else if (!strcmp(name,"fps")) {field=&c.fps; min=1; max=240;}
         else if (!strcmp(name,"output_fps")) {field=&c.output_fps; min=1; max=240;}
         else if (!strcmp(name,"qp")) {field=&c.qp; max=63;}
         else if (!strcmp(name,"maxrate")) {field=&c.maxrate; min=10000; max=100000000;}
-        else if (!strcmp(name,"encoder_max_future_frames")) {field=&c.encoder_max_future_frames; max=4;}
+        else if (!strcmp(name,"encoder_max_future_frames")) {field=&c.encoder_max_future_frames; max=10;}
+        else if (!strcmp(name,"encoder_parallel_frames")) {field=&c.encoder_parallel_frames; min=4; max=8;}
+        else if (!strcmp(name,"rate_burst_ms")) {field=&c.rate_burst_ms; max=1000;}
         else if (!strcmp(name,"frame_log_every")) {field=&c.frame_log_every; min=1; max=1000000;}
         else if (!strcmp(name,"slow_frame_ms")) {field=&c.slow_frame_ms; min=1; max=600000;}
         else if (!strcmp(name,"mux_wait_ms")) {field=&c.mux_wait_ms; min=1; max=1000;}
@@ -106,6 +135,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         if (!yyjson_is_int(val) || yyjson_get_sint(val)<min || yyjson_get_sint(val)>max) {bad(error,cap,"Integer out of range"); goto end;}
         *field=(int)yyjson_get_sint(val);
     }
+    if(r28_defaults(root,&c,error,cap))goto end;
     if(c.decoder_pump&&!c.decoder_async) {bad(error,cap,"decoder_pump requires decoder_async");goto end;}
     int multi=naki_outputs_parse(root,&c,error,cap);
     if(multi<0)goto end;
@@ -141,9 +171,9 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     }
     if(c.codec_trace&&(!c.encoder_max_future_frames||!vvc)) {bad(error,cap,"codec_trace requires direct live VVenC with future guard; native HEVC input is checked on open");goto end;}
     if(c.constrained_crf) {
-        if(!vvc||c.policy.intra!=NAKI_INTRA_SOURCE||!c.encoder_max_future_frames||!c.output_fps||yyjson_obj_get(root,"qp")||yyjson_obj_get(root,"bitrate")||
+        if(!vvc||(c.encoder_parallel_frames ? c.policy.intra!=0 : c.policy.intra!=NAKI_INTRA_SOURCE)||!c.encoder_max_future_frames||!c.output_fps||yyjson_obj_get(root,"qp")||yyjson_obj_get(root,"bitrate")||
             (!c.maxrate&&!c.source_rate_limit)||(c.source_rate_limit&&!c.network_trace)) {
-            bad(error,cap,"constrained_crf requires follow_source, live VVenC, output_fps, future guard and maxrate and/or traced source_rate_limit; use crf, not qp/bitrate");goto end;
+            bad(error,cap,c.encoder_parallel_frames?"R28 requires periodic IDR and crf/maxrate":"constrained_crf requires follow_source, live VVenC, output_fps, future guard and maxrate and/or traced source_rate_limit; use crf, not qp/bitrate");goto end;
         }
         c.bitrate=0;
     } else if(yyjson_obj_get(root,"crf")||c.source_rate_limit) {bad(error,cap,"crf/source_rate_limit require constrained_crf");goto end;}
@@ -160,7 +190,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     if(vvc && c.policy.timestamps==NAKI_TS_SOURCE_ALL && !strcmp(c.encoder_profile,"reference")) {
         bad(error,cap,"source_all requires a live VVenC profile; reference uses a nominal frame time base"); goto end;
     }
-    if ((vvc && strcmp(c.encoder_profile,"reference") && strcmp(c.encoder_profile,"live_3b_2s") && strcmp(c.encoder_profile,"live_3b_2s_no_mctf") && strcmp(c.encoder_profile,"live_3b_2s_qt8") && strcmp(c.encoder_profile,"live_3b_2s_qt16") && strcmp(c.encoder_profile,"live_3b_2s_speed") && strcmp(c.encoder_profile,"live_3b_2s_rdoq0")) ||
+    if ((vvc && !c.encoder_parallel_frames && strcmp(c.encoder_profile,"reference") && strcmp(c.encoder_profile,"live_3b_2s") && strcmp(c.encoder_profile,"live_3b_2s_no_mctf") && strcmp(c.encoder_profile,"live_3b_2s_qt8") && strcmp(c.encoder_profile,"live_3b_2s_qt16") && strcmp(c.encoder_profile,"live_3b_2s_speed") && strcmp(c.encoder_profile,"live_3b_2s_rdoq0")) ||
         (!vvc && strcmp(c.encoder_profile,"default"))) {bad(error,cap,"Invalid encoder_profile for selected encoder"); goto end;}
     if((!strcmp(c.encoder_profile,"live_3b_2s_qt8")||!strcmp(c.encoder_profile,"live_3b_2s_qt16")||!strcmp(c.encoder_profile,"live_3b_2s_speed")||!strcmp(c.encoder_profile,"live_3b_2s_rdoq0"))&&!c.cqf) {bad(error,cap,"reduced search profiles require CQF/constrained_crf");goto end;}
     if (!*c.encoder_preset) strcpy(c.encoder_preset,vvc ? "faster" : "veryfast");

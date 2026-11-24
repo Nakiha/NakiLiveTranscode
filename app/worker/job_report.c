@@ -202,7 +202,12 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
     if(job->parent){yyjson_mut_val *inflight=yyjson_mut_obj(doc);yyjson_mut_obj_add_uint(doc,inflight,"frames",job->stats.branch_inflight_frames);yyjson_mut_obj_add_uint(doc,inflight,"bytes",job->stats.branch_inflight_bytes);yyjson_mut_obj_add_uint(doc,inflight,"frame_limit",128);yyjson_mut_obj_add_uint(doc,inflight,"byte_limit",job->progress.rendition_inflight_limit);yyjson_mut_obj_add_val(doc,yyjson_mut_doc_get_root(doc),"delivery_inflight",inflight);}
 
     json_int(doc,"reader_queue_capacity",job->config.reader_queue_capacity);
-    if(job->config.constrained_crf) {json_int(doc,"crf",job->config.qp);json_int(doc,"source_rate_limit",job->config.source_rate_limit);json_int(doc,"rate_window_ms",1000);}
+    if(job->config.constrained_crf) {json_int(doc,"crf",job->config.qp);json_int(doc,"source_rate_limit",job->config.source_rate_limit);json_int(doc,"rate_window_ms",job->config.encoder_parallel_frames?5000:1000);}
+    if(job->config.encoder_parallel_frames) {
+        json_int(doc,"encoder_threads",job->config.encoder_threads);
+        json_int(doc,"encoder_parallel_frames",job->config.encoder_parallel_frames);
+        json_int(doc,"rate_burst_ms",job->config.rate_burst_ms);
+    }
     if(job->config.cqf) {json_int(doc,"qp",job->config.qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",job->config.maxrate);}
     json_int(doc,"intra_requested",job->stats.intra_requested); json_int(doc,"intra_confirmed",job->stats.intra_confirmed);
     json_int(doc,"timestamp_wraps",job->stats.timestamp_wraps);

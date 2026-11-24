@@ -8,6 +8,15 @@
 
 0.8.0 开放 MPEG-TS（含 UDP/SRT）、Enhanced FLV（含 RTMP）和本地 MP4。FLV/TS 支持 AAC/MP3 透传与晚音轨追加，见 [直播封装](live-mux.md)。普通 MP4 要在 EOF/trailer 后完成索引，不适合直接作为持续直播交付格式，当前仍只输出视频。输入视频限 H.264/HEVC，不接受 VVC 回灌；在线视频规格重建与音频转码尚未实现。
 
+
+## R28 跨 GOP 闭环
+
+单路 8-bit、30 fps 视频可选择 `r28_live` 或 `r28_quality`，两档均使用程序内置的 R26 完整 profile、闭合 GOP4、周期 IDR、单 tile WPP 和两帧解码重排。请求使用 `rate_control=constrained_crf`、`crf` 和显式 `maxrate`（视频 bit/s）。现有档位与请求指纹保持兼容。[直接输出示例](../examples/r28-live.json)
+
+`encoder_threads` 默认为 8，可取 2 到 64。`encoder_parallel_frames` 取 4（默认）或 8，控制两组之间共享的图片编码器。新档的输入领先量守卫为 10，按 AU 实际返回时的显示序号检查。`rate_burst_ms` 默认为 300。输出采用限幅 SDR BT.709。滤镜按源矩阵和量程转换。未标记的源矩阵沿用服务的 BT.470BG 默认值，明确标记的其他原色和 HDR 传递函数不属于此档位，复用标准解码、滤镜和封装。普通 CQF、source-rate-limit、跟随源 I 策略及多输出仍可使用原先支持它们的档位。
+
+控制器在输入时预留比特。组角色确认后按两个在途组的可用额度确定最终 QP。服务在注入保留 SEI 和媒体 hook 处理后，按编码序提交实际包大小及最终封装时间基的 DTS。真正写包并 flush 后才释放这笔额度，EOF 在编码和音视频队列都排空后核对余额。限码观察包含 150 个 AU 和 5 秒时间窗，短时突发和复杂场景需用实际输出测量。
+
 ## 编码精度
 
 `encoder_bit_depth`仅接受8或10，默认10，仅用于libvvenc；固定输出分支也可各自设置。它传入VVenC原生`InternalBitDepth`，改变内部编码精度与码流位深。显式`encoder_input_bit_depth`默认10，8选择YUV420P字节filter及匹配fork的只读packed-byte接口，要求编码精度8、live CQF与future guard；当前guard仅支持直接输出。wrapper不修改输入平面、不分配全帧16bit暂存；VVenC接收时一次零扩展到自有工作缓冲。字节输入的外部QP活动度归一到10bit尺度。默认关闭字节参考开关时，原图、重建图和热点均保留旧工作存储路径。8bit输出仍可声明Main10 profile，实际精度以SPS和独立解码pix_fmt确认。

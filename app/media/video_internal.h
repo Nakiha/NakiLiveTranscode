@@ -3,6 +3,7 @@
 #define LEDGER_CAPACITY 256
 #include "pipeline_internal.h"
 #include <libavutil/opt.h>
+#include <libavcodec/vvenc_live.h>
 #include <libavfilter/buffersrc.h>
 #include <libavfilter/buffersink.h>
 #include <libavfilter/avfilter.h>
