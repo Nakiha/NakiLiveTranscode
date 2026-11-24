@@ -1,0 +1,227 @@
+{
+  "schema": 1,
+  "baseline": "9b7bddb244b8e539164c52b68a8166e67ae9693a",
+  "vvenc": "aa8db9807e22f4a295da7c68f0622dbc3eb195b8",
+  "ffmpeg": "1323a30133d8131520b32e61d3d8913a74efcf6c",
+  "target": "Linux x86-64-v3, Clang 18, ThinLTO and fresh PGO",
+  "native_build_id": "724abe53df4afbbda5d6bafd4ac499ad4ae98186",
+  "native_library_sha256": "984e2a93a838cd4abdeb43aca8346c20f6fb0ca3dce6f8674c191253e722d960",
+  "native_debug_sha256": "bee190b32be779987a03ca8c36df702f8f201c6073bcd76262f32ed7e7654285",
+  "native_driver_sha256": "1895e91f45a29115d9f1f49138c7d68979564b39ec129c3870facba14e269e93",
+  "pgo_sha256": "e726b6c095e481387de27539c47fd35343174d2a6303f041792975b42ee9f22d",
+  "native_recipe_sha256": "a32b6d282fcc7c387be1798b4cad85e904c896822d332b50908fa7932e7e7284",
+  "compile_recipe_sha256": "9f3eee0f4aeeb23d3127c8653bcff778366b922086afb93b9d4f4f4b89619bef",
+  "training_inputs": {
+    "s3stress.yuv": "6148c31b59ab9821f416bfa6e6586032bdc1e46b60584cb5290f93a750bf7c0e",
+    "cam65.yuv": "51e0583c7b17677797fe0fd22ca3ec4340aec839805929562dcb31696bb57acf"
+  },
+  "training_profiles": {
+    "live": "df580eaacfcd6745af515d15dedef0c64fe1bf5da9df75e9246042e5534df039",
+    "quality": "a56468bbeeba841b45851933f7e6f4c16f0a9d717a9073b30109265f38e834e2"
+  },
+  "service_dependency_key": "e7036bd14b8d72763855394c",
+  "service_source_identity": "00c6b006570a087dd32a65ef33a3bf8bacdea20344385f9163cef09f72446c77",
+  "component_keys": {
+    "vvenc": "40d24ecec006996ade183549d07e931ab4f6c242b058058952c3b0aebdb9d309",
+    "ffmpeg": "e1383c9f76e7bb2107ae30479795fa4f550e1764b678d60f7def2012eb393e74"
+  },
+  "service_recipes": {
+    "Dockerfile.ffmpeg": "481688d1f2260f1aeb7a3bc233c3ab2f4904a387f297eda461476c0bded940e1",
+    "scripts/archive-symbols.py": "a855bd3569d1f46157fde13aeb8a59eebb481d917938c90ed4d43f3f21ffcd87",
+    "scripts/build-ffmpeg.sh": "ce2c00e945253540f5b272db2f79c0bedbaade96e2cb14b811cf85ecf943ecbe",
+    "scripts/build-vvenc.sh": "2a54031b8260a3269fda1d18eb88c6247b0ff7e4ce29b8158b4ec89bb0cdfb12",
+    "scripts/sdk-identity.py": "013ea701cf930bd4325f340747473c1b4093fdf520f6117016bef441ffa142ae"
+  },
+  "test_profiles": {
+    "live4": "df580eaacfcd6745af515d15dedef0c64fe1bf5da9df75e9246042e5534df039",
+    "live8": "a5860c95f1c1e1f42d886b952a217d0843e11ef856425761084c070eb6e3e468",
+    "quality4": "a56468bbeeba841b45851933f7e6f4c16f0a9d717a9073b30109265f38e834e2",
+    "quality8": "5b0d8ad7532feab21adc5b529fa88ec7d3cbbb227eed315d384e4830c5de1697"
+  },
+  "verification": {
+    "coverage": {
+      "closed": {
+        "streams": 8,
+        "frames": 2400,
+        "idr_starts": 40
+      },
+      "closed-holdout": {
+        "streams": 4,
+        "frames": 720,
+        "idr_starts": 12
+      },
+      "holdout": {
+        "streams": 4,
+        "frames": 720,
+        "idr_starts": 12
+      },
+      "rate-matched": {
+        "streams": 1,
+        "frames": 60,
+        "idr_starts": 1
+      },
+      "service": {
+        "streams": 4,
+        "frames": 1200,
+        "idr_starts": 20
+      }
+    },
+    "strict_ten_max": 10,
+    "profile": "R28 Live and Quality, single-tile WPP, reorder 2",
+    "tool_hashes": {
+      "checker_sha256": "4180c2d567798895bd4afc439c785075391c6f0ad2a6f5e3a27d5e1b8b293358",
+      "tools_sha256": "cc473e332ecb2d286634dc5fc145a46fcd1f7e67eafb4d2120f1ae54f680f5b4",
+      "filter_sha256": "1ab1e47d25bc67231d54d04f81da4226f974c6604429c778e5b27a64c3047958",
+      "tool_filter_sha256": "5151b5cdaf58b50de1b13622a5ced9634d1fa52fd5e32d887ae16fc754084804",
+      "proof_sha256": "44ca57c19ec027d18c44e81f338a1140d4635195ca389c75a52f569e470308ae",
+      "tool_proof_sha256": "0274dbb813af4cee6ff7913d72e72b88d1bbd84e95acc528bcdaa9ffe9d232bf",
+      "decoder_sha256": "a4584d9d5fc023ff829208498a26d6eb6df6dc0f1cf1212aa50611aaf771e60f",
+      "ffmpeg_sha256": "8074475f382870c727a95c24669e74082301980c4cf7dea76aa94b6a40ec0d56",
+      "trace_sha256": "ed16af623947494a72e284b6eb8ff225f2da22b38b5d5069c2fd4b4ba3384e41",
+      "prediction_sha256": "fba7300efccc1a082568f1452c58faebe736235de571c62c919cb434b6d91a0f",
+      "full_subset_sha256": "a7b1c953d7b31a220a32dc25cfd6852706e5b4d70eb7b2c79b832e88c2a20d17"
+    },
+    "original_prefixes_sha256": "4c29d97f62cb3e35c1fc1e57f6240b560018f87b3cbbb03afea2f0eea946d50d",
+    "geometry_oracle_sha256": "44ca57c19ec027d18c44e81f338a1140d4635195ca389c75a52f569e470308ae",
+    "tool_oracle_sha256": "0274dbb813af4cee6ff7913d72e72b88d1bbd84e95acc528bcdaa9ffe9d232bf",
+    "input_hashes": {
+      "11": "91aabea8086f9917e2bba254aa6a3ec5bf368a415336ffe68c8860ad5eb0e8b2",
+      "13": "b2231ef8f28ad3ba995a09123838b4081aa56378ea0fa45e154e062c98ebdc06",
+      "10": "a65167eeb5d25f1b5463945df69a147d5dbb5539d9dcf9f309f807deb9ed3998",
+      "ch01": "6f508c4dddee55e22b2cb7f286c5be2f9f518643e69885201e593182e0ba5020",
+      "ch09": "775d17d8e32c22be3fa775d84c5951b325dfed2c134f944fc8a3827a34763643",
+      "ch14": "bbb4d3ca1073c253035d691bd2d98eb7c6f1648313194e9a279c9883731cdef1",
+      "finger": "9a338b72324c21d4fea17f92d423874614e8994fa8615fb9624ea62d0331f4fd",
+      "game12-100": "f7f6ac9e44d6d21bc05da5b52a44a3475964ce59b67baf8210764d0312800f39"
+    }
+  },
+  "performance": {
+    "host": "Ryzen 7 9700X, WSL2 Linux, one logical CPU per physical core, eight workers",
+    "size": "540x960",
+    "rate_hz": 30,
+    "native": "3 paired 300-frame repetitions per setting, saturated encoder write-out, virtual media clock and real AU feedback",
+    "service": "2 separate 300-frame, 30 Hz H.264 TS to VVC MP4 runs per version per setting",
+    "results": {
+      "live-11-p4": {
+        "paired_throughput_percent": 1.312,
+        "median_fps": {
+          "release": 51.245,
+          "r29": 51.918
+        },
+        "ingress_to_mux_flush_p95_ms": {
+          "release": 224.1,
+          "r29": 216.195
+        }
+      },
+      "quality-13-p8": {
+        "paired_throughput_percent": 9.41,
+        "median_fps": {
+          "release": 34.301,
+          "r29": 37.602
+        },
+        "ingress_to_mux_flush_p95_ms": {
+          "release": 575.124,
+          "r29": 519.013
+        }
+      },
+      "live-13-p8": {
+        "paired_throughput_percent": 1.981,
+        "median_fps": {
+          "release": 69.839,
+          "r29": 70.698
+        },
+        "ingress_to_mux_flush_p95_ms": {
+          "release": 241.721,
+          "r29": 237.713
+        }
+      },
+      "quality-11-p4": {
+        "paired_throughput_percent": 12.391,
+        "median_fps": {
+          "release": 23.764,
+          "r29": 26.708
+        },
+        "ingress_to_mux_flush_p95_ms": {
+          "release": 954.61,
+          "r29": 877.825
+        }
+      },
+      "quality-11-p8": {
+        "paired_throughput_percent": 11.17,
+        "median_fps": {
+          "release": 25.57,
+          "r29": 28.425
+        },
+        "ingress_to_mux_flush_p95_ms": {
+          "release": 1009.003,
+          "r29": 893.227
+        }
+      },
+      "live-13-p4": {
+        "paired_throughput_percent": 1.223,
+        "median_fps": {
+          "release": 59.558,
+          "r29": 60.416
+        },
+        "ingress_to_mux_flush_p95_ms": {
+          "release": 240.354,
+          "r29": 239.53
+        }
+      },
+      "quality-13-p4": {
+        "paired_throughput_percent": 12.182,
+        "median_fps": {
+          "release": 30.091,
+          "r29": 33.757
+        },
+        "ingress_to_mux_flush_p95_ms": {
+          "release": 816.122,
+          "r29": 559.019
+        }
+      },
+      "live-11-p8": {
+        "paired_throughput_percent": 1.918,
+        "median_fps": {
+          "release": 55.795,
+          "r29": 56.602
+        },
+        "ingress_to_mux_flush_p95_ms": {
+          "release": 237.132,
+          "r29": 212.27
+        }
+      }
+    }
+  },
+  "picture": {
+    "live": {
+      "comparisons": 8,
+      "max_absolute_actual_rate_delta_percent": 0.3417,
+      "mean_delta_psnr_y_db": -0.0016,
+      "mean_delta_pooled_psnr_yuv_db": -0.0015,
+      "flat_4x4_chroma_cells": 19851298,
+      "absolute_mean_chroma_bias_ge_6": [
+        1248,
+        1283
+      ],
+      "absolute_mean_chroma_bias_ge_12": [
+        5,
+        4
+      ]
+    },
+    "quality": {
+      "comparisons": 8,
+      "max_absolute_actual_rate_delta_percent": 0.4971,
+      "mean_delta_psnr_y_db": -0.0079,
+      "mean_delta_pooled_psnr_yuv_db": -0.0081,
+      "flat_4x4_chroma_cells": 19851298,
+      "absolute_mean_chroma_bias_ge_6": [
+        784,
+        851
+      ],
+      "absolute_mean_chroma_bias_ge_12": [
+        0,
+        0
+      ]
+    }
+  }
+}
