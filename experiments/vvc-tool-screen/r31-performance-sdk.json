@@ -1,0 +1,697 @@
+{
+  "schema": 2,
+  "baseline": "9b7bddb244b8e539164c52b68a8166e67ae9693a",
+  "vvenc": "70e24a215016c0ca401a3a8a9619cc2d48816ea5",
+  "ffmpeg": "1323a30133d8131520b32e61d3d8913a74efcf6c",
+  "target": "Linux x86-64-v3 / Clang 18 / ThinLTO / new profile-guided optimization",
+  "native_build_id": "1366bd157b26c94b4c3e9b017e0f0b19b30aee09",
+  "native_library_sha256": "72096992dcb5fca50ea10c43f00dc96619f8bb7f76804dcf63a43c55bbd6dfb2",
+  "native_debug_sha256": "162ce2f6b89812b77f8bdeb05fe49fc6826df30bff23e3d4f574fddec05379e5",
+  "native_driver_sha256": "1895e91f45a29115d9f1f49138c7d68979564b39ec129c3870facba14e269e93",
+  "pgo_sha256": "afdcd174f92c2f0eafe83299f99eecadafa7c1c6a2d68e32c8390e34c4f04f47",
+  "compile_recipe_sha256": "9f3eee0f4aeeb23d3127c8653bcff778366b922086afb93b9d4f4f4b89619bef",
+  "native_recipe_sha256": "a32b6d282fcc7c387be1798b4cad85e904c896822d332b50908fa7932e7e7284",
+  "training_sources": {
+    "s3stress.yuv": "6148c31b59ab9821f416bfa6e6586032bdc1e46b60584cb5290f93a750bf7c0e",
+    "cam65.yuv": "51e0583c7b17677797fe0fd22ca3ec4340aec839805929562dcb31696bb57acf"
+  },
+  "test_profiles": {
+    "live4.cfg": "df580eaacfcd6745af515d15dedef0c64fe1bf5da9df75e9246042e5534df039",
+    "live8.cfg": "a5860c95f1c1e1f42d886b952a217d0843e11ef856425761084c070eb6e3e468",
+    "quality4.cfg": "a56468bbeeba841b45851933f7e6f4c16f0a9d717a9073b30109265f38e834e2",
+    "quality8.cfg": "5b0d8ad7532feab21adc5b529fa88ec7d3cbbb227eed315d384e4830c5de1697"
+  },
+  "service_dependency_key": "d15dbf2769588acf41ca9719",
+  "service_source_identity": "2baaca233b3f776560094f1fddd05d9be0880c3b2635f7cd68c78cf69fda3a4b",
+  "service_recipes": {
+    "Dockerfile.ffmpeg": "481688d1f2260f1aeb7a3bc233c3ab2f4904a387f297eda461476c0bded940e1",
+    "scripts/archive-symbols.py": "a855bd3569d1f46157fde13aeb8a59eebb481d917938c90ed4d43f3f21ffcd87",
+    "scripts/build-ffmpeg.sh": "ce2c00e945253540f5b272db2f79c0bedbaade96e2cb14b811cf85ecf943ecbe",
+    "scripts/build-vvenc.sh": "2a54031b8260a3269fda1d18eb88c6247b0ff7e4ce29b8158b4ec89bb0cdfb12",
+    "scripts/sdk-identity.py": "013ea701cf930bd4325f340747473c1b4093fdf520f6117016bef441ffa142ae"
+  },
+  "component_keys": {
+    "vvenc": "288cf27598a770a623cbbb4ff2165ac943a25856c7a19706312fc6aa5c079048",
+    "ffmpeg": "58a4928a03afa6d0a6ebc811035d07826a313b506f80d00b42b4fcb5503c452c"
+  },
+  "reference_inputs_sha256": "4c29d97f62cb3e35c1fc1e57f6240b560018f87b3cbbb03afea2f0eea946d50d",
+  "verification": {
+    "input_hashes": {
+      "finger": "9a338b72324c21d4fea17f92d423874614e8994fa8615fb9624ea62d0331f4fd",
+      "ch14": "bbb4d3ca1073c253035d691bd2d98eb7c6f1648313194e9a279c9883731cdef1",
+      "ch09": "775d17d8e32c22be3fa775d84c5951b325dfed2c134f944fc8a3827a34763643",
+      "11": "91aabea8086f9917e2bba254aa6a3ec5bf368a415336ffe68c8860ad5eb0e8b2",
+      "13": "b2231ef8f28ad3ba995a09123838b4081aa56378ea0fa45e154e062c98ebdc06",
+      "ch01": "6f508c4dddee55e22b2cb7f286c5be2f9f518643e69885201e593182e0ba5020",
+      "game12-100": "f7f6ac9e44d6d21bc05da5b52a44a3475964ce59b67baf8210764d0312800f39",
+      "10": "a65167eeb5d25f1b5463945df69a147d5dbb5539d9dcf9f309f807deb9ed3998",
+      "05C": "5ea37227b9fe36e873592103516d9fef40d0d50c9b87b45dce828ebeb1b97bc2",
+      "S4-100": "a51bb4fbf5b98ef6580ac82a1a4911a14a9b50bfb83f1ce46c36866a2a7f83b1",
+      "900s-100": "f127a0b23c6ee1410eea1d0494ceba4a11d461e994c530c56b378325eb82f795"
+    },
+    "oracles": {
+      "proof_sha256": "44ca57c19ec027d18c44e81f338a1140d4635195ca389c75a52f569e470308ae",
+      "tool_proof_sha256": "0274dbb813af4cee6ff7913d72e72b88d1bbd84e95acc528bcdaa9ffe9d232bf",
+      "decoder_sha256": "a4584d9d5fc023ff829208498a26d6eb6df6dc0f1cf1212aa50611aaf771e60f",
+      "ffmpeg_sha256": "8074475f382870c727a95c24669e74082301980c4cf7dea76aa94b6a40ec0d56",
+      "checker_sha256": "4180c2d567798895bd4afc439c785075391c6f0ad2a6f5e3a27d5e1b8b293358",
+      "tools_sha256": "cc473e332ecb2d286634dc5fc145a46fcd1f7e67eafb4d2120f1ae54f680f5b4"
+    },
+    "covered": {
+      "picture": {
+        "unique_streams": 30,
+        "selected_cases": 32,
+        "frames": 6420
+      },
+      "perf": {
+        "unique_streams": 7,
+        "selected_cases": 8,
+        "frames": 2100
+      },
+      "service": {
+        "unique_streams": 4,
+        "selected_cases": 4,
+        "frames": 1200
+      }
+    },
+    "distinct_streams": 39,
+    "distinct_frames": 9120,
+    "strict_ten_measured_max": 10,
+    "scope": "Original S1/S4/mini8 VTM same-role checks; single-tile WPP, reorder 2, 8-bit 4:2:0, 540x960 and 30 Hz.",
+    "uncovered": [
+      "Syntax and content roles outside the observed samples",
+      "Other input formats and sizes",
+      "Server topology and long-run service residence"
+    ],
+    "nearby_rate_pairs": {
+      "live-ch14-p4": {
+        "nominal_r28_kbps": 480.02222222222224,
+        "nominal_candidate_kbps": 484.71111111111105,
+        "nominal_mismatch_percent": 0.9768066293227129,
+        "nominal_whole_y_db": 0.02889969509999446,
+        "measured_r28_kbps": 543.6755555555555,
+        "measured_candidate_kbps": 543.1377777777777,
+        "measured_mismatch_percent": -0.09891520269441623,
+        "higher_operating_point_percent": 13.260497199203748,
+        "measured_whole_y_db": -0.011438897600001496,
+        "nominal_interpolated_deltas": {
+          "y": -0.012768417478357622,
+          "yuv": -0.01829485007163779
+        }
+      },
+      "quality-05C-p4": {
+        "nominal_r28_kbps": 889.1223999999999,
+        "nominal_candidate_kbps": 897.396,
+        "nominal_mismatch_percent": 0.9305355483114619,
+        "nominal_whole_y_db": -0.03276362639999775,
+        "measured_r28_kbps": 903.6231999999999,
+        "measured_candidate_kbps": 904.2023999999999,
+        "measured_mismatch_percent": 0.06409751321125867,
+        "higher_operating_point_percent": 1.6960544464968974,
+        "measured_whole_y_db": -0.04219443670000089,
+        "nominal_interpolated_deltas": {
+          "y": -0.10525017223115664,
+          "yuv": -0.11585930423550356
+        }
+      }
+    },
+    "edge_repeat": {
+      "frame": 33,
+      "xy": [
+        360,
+        576
+      ],
+      "display_prior_and_next": [
+        31,
+        35
+      ],
+      "same_exact_parameters": true,
+      "per_arm": {
+        "R28": {
+          "n": 12,
+          "unique_streams": 12,
+          "both_at_least_12": 6,
+          "one_at_least_12": 6,
+          "mean_by_cell": [
+            6.166666666666667,
+            9.984375
+          ],
+          "median_by_cell": [
+            5.59375,
+            9.59375
+          ],
+          "range_by_cell": [
+            [
+              -1.9375,
+              14.5
+            ],
+            [
+              1.0625,
+              19.0625
+            ]
+          ]
+        },
+        "R30": {
+          "n": 12,
+          "unique_streams": 12,
+          "both_at_least_12": 1,
+          "one_at_least_12": 1,
+          "mean_by_cell": [
+            5.765625,
+            9.916666666666666
+          ],
+          "median_by_cell": [
+            6.3125,
+            10.75
+          ],
+          "range_by_cell": [
+            [
+              -0.4375,
+              12.6875
+            ],
+            [
+              2.8125,
+              16.625
+            ]
+          ]
+        }
+      },
+      "matched": {
+        "R28": {
+          "n": 12,
+          "unique_streams": 12,
+          "both_at_least_12": 6,
+          "one_at_least_12": 6,
+          "mean_by_cell": [
+            6.166666666666667,
+            9.984375
+          ],
+          "median_by_cell": [
+            5.59375,
+            9.59375
+          ],
+          "range_by_cell": [
+            [
+              -1.9375,
+              14.5
+            ],
+            [
+              1.0625,
+              19.0625
+            ]
+          ]
+        },
+        "R30": {
+          "n": 12,
+          "unique_streams": 12,
+          "both_at_least_12": 1,
+          "one_at_least_12": 1,
+          "mean_by_cell": [
+            5.765625,
+            9.916666666666666
+          ],
+          "median_by_cell": [
+            6.3125,
+            10.75
+          ],
+          "range_by_cell": [
+            [
+              -0.4375,
+              12.6875
+            ],
+            [
+              2.8125,
+              16.625
+            ]
+          ]
+        }
+      },
+      "rate_range_percent": [
+        -0.07649497227535385,
+        0.22742770455084216
+      ]
+    },
+    "visual_summary_zh": "手部第 12 至 16 帧保留了指尖和整手轮廓。CH09 Live 第 33 帧有时会在白袖旁的暗缝提前出现红边。独立交替重编码 12 对后，两个相邻色度块同时达到 12 码值的次数为 R28 6/12、候选 1/12，每对实际码率相差均小于 0.23%。第 33 帧最重色块的 Cr 有符号均值在两组中分别为 +9.98 和 +9.92。CH11 Quality 第 47 帧白衣上有单帧淡黄残影，另外能看到个别纸屑和手部边缘色差。原尺寸复核六组最差单帧或五帧窗口，损失集中于树叶、人物像素边缘、纸花和招牌细笔画，未看到成片的新色斑。",
+    "visual_hashes_sha256": "9bcd8f217d5925510c1c27606fd924587b2c577f06fd4a3c4edb2b09f1f1045f",
+    "raw_measurements_sha256": {
+      "matched-actual.json": "102bddd7a3af4eec1f1dd418aac6b64205182981a272e025298eab826e31c671",
+      "matched-qualified.json": "5f8a101102327c2f0b0cfe4e698930cadfe5c77a92432d45b8dc3c5674781253",
+      "frame-psnr-actual.json": "497597698206b9a0fccb8ffe0dcdc8e8d5c8266b54bb44c0b2f6196187802fa6",
+      "color-regions-actual.json": "b2ef01fa81ad526ac9019ae3dbbfc0af0cbb541fb5a5468f6b8228d4a7446bfb",
+      "pixel-repeat-review.json": "145da30d787bbc3d5ea673abaf47517d6e8e6490d791c713bab21d4cc0778935",
+      "saturation.json": "91b345394a01a4126ad789bfbb908f979b0af10a9d56250a7cdfeda72f1f6e24",
+      "saturation-retaken.json": "1fb5990c400d84e00a41545a6915d8e764b9a877f6f36330c2bf0db10dfe9fef",
+      "final-latency.json": "de41bfebbeb57007349ffb803c904799ec39236d93fd63b9766d7848df4c1c9a",
+      "final-service-runs.json": "7ab43b7740b9c4529cb4128eb7231a89f81b4845c200f5a103f03fad7ed2d04c",
+      "service-bitrates.json": "6151a7bf5d7f3fbe76af8d46595e822a977907814f45aef478436a54aaee6e2d",
+      "edge-repeat/pairs.json": "e38830cf8071e9c09618ffca3a28dc1192afe5fff4406421737db033ae4deaf6",
+      "visual/worst-windows/cases.json": "e7f97670e601e6e143277df69ce6f8f8f1a2856170642b3fdfbc19a0d49bb854",
+      "visual/motion-verified.json": "f14aa836dd684b24347f02e0efc70ac26d35a78d5b5cd675b0a18bdba72d9862",
+      "native-unit-checks.json": "5a66d381884cf8fca17f6463e9c2abfacac9c3cd9186d0c15b53eb0ca3c746c0"
+    }
+  },
+  "picture": {
+    "live": {
+      "cases": 13,
+      "mean_delta_psnr_y_db": -0.0144,
+      "lowest_delta_y_db": -0.0914,
+      "mean_delta_pooled_psnr_yuv_db": -0.0204,
+      "lowest_delta_pooled_yuv_db": -0.0993,
+      "worst_frame_delta_y_db": -1.4931,
+      "max_absolute_matched_rate_percent": 0.3917,
+      "severe_flat_chroma_cells": [
+        34,
+        23
+      ],
+      "new_severe_connected_regions": 1,
+      "persistent_new_cells": 0,
+      "display_frame_mean_deltas_db": {
+        "y": {
+          "average_across_cases": -0.0118,
+          "lowest_case": -0.0821,
+          "worst_5_frame_window": -0.977
+        },
+        "cb": {
+          "average_across_cases": -0.0607,
+          "lowest_case": -0.1547,
+          "worst_5_frame_window": -0.6211
+        },
+        "cr": {
+          "average_across_cases": -0.0448,
+          "lowest_case": -0.1231,
+          "worst_5_frame_window": -0.5751
+        },
+        "combined": {
+          "average_across_cases": -0.0179,
+          "lowest_case": -0.0904,
+          "worst_5_frame_window": -0.8881
+        }
+      },
+      "newly_marked_sources_flat_cells": 11,
+      "whole_component_delta_db": {
+        "y": {
+          "mean": -0.0144,
+          "worst": -0.0914
+        },
+        "cb": {
+          "mean": -0.0648,
+          "worst": -0.1638
+        },
+        "cr": {
+          "mean": -0.0493,
+          "worst": -0.1324
+        }
+      }
+    },
+    "quality": {
+      "cases": 13,
+      "mean_delta_psnr_y_db": -0.0558,
+      "lowest_delta_y_db": -0.1307,
+      "mean_delta_pooled_psnr_yuv_db": -0.0587,
+      "lowest_delta_pooled_yuv_db": -0.1283,
+      "worst_frame_delta_y_db": -0.9423,
+      "max_absolute_matched_rate_percent": 0.4997,
+      "severe_flat_chroma_cells": [
+        11,
+        6
+      ],
+      "new_severe_connected_regions": 0,
+      "persistent_new_cells": 0,
+      "display_frame_mean_deltas_db": {
+        "y": {
+          "average_across_cases": -0.0551,
+          "lowest_case": -0.1104,
+          "worst_5_frame_window": -0.7443
+        },
+        "cb": {
+          "average_across_cases": -0.0798,
+          "lowest_case": -0.1296,
+          "worst_5_frame_window": -0.6928
+        },
+        "cr": {
+          "average_across_cases": -0.0718,
+          "lowest_case": -0.1224,
+          "worst_5_frame_window": -0.6469
+        },
+        "combined": {
+          "average_across_cases": -0.0581,
+          "lowest_case": -0.1132,
+          "worst_5_frame_window": -0.716
+        }
+      },
+      "newly_marked_sources_flat_cells": 3,
+      "whole_component_delta_db": {
+        "y": {
+          "mean": -0.0558,
+          "worst": -0.1307
+        },
+        "cb": {
+          "mean": -0.08,
+          "worst": -0.1314
+        },
+        "cr": {
+          "mean": -0.0732,
+          "worst": -0.1231
+        }
+      }
+    }
+  },
+  "performance": {
+    "host": "WSL2 Linux AMD Ryzen 7 9700X, 8 workers pinned to separate physical cores, 4 or 8 in-flight pictures",
+    "capacity": "Actual last native AU write under saturated input, three alternating pairs of 300 frames per case.",
+    "latency": "Paced H.264 MPEG-TS to VVC MP4, service packet ingress through actual mux write/flush, two cold runs of 300 frames per arm per case.",
+    "results": {
+      "live-11-p4": {
+        "fps": {
+          "R28": 51.7746,
+          "R31": 65.8579
+        },
+        "paired_throughput_ratio": 1.2747,
+        "trial_ratios": [
+          1.2897,
+          1.2747,
+          1.2534
+        ],
+        "cpu_saving_percent": 20.4995,
+        "actual_native_rate_percent": [
+          0.179,
+          0.1403,
+          0.1902
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 170.381,
+            "p95": 210.663,
+            "p99": 278.712,
+            "max": 345.092
+          },
+          "R31": {
+            "p50": 137.912,
+            "p95": 204.502,
+            "p99": 253.581,
+            "max": 339.537
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R31": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1953.2956,
+          "R31": 1953.1108
+        },
+        "service_rate_delta_percent": -0.0095
+      },
+      "quality-13-p8": {
+        "fps": {
+          "R28": 34.32,
+          "R31": 47.914
+        },
+        "paired_throughput_ratio": 1.3913,
+        "trial_ratios": [
+          1.422,
+          1.3886,
+          1.3913
+        ],
+        "cpu_saving_percent": 27.2769,
+        "actual_native_rate_percent": [
+          -0.2813,
+          -0.2117,
+          -0.188
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 305.728,
+            "p95": 569.711,
+            "p99": 672.44,
+            "max": 738.77
+          },
+          "R31": {
+            "p50": 203.15,
+            "p95": 387.148,
+            "p99": 472.965,
+            "max": 528.276
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R31": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1480.0104,
+          "R31": 1500.9132
+        },
+        "service_rate_delta_percent": 1.4123
+      },
+      "live-13-p8": {
+        "fps": {
+          "R28": 69.6321,
+          "R31": 81.8896
+        },
+        "paired_throughput_ratio": 1.176,
+        "trial_ratios": [
+          1.2344,
+          1.176,
+          1.1645
+        ],
+        "cpu_saving_percent": 14.5244,
+        "actual_native_rate_percent": [
+          0.0035,
+          0.0187,
+          0.0851
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 138.373,
+            "p95": 247.624,
+            "p99": 305.191,
+            "max": 348.793
+          },
+          "R31": {
+            "p50": 137.263,
+            "p95": 209.683,
+            "p99": 276.87,
+            "max": 338.087
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R31": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1454.4856,
+          "R31": 1466.3408
+        },
+        "service_rate_delta_percent": 0.8151
+      },
+      "quality-11-p4": {
+        "fps": {
+          "R28": 23.85,
+          "R31": 34.9156
+        },
+        "paired_throughput_ratio": 1.4505,
+        "trial_ratios": [
+          1.4488,
+          1.4505,
+          1.4784
+        ],
+        "cpu_saving_percent": 29.5944,
+        "actual_native_rate_percent": [
+          0.1041,
+          -0.0142,
+          0.2337
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 799.493,
+            "p95": 979.296,
+            "p99": 1022.949,
+            "max": 1095.128
+          },
+          "R31": {
+            "p50": 238.131,
+            "p95": 387.062,
+            "p99": 447.604,
+            "max": 469.859
+          }
+        },
+        "over_1000_ms": {
+          "R28": 16,
+          "R31": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1923.8308,
+          "R31": 1934.5764
+        },
+        "service_rate_delta_percent": 0.5586
+      },
+      "quality-11-p8": {
+        "fps": {
+          "R28": 25.2334,
+          "R31": 36.2819
+        },
+        "paired_throughput_ratio": 1.4495,
+        "trial_ratios": [
+          1.4064,
+          1.4495,
+          1.4532
+        ],
+        "cpu_saving_percent": 31.9773,
+        "actual_native_rate_percent": [
+          0.094,
+          0.1771,
+          0.2021
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 811.971,
+            "p95": 1012.353,
+            "p99": 1094.49,
+            "max": 1156.619
+          },
+          "R31": {
+            "p50": 216.061,
+            "p95": 380.203,
+            "p99": 445.337,
+            "max": 493.161
+          }
+        },
+        "over_1000_ms": {
+          "R28": 44,
+          "R31": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1923.1956,
+          "R31": 1939.026
+        },
+        "service_rate_delta_percent": 0.8231
+      },
+      "live-13-p4": {
+        "fps": {
+          "R28": 59.1276,
+          "R31": 72.9723
+        },
+        "paired_throughput_ratio": 1.2381,
+        "trial_ratios": [
+          1.1535,
+          1.2388,
+          1.2381
+        ],
+        "cpu_saving_percent": 16.8865,
+        "actual_native_rate_percent": [
+          -0.0005,
+          0.0063,
+          0.0129
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 138.563,
+            "p95": 244.041,
+            "p99": 306.766,
+            "max": 314.979
+          },
+          "R31": {
+            "p50": 137.234,
+            "p95": 237.667,
+            "p99": 277.705,
+            "max": 309.531
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R31": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1452.426,
+          "R31": 1468.3628
+        },
+        "service_rate_delta_percent": 1.0973
+      },
+      "quality-13-p4": {
+        "fps": {
+          "R28": 29.7618,
+          "R31": 41.3656
+        },
+        "paired_throughput_ratio": 1.389,
+        "trial_ratios": [
+          1.3899,
+          1.3889,
+          1.389
+        ],
+        "cpu_saving_percent": 26.4216,
+        "actual_native_rate_percent": [
+          -0.1956,
+          -0.1956,
+          -0.1956
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 623.601,
+            "p95": 949.748,
+            "p99": 1050.57,
+            "max": 1107.056
+          },
+          "R31": {
+            "p50": 203.843,
+            "p95": 422.685,
+            "p99": 535.398,
+            "max": 616.339
+          }
+        },
+        "over_1000_ms": {
+          "R28": 22,
+          "R31": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1482.3984,
+          "R31": 1497.4084
+        },
+        "service_rate_delta_percent": 1.0125
+      },
+      "live-11-p8": {
+        "fps": {
+          "R28": 54.2363,
+          "R31": 68.2041
+        },
+        "paired_throughput_ratio": 1.2575,
+        "trial_ratios": [
+          1.194,
+          1.2575,
+          1.2816
+        ],
+        "cpu_saving_percent": 21.8786,
+        "actual_native_rate_percent": [
+          0.2721,
+          0.2438,
+          0.2493
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 170.34,
+            "p95": 232.569,
+            "p99": 314.325,
+            "max": 391.227
+          },
+          "R31": {
+            "p50": 137.825,
+            "p95": 204.479,
+            "p99": 298.375,
+            "max": 364.703
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R31": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1952.31,
+          "R31": 1951.3316
+        },
+        "service_rate_delta_percent": -0.0501
+      }
+    }
+  },
+  "release": "R31",
+  "previous_vvenc": "393e85a26275b416b498adbf5ebca385b7f53fb0",
+  "search_policy": "Published final reference CU geometry within the acquired native row boundary, observed depth and skip counts, and temporal-ID dependent search budget. In this strict-ten profile the signalled inter-layer ID is 0; the budget therefore covers QP 26 through 29 on these B pictures."
+}
