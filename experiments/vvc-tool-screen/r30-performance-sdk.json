@@ -1,0 +1,498 @@
+{
+  "schema": 1,
+  "baseline": "9b7bddb244b8e539164c52b68a8166e67ae9693a",
+  "vvenc": "393e85a26275b416b498adbf5ebca385b7f53fb0",
+  "ffmpeg": "1323a30133d8131520b32e61d3d8913a74efcf6c",
+  "target": "Linux x86-64-v3 / Clang 18 / ThinLTO / new profile-guided optimization",
+  "native_build_id": "ca071a252ecd085d65361c8057d75c711d6234a0",
+  "native_library_sha256": "82364bb5fe1197499f9365c4a9e2af7e9ffbbcc0a8f917b8c5c2bced3e0b3151",
+  "native_debug_sha256": "04282a0f48c483613b6ea53c2bb0dae0bb4a975ded7e80e1cd8d5f2b0d9abe75",
+  "native_driver_sha256": "1895e91f45a29115d9f1f49138c7d68979564b39ec129c3870facba14e269e93",
+  "pgo_sha256": "f569e86b2b217f19042ad06b322c81028d375fbf739040d5da5bcecedeafc259",
+  "compile_recipe_sha256": "9f3eee0f4aeeb23d3127c8653bcff778366b922086afb93b9d4f4f4b89619bef",
+  "native_recipe_sha256": "a32b6d282fcc7c387be1798b4cad85e904c896822d332b50908fa7932e7e7284",
+  "training_sources": {
+    "s3stress.yuv": "6148c31b59ab9821f416bfa6e6586032bdc1e46b60584cb5290f93a750bf7c0e",
+    "cam65.yuv": "51e0583c7b17677797fe0fd22ca3ec4340aec839805929562dcb31696bb57acf"
+  },
+  "test_profiles": {
+    "live4.cfg": "df580eaacfcd6745af515d15dedef0c64fe1bf5da9df75e9246042e5534df039",
+    "live8.cfg": "a5860c95f1c1e1f42d886b952a217d0843e11ef856425761084c070eb6e3e468",
+    "quality4.cfg": "a56468bbeeba841b45851933f7e6f4c16f0a9d717a9073b30109265f38e834e2",
+    "quality8.cfg": "5b0d8ad7532feab21adc5b529fa88ec7d3cbbb227eed315d384e4830c5de1697"
+  },
+  "service_dependency_key": "84cb7024f342310ce99c76b1",
+  "service_source_identity": "6f5209634c869dd742e3d4d5b7f9182f5df60ce18357487c9634ca4de1a9a56d",
+  "service_recipes": {
+    "Dockerfile.ffmpeg": "481688d1f2260f1aeb7a3bc233c3ab2f4904a387f297eda461476c0bded940e1",
+    "scripts/archive-symbols.py": "a855bd3569d1f46157fde13aeb8a59eebb481d917938c90ed4d43f3f21ffcd87",
+    "scripts/build-ffmpeg.sh": "ce2c00e945253540f5b272db2f79c0bedbaade96e2cb14b811cf85ecf943ecbe",
+    "scripts/build-vvenc.sh": "2a54031b8260a3269fda1d18eb88c6247b0ff7e4ce29b8158b4ec89bb0cdfb12",
+    "scripts/sdk-identity.py": "013ea701cf930bd4325f340747473c1b4093fdf520f6117016bef441ffa142ae"
+  },
+  "component_keys": {
+    "vvenc": "c9b0cd4789e40eace351b9fe37ea3877fec8e718a23803d329da845e9240a7b5",
+    "ffmpeg": "7313a439dc13f2e748c2fec0f9b923ff194f5399224d03bc2fff00bc3ed46c48"
+  },
+  "reference_inputs_sha256": "4c29d97f62cb3e35c1fc1e57f6240b560018f87b3cbbb03afea2f0eea946d50d",
+  "verification": {
+    "input_hashes": {
+      "finger": "9a338b72324c21d4fea17f92d423874614e8994fa8615fb9624ea62d0331f4fd",
+      "ch14": "bbb4d3ca1073c253035d691bd2d98eb7c6f1648313194e9a279c9883731cdef1",
+      "ch09": "775d17d8e32c22be3fa775d84c5951b325dfed2c134f944fc8a3827a34763643",
+      "11": "91aabea8086f9917e2bba254aa6a3ec5bf368a415336ffe68c8860ad5eb0e8b2",
+      "13": "b2231ef8f28ad3ba995a09123838b4081aa56378ea0fa45e154e062c98ebdc06",
+      "ch01": "6f508c4dddee55e22b2cb7f286c5be2f9f518643e69885201e593182e0ba5020",
+      "game12-100": "f7f6ac9e44d6d21bc05da5b52a44a3475964ce59b67baf8210764d0312800f39",
+      "10": "a65167eeb5d25f1b5463945df69a147d5dbb5539d9dcf9f309f807deb9ed3998",
+      "05C": "5ea37227b9fe36e873592103516d9fef40d0d50c9b87b45dce828ebeb1b97bc2",
+      "S4-100": "a51bb4fbf5b98ef6580ac82a1a4911a14a9b50bfb83f1ce46c36866a2a7f83b1",
+      "900s-100": "f127a0b23c6ee1410eea1d0494ceba4a11d461e994c530c56b378325eb82f795"
+    },
+    "oracles": {
+      "proof_sha256": "44ca57c19ec027d18c44e81f338a1140d4635195ca389c75a52f569e470308ae",
+      "tool_proof_sha256": "0274dbb813af4cee6ff7913d72e72b88d1bbd84e95acc528bcdaa9ffe9d232bf",
+      "decoder_sha256": "a4584d9d5fc023ff829208498a26d6eb6df6dc0f1cf1212aa50611aaf771e60f",
+      "ffmpeg_sha256": "8074475f382870c727a95c24669e74082301980c4cf7dea76aa94b6a40ec0d56",
+      "checker_sha256": "4180c2d567798895bd4afc439c785075391c6f0ad2a6f5e3a27d5e1b8b293358",
+      "tools_sha256": "cc473e332ecb2d286634dc5fc145a46fcd1f7e67eafb4d2120f1ae54f680f5b4"
+    },
+    "covered": {
+      "picture": {
+        "unique_streams": 25,
+        "selected_cases": 26,
+        "frames": 5412
+      },
+      "perf": {
+        "unique_streams": 8,
+        "selected_cases": 8,
+        "frames": 2400
+      },
+      "service": {
+        "unique_streams": 4,
+        "selected_cases": 4,
+        "frames": 1200
+      }
+    },
+    "distinct_streams": 35,
+    "distinct_frames": 8412,
+    "strict_ten_measured_max": 10,
+    "scope": "Original S1/S4/mini8 VTM same-role checks; single-tile WPP, reorder 2, 8-bit 4:2:0, 540x960 and 30 Hz.",
+    "uncovered": [
+      "Syntax and content roles outside the observed samples",
+      "Other input formats and sizes",
+      "Server topology and long-run service residence"
+    ]
+  },
+  "picture": {
+    "live": {
+      "cases": 13,
+      "mean_delta_psnr_y_db": -0.0073,
+      "lowest_delta_y_db": -0.032,
+      "mean_delta_pooled_psnr_yuv_db": -0.0069,
+      "lowest_delta_pooled_yuv_db": -0.0305,
+      "worst_frame_delta_y_db": -1.1827,
+      "max_absolute_matched_rate_percent": 0.3619,
+      "severe_flat_chroma_cells": [
+        40,
+        19
+      ],
+      "new_severe_connected_regions": 0,
+      "persistent_new_cells": 0,
+      "display_frame_mean_deltas_db": {
+        "y": {
+          "average_across_cases": -0.0069,
+          "lowest_case": -0.0238,
+          "worst_5_frame_window": -0.5994
+        },
+        "cb": {
+          "average_across_cases": -0.004,
+          "lowest_case": -0.0533,
+          "worst_5_frame_window": -0.295
+        },
+        "cr": {
+          "average_across_cases": -0.0033,
+          "lowest_case": -0.0215,
+          "worst_5_frame_window": -0.4029
+        },
+        "combined": {
+          "average_across_cases": -0.0064,
+          "lowest_case": -0.0221,
+          "worst_5_frame_window": -0.5422
+        }
+      }
+    },
+    "quality": {
+      "cases": 13,
+      "mean_delta_psnr_y_db": -0.0179,
+      "lowest_delta_y_db": -0.0558,
+      "mean_delta_pooled_psnr_yuv_db": -0.0185,
+      "lowest_delta_pooled_yuv_db": -0.0537,
+      "worst_frame_delta_y_db": -0.9527,
+      "max_absolute_matched_rate_percent": 0.4841,
+      "severe_flat_chroma_cells": [
+        12,
+        8
+      ],
+      "new_severe_connected_regions": 0,
+      "persistent_new_cells": 0,
+      "display_frame_mean_deltas_db": {
+        "y": {
+          "average_across_cases": -0.0188,
+          "lowest_case": -0.0416,
+          "worst_5_frame_window": -0.6171
+        },
+        "cb": {
+          "average_across_cases": -0.0213,
+          "lowest_case": -0.0514,
+          "worst_5_frame_window": -0.3205
+        },
+        "cr": {
+          "average_across_cases": -0.022,
+          "lowest_case": -0.0531,
+          "worst_5_frame_window": -0.5058
+        },
+        "combined": {
+          "average_across_cases": -0.0191,
+          "lowest_case": -0.0409,
+          "worst_5_frame_window": -0.5732
+        }
+      }
+    }
+  },
+  "performance": {
+    "host": "WSL2 Linux AMD Ryzen 7 9700X, 8 workers pinned to separate physical cores, 4 or 8 in-flight pictures",
+    "capacity": "Actual last native AU write under saturated input, three alternating pairs of 300 frames per case.",
+    "latency": "Paced H.264 MPEG-TS to VVC MP4, service packet ingress through actual mux write/flush, two cold runs of 300 frames per arm per case.",
+    "results": {
+      "live-11-p4": {
+        "fps": {
+          "release": 51.2058,
+          "r30": 59.3503
+        },
+        "paired_throughput_ratio": 1.1575,
+        "trial_ratios": [
+          1.2135,
+          1.1529,
+          1.1575
+        ],
+        "cpu_saving_percent": 13.5861,
+        "actual_native_rate_percent": [
+          -0.147,
+          -0.0736,
+          -0.0891
+        ],
+        "ingress_to_mux_flush_ms": {
+          "release": {
+            "p50": 170.456,
+            "p95": 209.466,
+            "p99": 275.385,
+            "max": 340.953
+          },
+          "r30": {
+            "p50": 139.325,
+            "p95": 205.538,
+            "p99": 277.952,
+            "max": 358.502
+          }
+        },
+        "over_1000_ms": {
+          "release": 0,
+          "r30": 0
+        },
+        "service_actual_kbps": {
+          "r30": 1949.934,
+          "release": 1953.0996
+        },
+        "service_rate_delta_percent": -0.1621
+      },
+      "quality-13-p8": {
+        "fps": {
+          "release": 34.1046,
+          "r30": 41.5168
+        },
+        "paired_throughput_ratio": 1.2173,
+        "trial_ratios": [
+          1.1864,
+          1.2316,
+          1.2173
+        ],
+        "cpu_saving_percent": 18.8877,
+        "actual_native_rate_percent": [
+          0.0773,
+          0.0676,
+          0.0676
+        ],
+        "ingress_to_mux_flush_ms": {
+          "release": {
+            "p50": 336.696,
+            "p95": 617.387,
+            "p99": 728.26,
+            "max": 809.553
+          },
+          "r30": {
+            "p50": 216.041,
+            "p95": 479.232,
+            "p99": 607.495,
+            "max": 679.115
+          }
+        },
+        "over_1000_ms": {
+          "release": 0,
+          "r30": 0
+        },
+        "service_actual_kbps": {
+          "r30": 1481.9032,
+          "release": 1482.3984
+        },
+        "service_rate_delta_percent": -0.0334
+      },
+      "live-13-p8": {
+        "fps": {
+          "release": 69.2524,
+          "r30": 74.0836
+        },
+        "paired_throughput_ratio": 1.0699,
+        "trial_ratios": [
+          1.0705,
+          1.0365,
+          1.0699
+        ],
+        "cpu_saving_percent": 7.0277,
+        "actual_native_rate_percent": [
+          0.0366,
+          0.0366,
+          0.0372
+        ],
+        "ingress_to_mux_flush_ms": {
+          "release": {
+            "p50": 138.282,
+            "p95": 249.536,
+            "p99": 317.88,
+            "max": 373.657
+          },
+          "r30": {
+            "p50": 137.833,
+            "p95": 237.608,
+            "p99": 290.818,
+            "max": 342.418
+          }
+        },
+        "over_1000_ms": {
+          "release": 0,
+          "r30": 0
+        },
+        "service_actual_kbps": {
+          "r30": 1451.2816,
+          "release": 1454.54
+        },
+        "service_rate_delta_percent": -0.224
+      },
+      "quality-11-p4": {
+        "fps": {
+          "release": 23.6187,
+          "r30": 31.8256
+        },
+        "paired_throughput_ratio": 1.3475,
+        "trial_ratios": [
+          1.3508,
+          1.3448,
+          1.3475
+        ],
+        "cpu_saving_percent": 25.5712,
+        "actual_native_rate_percent": [
+          -0.0881,
+          -0.0014,
+          -0.1032
+        ],
+        "ingress_to_mux_flush_ms": {
+          "release": {
+            "p50": 827.905,
+            "p95": 1017.904,
+            "p99": 1071.799,
+            "max": 1169.91
+          },
+          "r30": {
+            "p50": 279.84,
+            "p95": 418.815,
+            "p99": 473.707,
+            "max": 540.112
+          }
+        },
+        "over_1000_ms": {
+          "release": 43,
+          "r30": 0
+        },
+        "service_actual_kbps": {
+          "r30": 1921.8724,
+          "release": 1922.2132
+        },
+        "service_rate_delta_percent": -0.0177
+      },
+      "quality-11-p8": {
+        "fps": {
+          "release": 25.1422,
+          "r30": 34.2535
+        },
+        "paired_throughput_ratio": 1.3388,
+        "trial_ratios": [
+          1.3388,
+          1.3378,
+          1.3706
+        ],
+        "cpu_saving_percent": 25.8776,
+        "actual_native_rate_percent": [
+          -0.145,
+          -0.1483,
+          -0.1149
+        ],
+        "ingress_to_mux_flush_ms": {
+          "release": {
+            "p50": 793.731,
+            "p95": 1003.526,
+            "p99": 1076.467,
+            "max": 1131.642
+          },
+          "r30": {
+            "p50": 252.179,
+            "p95": 422.46,
+            "p99": 489.128,
+            "max": 555.388
+          }
+        },
+        "over_1000_ms": {
+          "release": 32,
+          "r30": 0
+        },
+        "service_actual_kbps": {
+          "r30": 1926.6448,
+          "release": 1923.056
+        },
+        "service_rate_delta_percent": 0.1866
+      },
+      "live-13-p4": {
+        "fps": {
+          "release": 59.5355,
+          "r30": 64.0803
+        },
+        "paired_throughput_ratio": 1.0747,
+        "trial_ratios": [
+          1.0747,
+          1.0692,
+          1.0763
+        ],
+        "cpu_saving_percent": 7.7036,
+        "actual_native_rate_percent": [
+          0.026,
+          0.0325,
+          0.013
+        ],
+        "ingress_to_mux_flush_ms": {
+          "release": {
+            "p50": 137.949,
+            "p95": 241.245,
+            "p99": 285.94,
+            "max": 314.365
+          },
+          "r30": {
+            "p50": 138.068,
+            "p95": 238.93,
+            "p99": 284.607,
+            "max": 341.493
+          }
+        },
+        "over_1000_ms": {
+          "release": 0,
+          "r30": 0
+        },
+        "service_actual_kbps": {
+          "r30": 1451.1128,
+          "release": 1452.5356
+        },
+        "service_rate_delta_percent": -0.098
+      },
+      "quality-13-p4": {
+        "fps": {
+          "release": 29.3991,
+          "r30": 36.0112
+        },
+        "paired_throughput_ratio": 1.2039,
+        "trial_ratios": [
+          1.2039,
+          1.2249,
+          1.2028
+        ],
+        "cpu_saving_percent": 18.7724,
+        "actual_native_rate_percent": [
+          0.0676,
+          0.0676,
+          0.0676
+        ],
+        "ingress_to_mux_flush_ms": {
+          "release": {
+            "p50": 513.659,
+            "p95": 822.667,
+            "p99": 883.852,
+            "max": 961.822
+          },
+          "r30": {
+            "p50": 271.736,
+            "p95": 492.969,
+            "p99": 596.618,
+            "max": 662.612
+          }
+        },
+        "over_1000_ms": {
+          "release": 0,
+          "r30": 0
+        },
+        "service_actual_kbps": {
+          "r30": 1481.9032,
+          "release": 1482.3984
+        },
+        "service_rate_delta_percent": -0.0334
+      },
+      "live-11-p8": {
+        "fps": {
+          "release": 55.4984,
+          "r30": 62.8328
+        },
+        "paired_throughput_ratio": 1.1401,
+        "trial_ratios": [
+          1.1401,
+          1.1433,
+          1.1061
+        ],
+        "cpu_saving_percent": 12.7087,
+        "actual_native_rate_percent": [
+          -0.0196,
+          -0.2309,
+          -0.1042
+        ],
+        "ingress_to_mux_flush_ms": {
+          "release": {
+            "p50": 170.59,
+            "p95": 215.5,
+            "p99": 313.841,
+            "max": 399.062
+          },
+          "r30": {
+            "p50": 139.343,
+            "p95": 204.89,
+            "p99": 304.91,
+            "max": 377.805
+          }
+        },
+        "over_1000_ms": {
+          "release": 0,
+          "r30": 0
+        },
+        "service_actual_kbps": {
+          "r30": 1948.5032,
+          "release": 1952.0408
+        },
+        "service_rate_delta_percent": -0.1812
+      }
+    }
+  }
+}
