@@ -1,0 +1,30 @@
+{
+  "source": {
+    "gitlink": "third_party/vvenc",
+    "revision": "17495d8af62ba76ba0279387bd9175287a75d3bd",
+    "branch": "codex/r26-server"
+  },
+  "sdk": {
+    "build_id": "e6ac386b9759fd6c6e8c64013b931f344939e7c5",
+    "library_sha256": "386dad5a08c126cfa3f15d712088ebea5a7b50bce7b2445f45d655d7a6254583",
+    "dwarf_sha256": "1dad68e3d3ab23cec7c0d718b85b06f9bca823be9416087c379de15365788ad0",
+    "dependency_key": "ecb59ec76c863adddf687e1955146cb21488ecb36b316f0418f1f03aaa52b3df",
+    "inputs": {
+      "source_commit": "17495d8af62ba76ba0279387bd9175287a75d3bd",
+      "base_commit": "198e67b11e90995436d197c9b7084322ffc696f2",
+      "recipe": "a32b6d282fcc7c387be1798b4cad85e904c896822d332b50908fa7932e7e7284",
+      "cmake_recipe": "9f3eee0f4aeeb23d3127c8653bcff778366b922086afb93b9d4f4f4b89619bef",
+      "pgo": "3b7c213b92eb3751c6dfd9625953e4013061687a5ea0cd8a0119ba075c8df995",
+      "compiler": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+      "profile_sha256": {
+        "live": "00b4d130205c24238e135c60129dce911728b90036fc5e63a7e20e938e223f7b",
+        "quality": "8ec4d2d33f65d7fbc6bed7c15bb23b8d798e076d531d4c4139deafb711e9d615"
+      }
+    }
+  },
+  "profiles": {
+    "live": "tools/live-gpb-r26/profiles/live.cfg",
+    "quality": "tools/live-gpb-r26/profiles/quality.cfg"
+  },
+  "build_recipe": "tools/live-gpb-r26/build-native.sh"
+}
