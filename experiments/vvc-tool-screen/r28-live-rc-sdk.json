@@ -95,6 +95,14 @@
     "promotion": "hold",
     "reason": "The published R28 Live and Quality streams used luma CU mode/size and partition combinations absent from the original Tencent samples at the same position in the closed IDR period. The original geometry check aggregated all B pictures.",
     "role_gate": "check-r28-geometry.py",
-    "additional_blockers": "Recheck actual AMVR, merge indices, TU geometry and block tools by role and shape before promoting either tier."
+    "additional_blockers": "Recheck actual AMVR, merge indices, TU geometry and block tools by role and shape before promoting either tier.",
+    "flat_noise_experiment": {
+      "baseline": "ad792544169dce3ee7a5591092c1b54496b28052",
+      "candidate": "353f2d07c5252526c9e595bcf655535dc227b5f9",
+      "native_build_id": "5f1f6a6b06ecfd45bb2b55b55e55e4fb48be2125",
+      "evidence_run": "out/vvenc-r28-flat-noise-20261124-01",
+      "promotion": "hold",
+      "scope": "R28 paired source, reconstruction and same-role geometry. Extended by-role AMVR, merge, TU and chroma SAO checks still report violations."
+    }
   }
 }
