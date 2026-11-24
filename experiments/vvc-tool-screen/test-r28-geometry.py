@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 import r28_tools as tools
@@ -67,6 +68,50 @@ class ToolGateTests(unittest.TestCase):
             result = subprocess.run(["awk", "-v", "stage=combined", "-f", HERE / "r28-tools.awk"],
                                     input=trace, capture_output=True, text=True)
             self.assertEqual(result.returncode == 0, skip is None, result.stderr)
+
+    def test_eof_uses_a_decode_prefix_of_measured_groups(self):
+        order = self.proof["decode_position"]
+        for i, poc in enumerate((0, 4, 2, 1, 3, 8, 6, 5)):
+            self.assertIn(f"{i}/{poc}", order)
+        for i, poc in enumerate((59, 57, 58), 57):
+            self.assertIn(f"{i}/{poc}", order)
+        self.assertNotIn("1/1", order)
+        self.assertNotIn("57/57", order)
+
+    def test_partial_period_may_only_occur_at_eof(self):
+        first = ["V H 0 0 0 2 7 0 8 8 0 0", "H 0 0 2 0 0 0 1 0 0 1",
+                 "V C 0 0 0 0 8 8 1", "U CU 0 0 0 8 8 1", "V T 0 0 0 8 8 0 0",
+                 "V T 0 0 1 4 4 0 0", "V T 0 0 2 4 4 0 0"]
+        trace = "\n".join(first + ["V H 1 1 0 2 7 0 8 8 0 0"]) + "\n"
+        outcome = subprocess.run(["awk", "-v", "stage=combined", "-f", HERE / "r28-tools.awk"],
+                                 input=trace, capture_output=True, text=True)
+        self.assertNotEqual(outcome.returncode, 0)
+        self.assertIn("early IDR", outcome.stderr)
+
+    def test_header_references_checked_even_if_no_pu_uses_them(self):
+        observed = self.proof["ordered_rpl"]
+        self.assertTrue(tools.reference_admitted("steady+2/-2/2", observed))
+        self.assertFalse(tools.reference_admitted("steady+2/-2/-2", observed))
+        self.assertFalse(tools.reference_admitted("steady+2/-6,-2/2", observed))
+        self.assertFalse(tools.reference_admitted("tail+1/-1/1", observed))
+        self.assertTrue(tools.reference_admitted("tail+1/-1/2", observed))
+
+    def test_bench_clock_uses_display_rank_across_sparse_and_reset_pocs(self):
+        order = {"0/IDR": 92, "1/start+4": 96, "2/start+2": 94,
+                 "3/IDR": 0, "4/start+4": 4}
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "frames.csv"
+            def write(display, ticks=(-6000, -3000, 0, 3000, 6000)):
+                ledger.write_text("ordinal,frame,dts_tick\n" + "".join(
+                    f"{i},{frame},{dts}\n" for i, (frame, dts) in enumerate(zip(display, ticks))))
+            write([0, 2, 1, 3, 4])
+            tools.check_bench_timestamps(ledger, order)
+            write([0, 1, 2, 3, 4])
+            with self.assertRaises(ValueError):
+                tools.check_bench_timestamps(ledger, order)
+            write([0, 2, 1, 3, 4], (-6000, -3000, 0, 0, 6000))
+            with self.assertRaises(ValueError):
+                tools.check_bench_timestamps(ledger, order)
 
     def test_sao_joins_at_poc_wrap_in_decode_order(self):
         fields = {"ph_pic_order_cnt_lsb": [254, 2, 0], "sps_log2_max_pic_order_cnt_lsb_minus4": [4],

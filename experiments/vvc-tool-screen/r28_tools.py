@@ -1,5 +1,6 @@
 """Reconcile actual VTM choices and FFmpeg SAO headers with the frozen Tencent traces."""
 from collections import Counter, defaultdict
+import csv
 import gzip
 import hashlib
 from pathlib import Path
@@ -9,7 +10,8 @@ import subprocess
 import tempfile
 
 HERE = Path(__file__).resolve().parent
-CATEGORIES = ("tu_geometry", "parameter_by_shape", "block_tool", "selected_reference", "sao_enabled")
+CATEGORIES = ("tu_geometry", "parameter_by_shape", "block_tool", "selected_reference", "sao_enabled",
+              "decode_position", "ordered_rpl")
 FIELDS = re.compile(rb"\[trace_headers @ [^\]]+\]\s+\d+\s+(\w+)\s+[01]+ = (-?\d+)\s*$")
 WANTED = {"ph_pic_order_cnt_lsb", "sps_log2_max_pic_order_cnt_lsb_minus4", "sps_bitdepth_minus8",
           "sps_sao_enabled_flag", "sh_sao_luma_used_flag", "sh_sao_chroma_used_flag"}
@@ -52,11 +54,52 @@ def unique(fields, key):
     return values.pop()
 
 
+def ordered_pictures(ordered):
+    pictures = sorted((int(key.split("/")[0]), key.split("/")[1], poc) for key, poc in ordered.items())
+    if [i for i, _, _ in pictures] != list(range(len(pictures))):
+        raise ValueError("VTM decode order is not contiguous")
+    return pictures
+
+
+def reference_admitted(key, allowed):
+    # The contract permits deleting unused entries while retaining their order
+    # in BOTH lists of the same observed picture role.
+    role, l0, l1 = key.split("/")
+    def subsequence(items, original):
+        values = iter([] if original == "-" else original.split(","))
+        return all(item in values for item in ([] if items == "-" else items.split(",")))
+    return any(role == ref_role and subsequence(l0, a) and subsequence(l1, b)
+               for ref_role, a, b in (entry.split("/") for entry in allowed))
+
+
+def check_bench_timestamps(path, order):
+    # The R28 benchmark records input CTS / 3000 as 'frame' at AU collection.
+    # Coded POCs can be sparse at EOF and restart at IDR. Their sorted ranks
+    # within each period must agree with those original display ordinals.
+    pictures = ordered_pictures(order)
+    display = [None] * len(pictures)
+    period = []
+    for index, role, poc in pictures:
+        if role == "IDR":
+            period = []
+        period.append((poc, index))
+        if index + 1 == len(pictures) or pictures[index + 1][1] == "IDR":
+            start = index + 1 - len(period)
+            for ordinal, (_, coding_index) in enumerate(sorted(period), start):
+                display[coding_index] = ordinal
+    with path.open(newline="") as source:
+        rows = list(csv.DictReader(source))
+    if (len(rows) != len(pictures) or [int(r["ordinal"]) for r in rows] != list(range(len(rows))) or
+            [int(r["frame"]) for r in rows] != display or
+            [int(r["dts_tick"]) for r in rows] != [(i - 2) * 3000 for i in range(len(rows))]):
+        raise ValueError("benchmark input CTS/display order or two-frame DTS cadence mismatch")
+
+
 def sao_choices(fields, ordered):
-    order = sorted((int(key.split("/")[0]), key.split("/")[1], poc) for key, poc in ordered.items())
+    order = ordered_pictures(ordered)
     n = len(order)
     modulus = 1 << (4 + unique(fields, "sps_log2_max_pic_order_cnt_lsb_minus4"))
-    if [i for i, _, _ in order] != list(range(n)) or fields["ph_pic_order_cnt_lsb"] != [p % modulus for _, _, p in order]:
+    if fields["ph_pic_order_cnt_lsb"] != [p % modulus for _, _, p in order]:
         raise ValueError("FFmpeg picture order does not match VTM POCs")
     enabled = unique(fields, "sps_sao_enabled_flag")
     result = Counter()
@@ -124,7 +167,7 @@ def executable(path):
     return Path(resolved).resolve()
 
 
-def decode(stream, decoder, ffmpeg, trace):
+def decode(stream, decoder, ffmpeg, trace, bench_frames=None):
     with subprocess.Popen([trace, "-nostdin", "-hide_banner", "-loglevel", "info", "-xerror", "-f", "vvc",
                            "-i", stream, "-map", "0:v", "-c:v", "copy", "-bsf:v", "trace_headers", "-f", "null", "-"],
                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as proc:
@@ -151,5 +194,8 @@ def decode(stream, decoder, ffmpeg, trace):
                         "-i", stream, "-map", "0:v", "-fps_mode", "passthrough", "-pix_fmt", pixel_format,
                         "-threads", "1", "-f", "rawvideo", independent], check=True)
         ffmpeg_hash = digest(independent)
-    counts["sao_enabled"] = sao_choices(fields, counts.pop("decode_order"))
+    order = counts.pop("decode_order")
+    if bench_frames is not None:
+        check_bench_timestamps(bench_frames, order)
+    counts["sao_enabled"] = sao_choices(fields, order)
     return counts, dict(bit_depth=depth, vtm_sha256=vtm_hash, ffmpeg_sha256=ffmpeg_hash)

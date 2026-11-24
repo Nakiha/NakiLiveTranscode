@@ -59,16 +59,18 @@ def verify_reference(directory, proof):
         raise ValueError("measured counts differ from the committed original evidence")
 
 
-def audit(stream, decoder, ffmpeg, trace, frames, output, proof, tool_proof):
+def audit(stream, decoder, ffmpeg, trace, frames, output, proof, tool_proof, bench_frames):
     if frames <= 0 or output.exists():
         raise ValueError("expected a positive picture count and a new output path")
     decoder, ffmpeg, trace = map(tools.executable, (decoder, ffmpeg, trace))
-    counts, pixels = tools.decode(stream, decoder, ffmpeg, trace)
+    counts, pixels = tools.decode(stream, decoder, ffmpeg, trace, bench_frames)
     if counts["coverage"]["pictures"] != frames:
         raise ValueError(f"decoded {counts['coverage']['pictures']} pictures, expected {frames}")
     allowed = {**proof["counts"], **tool_proof["counts"]}
     violations = {group: {key: n for key, n in sorted(counts[group].items()) if key not in allowed[group]}
                   for group in (*CATEGORIES, *tools.CATEGORIES)}
+    violations["ordered_rpl"] = {key: n for key, n in violations["ordered_rpl"].items()
+                                 if not tools.reference_admitted(key, allowed["ordered_rpl"])}
     matched = pixels["vtm_sha256"] == pixels["ffmpeg_sha256"]
     passed = matched and not any(violations.values())
     result = dict(passed=passed, stream_sha256=digest(stream), frames=frames, pixels=pixels,
@@ -76,6 +78,10 @@ def audit(stream, decoder, ffmpeg, trace, frames, output, proof, tool_proof):
                   decoder_sha256=digest(decoder), ffmpeg_sha256=digest(ffmpeg), trace_sha256=digest(trace),
                   proof_sha256=digest(PROOF), tool_proof_sha256=digest(TOOL_PROOF),
                   filter_sha256=digest(FILTER), tool_filter_sha256=digest(HERE / "r28-tools.awk"))
+    result["checker_sha256"] = digest(Path(__file__))
+    result["tools_sha256"] = digest(HERE / "r28_tools.py")
+    if bench_frames is not None:
+        result["bench_frames_sha256"] = digest(bench_frames)
     with output.open("x") as target:
         json.dump(result, target, indent=2, sort_keys=True)
         target.write("\n")
@@ -94,6 +100,7 @@ def main():
     candidate.add_argument("--frames", required=True, type=int)
     candidate.add_argument("--ffmpeg", default="ffmpeg", help="independent VVC decoder")
     candidate.add_argument("--trace-ffmpeg", default="ffmpeg", help="FFmpeg with VVC trace_headers")
+    candidate.add_argument("--bench-frames", type=Path, help="R28 benchmark frames.csv for 30 Hz CTS/DTS verification")
     args = parser.parse_args()
     tool_proof = json.loads(TOOL_PROOF.read_text())
     proof = json.loads(PROOF.read_text())
@@ -104,7 +111,7 @@ def main():
         print("Verified five structure/use trace pairs and three SAO header captures (248 pictures)")
         return 0
     return audit(args.stream.resolve(), args.structure, args.ffmpeg, args.trace_ffmpeg,
-                 args.frames, args.output, proof, tool_proof)
+                 args.frames, args.output, proof, tool_proof, args.bench_frames)
 
 
 if __name__ == "__main__":

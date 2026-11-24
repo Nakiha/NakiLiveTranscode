@@ -19,7 +19,11 @@ function tool_finish() {
 function tool_header(order, p, intra) {
     tool_finish()
     if (order != num || (!num && !intra)) tool_fail("missing or unordered IDR start")
-    if (intra) { origin=p; delete tool_seen }
+    if (intra) {
+        if (stage=="combined" && num && in_period!=60)
+            tool_fail("early IDR after " in_period " pictures")
+        origin=p; in_period=0; delete tool_seen
+    }
     rel=p-origin
     if (rel<0 || rel>=60 || rel in tool_seen) tool_fail("invalid relative POC " rel)
     tool_seen[rel]=1; tr=tool_role(rel); tpoc=p; torder=order; num++
@@ -29,6 +33,21 @@ function tool_header(order, p, intra) {
 $1=="V" && $2=="H" {
     if (NF<12 || stage=="use") tool_fail("invalid structure header")
     tool_header($3,$4,$6==2 && ($7==7 || $7==8))
+    if (NF!=12+$11+$12 || $11!~/^[0-9]+$/ || $12!~/^[0-9]+$/) tool_fail("incomplete active RPL")
+    if ($6==2 ? ($11!=0 || $12!=0) : ($11==0 || $12==0)) tool_fail("invalid active reference count")
+    tool_count["decode_position\t" in_period++ "/" rel]++
+    delete active
+    cursor=13; rpl=tr
+    for (list=0;list<=1;list++) {
+        refs=$(11+list); offsets=""
+        for (index_in_list=0;index_in_list<refs;index_in_list++) {
+            actual=$(cursor++)
+            active[list,index_in_list]=actual
+            offsets=offsets (index_in_list ? "," : "") (actual-tpoc)
+        }
+        rpl=rpl "/" (refs ? offsets : "-")
+    }
+    tool_count["ordered_rpl\t" rpl]++
     coded=$9*$10
 }
 $1=="H" {
@@ -46,6 +65,7 @@ $1=="V" && $2=="T" {
 }
 $1=="V" && $2=="R" {
     if (!num || $3!=torder || NF!=7 || $4!=0 || $5!~/^[01]$/) tool_fail("invalid selected reference")
+    if (!(($5,$6) in active) || active[$5,$6]!=$7) tool_fail("PU reference differs from its active RPL")
     tool_count["selected_reference\t" tr "/L" $5 "[" $6 "]/d" ($7-tpoc)]++
 }
 $1=="U" {

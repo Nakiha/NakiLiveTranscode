@@ -21,4 +21,6 @@ python3 experiments/vvc-tool-screen/check-r28-geometry.py check video.266 fresh-
 
 例如，`start+2/8x4` 的普通 merge 索引 2 有原片证据，索引 3 没有。`steady+0/64x64` 只实见显式 AMVR 模式 0。`tail+1` 没有亮度 4×4 TU 的证据。`start+2` 允许启用亮度 SAO，色度 SAO 须关闭。
 
+门禁还逐图核对 IDR 周期内的解码位置、相对 POC 和图头有序活动 L0/L1，检查实际 PU 选中的索引与图头指向同一张图。每条列表可在同一原片角色中按原顺序删减。末组须匹配腾讯原片的解码顺序前缀。给 30 Hz 基准驱动生成的流增加 `--bench-frames /path/to/frames.csv`，可一并校验逐 AU 的输入 CTS、显示顺序和两帧 DTS 偏移。短尾 POC 有空位时按实际图片的显示排名对齐。
+
 Service CI 执行门禁的无媒体回归。成品验收需要上述 VTM 探针和两个 FFmpeg 功能。完整发布同时需要 SPS/PH/SH、依序 RPL、严格码控及服务复核。历史 SDK 的记录与候选构建的结果分别保存在 `r28-live-rc-sdk.json`。
