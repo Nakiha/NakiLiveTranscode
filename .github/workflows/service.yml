@@ -33,6 +33,8 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+      - name: Test R28 same-role bitstream checks
+        run: python3 -B experiments/vvc-tool-screen/test-r28-geometry.py
       - name: Capture exact application source and unique image identity
         run: |
           mkdir -p out
