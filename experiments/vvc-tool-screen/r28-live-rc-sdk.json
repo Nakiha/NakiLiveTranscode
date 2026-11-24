@@ -90,5 +90,11 @@
     },
     "hardware_scope": "Ryzen 7 9700X / WSL2 / Ubuntu 24.04",
     "target_server_tested": false
+  },
+  "qualification_update": {
+    "promotion": "hold",
+    "reason": "The published R28 Live and Quality streams used luma CU mode/size and partition combinations absent from the original Tencent samples at the same position in the closed IDR period. The original geometry check aggregated all B pictures.",
+    "role_gate": "check-r28-geometry.py",
+    "additional_blockers": "Recheck actual AMVR, merge indices, TU geometry and block tools by role and shape before promoting either tier."
   }
 }
