@@ -59,11 +59,12 @@ def verify_reference(directory, proof):
         raise ValueError("measured counts differ from the committed original evidence")
 
 
-def audit(stream, decoder, ffmpeg, trace, frames, output, proof, tool_proof, bench_frames):
+def audit(stream, decoder, ffmpeg, trace, frames, output, proof, tool_proof, bench_frames, idr_frames=None):
     if frames <= 0 or output.exists():
         raise ValueError("expected a positive picture count and a new output path")
     decoder, ffmpeg, trace = map(tools.executable, (decoder, ffmpeg, trace))
-    counts, pixels = tools.decode(stream, decoder, ffmpeg, trace, bench_frames)
+    schedule = tools.idr_schedule(frames, idr_frames) if idr_frames is not None else None
+    counts, pixels = tools.decode(stream, decoder, ffmpeg, trace, bench_frames, schedule)
     if counts["coverage"]["pictures"] != frames:
         raise ValueError(f"decoded {counts['coverage']['pictures']} pictures, expected {frames}")
     allowed = {**proof["counts"], **tool_proof["counts"]}
@@ -80,6 +81,8 @@ def audit(stream, decoder, ffmpeg, trace, frames, output, proof, tool_proof, ben
                   filter_sha256=digest(FILTER), tool_filter_sha256=digest(HERE / "r28-tools.awk"))
     result["checker_sha256"] = digest(Path(__file__))
     result["tools_sha256"] = digest(HERE / "r28_tools.py")
+    if idr_frames is not None:
+        result["requested_idr_frames"] = idr_frames
     if bench_frames is not None:
         result["bench_frames_sha256"] = digest(bench_frames)
     with output.open("x") as target:
@@ -101,6 +104,7 @@ def main():
     candidate.add_argument("--ffmpeg", default="ffmpeg", help="independent VVC decoder")
     candidate.add_argument("--trace-ffmpeg", default="ffmpeg", help="FFmpeg with VVC trace_headers")
     candidate.add_argument("--bench-frames", type=Path, help="R28 benchmark frames.csv for 30 Hz CTS/DTS verification")
+    candidate.add_argument("--idr-frames", help="expected comma-separated display ordinals including the startup IDR")
     args = parser.parse_args()
     tool_proof = json.loads(TOOL_PROOF.read_text())
     proof = json.loads(PROOF.read_text())
@@ -111,7 +115,8 @@ def main():
         print("Verified five structure/use trace pairs and three SAO header captures (248 pictures)")
         return 0
     return audit(args.stream.resolve(), args.structure, args.ffmpeg, args.trace_ffmpeg,
-                 args.frames, args.output, proof, tool_proof, args.bench_frames)
+                 args.frames, args.output, proof, tool_proof, args.bench_frames,
+                 None if args.idr_frames is None else list(map(int, args.idr_frames.split(","))))
 
 
 if __name__ == "__main__":

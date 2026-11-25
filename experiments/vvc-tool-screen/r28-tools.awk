@@ -1,6 +1,20 @@
 # The candidate decoder interleaves V (structure) and U (actual use) traces.
 # The original instrumented decoders recorded these separately, in decode order.
 function tool_fail(message) { print "R28 tool trace: " message > "/dev/stderr"; broken=1; exit 2 }
+BEGIN {
+    scheduled = 0
+    if (schedule) {
+        while ((status = (getline line < schedule)) > 0) {
+            if (split(line, fields, "\t") != 3) tool_fail("invalid IDR schedule")
+            planned_rel[scheduled] = fields[1]+0
+            original_slot[scheduled] = fields[2]+0
+            original_rel[scheduled] = fields[3]+0
+            scheduled++
+        }
+        if (status < 0 || !scheduled) tool_fail("missing IDR schedule")
+        close(schedule)
+    }
+}
 function tool_role(p) {
     if (p == 0) return "IDR"
     if (p <= 4) return "start+" p
@@ -20,13 +34,15 @@ function tool_header(order, p, intra) {
     tool_finish()
     if (order != num || (!num && !intra)) tool_fail("missing or unordered IDR start")
     if (intra) {
-        if (stage=="combined" && num && in_period!=60)
+        if (!schedule && stage=="combined" && num && in_period!=60)
             tool_fail("early IDR after " in_period " pictures")
         origin=p; in_period=0; delete tool_seen
     }
     rel=p-origin
-    if (rel<0 || rel>=60 || rel in tool_seen) tool_fail("invalid relative POC " rel)
-    tool_seen[rel]=1; tr=tool_role(rel); tpoc=p; torder=order; num++
+    if (rel<0 || (!schedule && rel>=60) || rel in tool_seen) tool_fail("invalid relative POC " rel)
+    if (schedule && (order>=scheduled || rel!=planned_rel[order] || intra!=(planned_rel[order]==0)))
+        tool_fail("IDR/coding order differs from the requested schedule at picture " order)
+    tool_seen[rel]=1; tr=tool_role(schedule ? original_rel[order] : rel); tpoc=p; torder=order; num++
     delete area; used_area=0; uses=0; leaves=0; inter=0; amvr=0; sbts=0; use_header=0
     print "decode_order\t" order "/" tr "\t" p
 }
@@ -35,13 +51,19 @@ $1=="V" && $2=="H" {
     tool_header($3,$4,$6==2 && ($7==7 || $7==8))
     if (NF!=12+$11+$12 || $11!~/^[0-9]+$/ || $12!~/^[0-9]+$/) tool_fail("incomplete active RPL")
     if ($6==2 ? ($11!=0 || $12!=0) : ($11==0 || $12==0)) tool_fail("invalid active reference count")
-    tool_count["decode_position\t" in_period++ "/" rel]++
+    if (schedule) {
+        tool_count["stream_decode_position\t" in_period "/" rel]++
+        tool_count["decode_position\t" original_slot[torder] "/" original_rel[torder]]++
+    } else tool_count["decode_position\t" in_period "/" rel]++
+    in_period++
     delete active
     cursor=13; rpl=tr
     for (list=0;list<=1;list++) {
         refs=$(11+list); offsets=""
         for (index_in_list=0;index_in_list<refs;index_in_list++) {
             actual=$(cursor++)
+            if (schedule && (actual==tpoc || !((actual-origin) in tool_seen)))
+                tool_fail("reference outside the decoded part of this IDR period at POC " tpoc)
             active[list,index_in_list]=actual
             offsets=offsets (index_in_list ? "," : "") (actual-tpoc)
         }
@@ -81,7 +103,7 @@ $1=="U" {
 }
 END {
     if (broken) exit 2
-    if (!num) tool_fail("no pictures")
+    if (!num || (schedule && num!=scheduled)) tool_fail("incomplete picture count")
     tool_finish()
     for (key in tool_count) print key "\t" tool_count[key]
 }

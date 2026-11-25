@@ -194,6 +194,9 @@ target_include_directories(naki-vvenc-input8-test PRIVATE "${NAKI_FFMPEG_PREFIX}
 target_link_libraries(naki-vvenc-input8-test PRIVATE "${NAKI_FFMPEG_PREFIX}/lib/libvvenc.so")
 target_compile_options(naki-vvenc-input8-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 set_target_properties(naki-vvenc-input8-test PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
+add_executable(naki-vvenc-force-idr-test tests/fixtures/vvenc_force_idr_test.c)
+naki_sdk_native_test(naki-vvenc-force-idr-test)
+target_link_libraries(naki-vvenc-force-idr-test PRIVATE PkgConfig::FFMPEG)
 add_executable(naki-live-rate-test tests/unit/live_rate_test.c)
 naki_native_test(naki-live-rate-test)
 target_link_libraries(naki-live-rate-test PRIVATE m)
@@ -355,7 +358,7 @@ set_target_properties(naki-read-origin-probe PROPERTIES BUILD_RPATH "${NAKI_FFMP
     # Media/transport fixture drivers remain owned by their Python suites.
     foreach(name frame-policy frame-policy-config watermark-config branch-queue
             identity-intent control-spec sei component-update operation-store
-            operation-cache audio-signature video-rate video-filter live-rate vvenc-input8 native8)
+            operation-cache audio-signature video-rate video-filter live-rate vvenc-input8 vvenc-force-idr native8)
         add_test(NAME ${name} COMMAND naki-${name}-test)
         set_tests_properties(${name} PROPERTIES LABELS "native;quick" TIMEOUT 60)
     endforeach()

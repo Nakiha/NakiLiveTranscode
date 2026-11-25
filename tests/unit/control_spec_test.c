@@ -37,6 +37,10 @@ int main(void) {
     assert(r28.encoder_parallel_frames==4 && r28.encoder_max_future_frames==10 && r28.encoder_bit_depth==8);
     digest(&r28,a);digest(&explicit_r28,b);assert(!strcmp(a,b));
     explicit_r28.encoder_parallel_frames=8;digest(&explicit_r28,b);assert(strcmp(a,b));
+    Config source_idr=parse("{\"input\":\"i\",\"output\":\"o\",\"encoder\":\"libvvenc\",\"encoder_profile\":\"r28_live\",\"rate_control\":\"constrained_crf\",\"crf\":29,\"maxrate\":2100000,\"timestamps\":{\"mode\":\"source_all\"},\"intra\":{\"mode\":\"follow_source\"}}");
+    assert(source_idr.policy.intra==NAKI_INTRA_SOURCE && source_idr.encoder_parallel_frames==4);
+    Config periodic_idr=parse("{\"input\":\"i\",\"output\":\"o\",\"encoder\":\"libvvenc\",\"encoder_profile\":\"r28_quality\",\"rate_control\":\"constrained_crf\",\"crf\":29,\"maxrate\":2100000,\"encoder_parallel_frames\":8,\"timestamps\":{\"mode\":\"source_all\"},\"intra\":{\"mode\":\"periodic_pts_grid\",\"period_ms\":2700}}");
+    assert(periodic_idr.policy.intra==NAKI_INTRA_GRID && periodic_idr.policy.interval_ms==2700);
     const char *bad_r28[]={
         "{\"input\":\"i\",\"output\":\"o\",\"encoder\":\"libvvenc\",\"encoder_profile\":\"r28_live\",\"rate_control\":\"constrained_crf\",\"crf\":29,\"maxrate\":2100000,\"encoder_parallel_frames\":5}",
         "{\"input\":\"i\",\"output\":\"o\",\"encoder\":\"libvvenc\",\"encoder_profile\":\"r28_live\",\"rate_control\":\"constrained_crf\",\"crf\":29,\"maxrate\":2100000,\"encoder_max_future_frames\":4}",

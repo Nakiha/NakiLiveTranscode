@@ -11,9 +11,13 @@
 
 ## R28 跨 GOP 闭环
 
-单路 8-bit、30 fps 视频可选择 `r28_live` 或 `r28_quality`，两档均使用程序内置的 R26 完整 profile、闭合 GOP4、周期 IDR、单 tile WPP 和两帧解码重排。请求使用 `rate_control=constrained_crf`、`crf` 和显式 `maxrate`（视频 bit/s）。现有档位与请求指纹保持兼容。[直接输出示例](../examples/r28-live.json)
+单路 8-bit、30 fps 视频可选择 `r28_live` 或 `r28_quality`，两档均使用程序内置的 R26 完整 profile、闭合 GOP4、默认两秒 IDR、单 tile WPP 和两帧解码重排。请求使用 `rate_control=constrained_crf`、`crf` 和显式 `maxrate`（视频 bit/s）。现有档位与请求指纹保持兼容。[直接输出示例](../examples/r28-live.json)
 
 `encoder_threads` 默认为 8，可取 2 到 64。`encoder_parallel_frames` 取 4（默认）或 8，控制两组之间共享的图片编码器。新档的输入领先量守卫为 10，按 AU 实际返回时的显示序号检查。`rate_burst_ms` 默认为 300。输出采用限幅 SDR BT.709。滤镜按源矩阵和量程转换。未标记的源矩阵沿用服务的 BT.470BG 默认值，明确标记的其他原色和 HDR 传递函数不属于此档位，复用标准解码、滤镜和封装。普通 CQF、source-rate-limit、跟随源 I 策略及多输出仍可使用原先支持它们的档位。
+
+R33 的两个并行档沿用相同的档位名。需要跟随源 I 帧时，在请求顶层设置 `"timestamps":{"mode":"source_all"}` 和 `"intra":{"mode":"follow_source"}`。按自定义周期插入时，用 `"intra":{"mode":"periodic_pts_grid","period_ms":2500}`。需要在跟源的同时限制最长间隔时，用 `follow_source_with_max_gap` 和 `max_gap_ms`。首帧以及策略选中的输入帧都输出闭合 IDR，可以从这些包独立起播。
+
+直接集成 libavcodec 时，把送入帧的 `AVFrame.pict_type` 设为 `AV_PICTURE_TYPE_I` 即可在这张图插入 IDR。默认保留原两秒 PTS 网格。打开编码器前设 `live-frame-intra=1` 即由调用方决定首帧后的全部 IDR。相邻两帧可以连续请求。短组的内部 POC 可能跳号，调用方用输入 PTS 关联返回包。
 
 控制器在输入时预留比特。组角色确认后按两个在途组的可用额度确定最终 QP。服务在注入保留 SEI 和媒体 hook 处理后，按编码序提交实际包大小及最终封装时间基的 DTS。真正写包并 flush 后才释放这笔额度，EOF 在编码和音视频队列都排空后核对余额。限码观察包含 150 个 AU 和 5 秒时间窗，短时突发和复杂场景需用实际输出测量。
 
@@ -62,7 +66,7 @@ trace v4 增加四个单线程 CPU 窗口的外围 `CLOCK_MONOTONIC_RAW` 时长�
 
 ## 显式普通 I（已实现）
 
-可选 app `intra` 策略在现有 live profile 上启用 FFmpeg wrapper 的 `live-frame-intra=1`。匹配 VVenC fork 通过 `VVENC_LIVE_FRAME_INTRA_VERSION=1`、`m_liveFrameIntra` 和每张输入的 `forceIntra` 接收请求，在 PreProcess 的 PTS-group 决策之前关闭隐含周期 CRA、截断前一短组，并把后续请求编码为普通 TRAIL I；启动仍保留 IDR。GOP4 / 3B、PTS/DTS FIFO、one-pass JSON lookahead RC 的既有边界保持，reference profile 不接受该选项。
+串行 live profile 的可选 app `intra` 策略启用 FFmpeg wrapper 的 `live-frame-intra=1`。匹配 VVenC fork 通过 `VVENC_LIVE_FRAME_INTRA_VERSION=1`、`m_liveFrameIntra` 和每张输入的 `forceIntra` 接收请求，在 PreProcess 的 PTS-group 决策之前关闭隐含周期 CRA、截断前一短组，并把后续请求编码为普通 TRAIL I；启动仍保留 IDR。GOP4 / 3B、PTS/DTS FIFO、one-pass JSON lookahead RC 的既有边界保持，reference profile 不接受该选项。
 
 FFmpeg `libvvenc.c` 将实际 access unit 的 sliceType 提供为 I/P/B 统计，hook 和追踪不再把全部 VVC 类型记为未知。实际 NAL、显示顺序 I 位置和逐帧类型由独立解码核对，见[帧策略](frame-policy.md)。不提供新策略仍使用下面的周期 profile。ABI 必须匹配固定 gitlink/SDK；早期复审见[历史记录](validation-frame-policy.md)，当前身份与回归见[核心整理验证](validation-core-refactor.md)。
 

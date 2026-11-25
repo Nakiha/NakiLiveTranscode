@@ -22,8 +22,29 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def reduce_trace(source, stage):
+def idr_schedule(frames, idrs):
+    """Expected relative POC and the corresponding original decode slot and POC."""
+    if not idrs or idrs[0] != 0 or sorted(set(idrs)) != idrs or idrs[-1] >= frames:
+        raise ValueError("expected increasing display frame ordinals starting at IDR 0")
+    schedule = []
+    for start, stop in zip(idrs, [*idrs[1:], frames], strict=True):
+        schedule.append((0, 0, 0))
+        for base in range(0, stop - start - 1, 4):
+            remaining = stop - start - 1 - base
+            # The original three-slot tail is used only at the end of the
+            # nominal 60-picture period. A longer interval continues GOP4.
+            tail = base == 56 and remaining <= 3
+            slots = (3, 1, 2) if tail else (4, 2, 1, 3)
+            original = base if base < 56 or tail else 52
+            for index, slot in enumerate(slots[:remaining], 1):
+                schedule.append((base + slot, original + index, original + slot))
+    return schedule
+
+
+def reduce_trace(source, stage, schedule=None):
     cmd = ["awk", "-v", "stage=" + stage, "-f", HERE / "r28-tools.awk"]
+    if schedule is not None:
+        cmd[1:1] = ["-v", "schedule=" + str(schedule)]
     if stage != "use":
         cmd += ["-f", HERE / "r28-geometry.awk"]
     result = subprocess.run(cmd, stdin=source, capture_output=True, check=False)
@@ -167,7 +188,7 @@ def executable(path):
     return Path(resolved).resolve()
 
 
-def decode(stream, decoder, ffmpeg, trace, bench_frames=None):
+def decode(stream, decoder, ffmpeg, trace, bench_frames=None, schedule=None):
     with subprocess.Popen([trace, "-nostdin", "-hide_banner", "-loglevel", "info", "-xerror", "-f", "vvc",
                            "-i", stream, "-map", "0:v", "-c:v", "copy", "-bsf:v", "trace_headers", "-f", "null", "-"],
                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as proc:
@@ -178,11 +199,15 @@ def decode(stream, decoder, ffmpeg, trace, bench_frames=None):
     if depth not in (8, 10):
         raise ValueError(f"unsupported R28 bit depth {depth}")
     with tempfile.TemporaryDirectory() as tmp:
+        schedule_file = None
+        if schedule is not None:
+            schedule_file = Path(tmp) / "idr-schedule.tsv"
+            schedule_file.write_text("".join(f"{poc}\t{slot}\t{original}\n" for poc, slot, original in schedule))
         reconstruction = Path(tmp) / "vtm.yuv"
         with subprocess.Popen([decoder, "-b", stream, "-o", reconstruction, f"--OutputBitDepth={depth}"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as proc:
             try:
-                counts = reduce_trace(proc.stderr, "combined")
+                counts = reduce_trace(proc.stderr, "combined", schedule_file)
             finally:
                 proc.stderr.close()
             if proc.wait() or reconstruction.stat().st_size == 0:

@@ -18,8 +18,8 @@ $1=="V" && $2=="H" {
         base=poc; periods++; delete seen
     } else if (!periods || $6!=0) fail("expected an IDR followed by B slices")
     relative=poc-base
-    if (relative<0 || relative>=60 || relative in seen) fail("invalid POC in IDR period")
-    seen[relative]=1; r=role(relative); pictures++; count["pictures\t" r]++
+    if (relative<0 || (!schedule && relative>=60) || relative in seen) fail("invalid POC in IDR period")
+    seen[relative]=1; r=role(schedule ? original_rel[order] : relative); pictures++; count["pictures\t" r]++
     next
 }
 $1=="V" && ($2=="C" || $2=="N") {

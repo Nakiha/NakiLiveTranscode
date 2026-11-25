@@ -171,9 +171,9 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
     }
     if(c.codec_trace&&(!c.encoder_max_future_frames||!vvc)) {bad(error,cap,"codec_trace requires direct live VVenC with future guard; native HEVC input is checked on open");goto end;}
     if(c.constrained_crf) {
-        if(!vvc||(c.encoder_parallel_frames ? c.policy.intra!=0 : c.policy.intra!=NAKI_INTRA_SOURCE)||!c.encoder_max_future_frames||!c.output_fps||yyjson_obj_get(root,"qp")||yyjson_obj_get(root,"bitrate")||
+        if(!vvc||(!c.encoder_parallel_frames && c.policy.intra!=NAKI_INTRA_SOURCE)||!c.encoder_max_future_frames||!c.output_fps||yyjson_obj_get(root,"qp")||yyjson_obj_get(root,"bitrate")||
             (!c.maxrate&&!c.source_rate_limit)||(c.source_rate_limit&&!c.network_trace)) {
-            bad(error,cap,c.encoder_parallel_frames?"R28 requires periodic IDR and crf/maxrate":"constrained_crf requires follow_source, live VVenC, output_fps, future guard and maxrate and/or traced source_rate_limit; use crf, not qp/bitrate");goto end;
+            bad(error,cap,c.encoder_parallel_frames?"parallel live VVenC requires crf/maxrate, output_fps and the future guard":"constrained_crf requires follow_source, live VVenC, output_fps, future guard and maxrate and/or traced source_rate_limit; use crf, not qp/bitrate");goto end;
         }
         c.bitrate=0;
     } else if(yyjson_obj_get(root,"crf")||c.source_rate_limit) {bad(error,cap,"crf/source_rate_limit require constrained_crf");goto end;}

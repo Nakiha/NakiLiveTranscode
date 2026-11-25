@@ -94,6 +94,9 @@ int pipeline_receive_encoded(Pipeline *p) {
         if(mapped->intra_reason) {
             size_t size=0; const uint8_t *stats=av_packet_get_side_data(packet,AV_PKT_DATA_QUALITY_STATS,&size);
             if(size<5 || stats[4]!=AV_PICTURE_TYPE_I) {p->stage="encoder did not confirm requested I picture"; ret=AVERROR_INVALIDDATA; break;}
+            if(naki_job_config(p->job)->encoder_parallel_frames && !(packet->flags&AV_PKT_FLAG_KEY)) {
+                p->stage="parallel VVenC did not confirm requested IDR"; ret=AVERROR_INVALIDDATA; break;
+            }
             naki_job_count(p->job,NAKI_COUNT_INTRA_CONFIRMED,1);
         }
         if(p->hooks.video_packet) {
