@@ -1,0 +1,527 @@
+{
+  "schema": 1,
+  "date": "2026-11-25",
+  "format": {
+    "width": 540,
+    "height": 960,
+    "fps": 30,
+    "pixel_format": "yuv420p",
+    "bytes_per_frame": 777600
+  },
+  "paths": {
+    "source_root": "/var/tmp",
+    "evidence_root": "/mnt/d/Code/ffmpeg_live/out"
+  },
+  "r28": {
+    "commit": "9b7bddb244b8e539164c52b68a8166e67ae9693a",
+    "sdk_sha256": "6dafc2e04148b05ce7510ab0d9f563302eb53e117fb849766ce4f31fc0bc95fa"
+  },
+  "candidates": {
+    "quality": {
+      "tag": "patch-stage-duel",
+      "commit": "39603f9a8ec68c20779d16ef1e86290ec92bd51e",
+      "panel": "vvenc-r34-inter-search-20261125-01/bi-panel/patch-stage-duel/panel-quality.json",
+      "sdk_sha256": "d1190a17e6ba55bed46d7d80ef4c4e1628b76b2c0c962e05e8a54685689b3680"
+    },
+    "live": {
+      "tag": "joint-residual",
+      "commit": "e448ab091f85fbbb17719e6e3706e6a4adafc405",
+      "panel": "vvenc-r34-inter-search-20261125-01/bi-panel/joint-residual/panel-live.json",
+      "sdk_sha256": "c62a403e2e434c28837f9a6a994607c7ca9d083095a55f79d9a0d6d58d4a09a0"
+    }
+  },
+  "profiles_by_sha256": {
+    "4acf3b94000a9e67c5bdae10b6e4ff20a9a093f297dee8f059f45efbdda849ee": "vvenc-r34-inter-search-20261125-01/closed-2125900-0.0/live-11-p4-joint-residual-0/profile.cfg",
+    "5b0d8ad7532feab21adc5b529fa88ec7d3cbbb227eed315d384e4830c5de1697": "vvenc-r34-inter-search-20261125-01/closed-2125900-0.0/quality-11-p8-patch-stage-duel-0/profile.cfg",
+    "5d2f03799c9618e1c3d5ade75c42a7652d65cf9a86045f619e3dc81a8cdb05ea": "vvenc-r34-inter-search-20261125-01/closed-2125900-0.0/live-11-p8-joint-residual-0/profile.cfg",
+    "a56468bbeeba841b45851933f7e6f4c16f0a9d717a9073b30109265f38e834e2": "vvenc-r30-search-budget-20261125-01/round3-matched/quality-ch01-p4-R28-0/profile.cfg",
+    "a5860c95f1c1e1f42d886b952a217d0843e11ef856425761084c070eb6e3e468": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-11-p8-R28-0/profile.cfg",
+    "df580eaacfcd6745af515d15dedef0c64fe1bf5da9df75e9246042e5534df039": "vvenc-r34-inter-search-20261125-01/common-rate-1320000-0.00390625/live-ch14-p4-R28-0/profile.cfg"
+  },
+  "sources": [
+    {
+      "id": "05C",
+      "frames": 300,
+      "path": "vvenc-r28-qt-holdout-20261124-01/05C.yuv",
+      "sha256": "5ea37227b9fe36e873592103516d9fef40d0d50c9b87b45dce828ebeb1b97bc2"
+    },
+    {
+      "id": "10",
+      "frames": 300,
+      "path": "vvenc-r28-qt-holdout-20261124-01/10.yuv",
+      "sha256": "a65167eeb5d25f1b5463945df69a147d5dbb5539d9dcf9f309f807deb9ed3998"
+    },
+    {
+      "id": "11",
+      "frames": 300,
+      "path": "vvenc-r25-20261124-01/inputs/11.yuv",
+      "sha256": "91aabea8086f9917e2bba254aa6a3ec5bf368a415336ffe68c8860ad5eb0e8b2"
+    },
+    {
+      "id": "13",
+      "frames": 300,
+      "path": "vvenc-r25-20261124-01/inputs/13.yuv",
+      "sha256": "b2231ef8f28ad3ba995a09123838b4081aa56378ea0fa45e154e062c98ebdc06"
+    },
+    {
+      "id": "900s-100",
+      "frames": 300,
+      "path": "vvenc-r28-qt-holdout-20261124-01/900s-100.yuv",
+      "sha256": "f127a0b23c6ee1410eea1d0494ceba4a11d461e994c530c56b378325eb82f795"
+    },
+    {
+      "id": "S4-100",
+      "frames": 120,
+      "path": "vvenc-r25-20261124-01/inputs/S4-100.yuv",
+      "sha256": "a51bb4fbf5b98ef6580ac82a1a4911a14a9b50bfb83f1ce46c36866a2a7f83b1"
+    },
+    {
+      "id": "ch01",
+      "frames": 87,
+      "path": "vvenc-q26-pull-forensics-20261123-01/benchset/01/source.yuv",
+      "sha256": "6f508c4dddee55e22b2cb7f286c5be2f9f518643e69885201e593182e0ba5020"
+    },
+    {
+      "id": "ch09",
+      "frames": 135,
+      "path": "vvenc-q26-pull-forensics-20261123-01/benchset/09/source.yuv",
+      "sha256": "775d17d8e32c22be3fa775d84c5951b325dfed2c134f944fc8a3827a34763643"
+    },
+    {
+      "id": "ch14",
+      "frames": 54,
+      "path": "vvenc-q26-pull-forensics-20261123-01/benchset/14/source.yuv",
+      "sha256": "bbb4d3ca1073c253035d691bd2d98eb7c6f1648313194e9a279c9883731cdef1"
+    },
+    {
+      "id": "finger",
+      "frames": 60,
+      "path": "vvenc-r28-motion-geometry-20261124-01/intranet/source-area.i420",
+      "sha256": "9a338b72324c21d4fea17f92d423874614e8994fa8615fb9624ea62d0331f4fd"
+    },
+    {
+      "id": "game12-100",
+      "frames": 300,
+      "path": "vvenc-r28-qt-holdout-20261124-01/game12-100.yuv",
+      "sha256": "f7f6ac9e44d6d21bc05da5b52a44a3475964ce59b67baf8210764d0312800f39"
+    }
+  ],
+  "cases": [
+    {
+      "source": "05C",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-05C-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-picture-spread-blend-price/public-feedback/quality-05C-p4-R28-0/video.266",
+          "sha256": "ae23eec390b54f7abe84629ae15dafbbc4a6c21be4f89f9689e76e8f6726f086",
+          "bytes": 1113124
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1113500-0.1456/quality-05C-p4-patch-stage-duel-0/video.266",
+          "sha256": "d3555193262ca36181c798d4b68a6bc69e47a8f21636136382e634b52922edc2",
+          "bytes": 1118046
+        },
+        "rate_delta_pct": 0.442179
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-05C-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-05C-p4-R28-0/video.266",
+          "sha256": "47fb4e6396c710e11dd8d4701dd8c7544f1f96941168ac4b217e34fed8be7713",
+          "bytes": 1106682
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1120200-0.0/live-05C-p4-joint-residual-0/video.266",
+          "sha256": "4be732d4d26cbacf6e4f376d88fd14249ce4c71ca8764186dc8a582c69815f57",
+          "bytes": 1110191
+        },
+        "rate_delta_pct": 0.317074
+      }
+    },
+    {
+      "source": "10",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-10-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-motion-regular-guard/public-feedback/quality-10-p4-R28-0/video.266",
+          "sha256": "c710c5e24259a375348a3cf196ba048b26799daa377a1e0235827485faafe851",
+          "bytes": 2397753
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2256000-0.0/quality-10-p4-patch-stage-duel-0/video.266",
+          "sha256": "bccb4bc15f8a3cef681823b566c582e83700b9916fc5b2106850cfc96aed939c",
+          "bytes": 2400343
+        },
+        "rate_delta_pct": 0.108018
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-10-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-10-p4-R28-0/video.266",
+          "sha256": "d59209a7399175e42c8490ff6597dc23e00816400bde5be57360352e87bb4cdb",
+          "bytes": 2392069
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2244050-0.0/live-10-p4-joint-residual-0/video.266",
+          "sha256": "517e2b444f0379cdcba28414f127bda59a02d4cfd7348ec460bbcf6f8843752c",
+          "bytes": 2383087
+        },
+        "rate_delta_pct": -0.375491
+      }
+    },
+    {
+      "source": "11",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-11-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-anchor-color/public-feedback/quality-11-p4-R28-0/video.266",
+          "sha256": "b1845bd64038eb4cd34f5f840c5b9a6ec33845ca77baa8094f3abd9e21f9fcdc",
+          "bytes": 2401766
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2125900-0.0/quality-11-p4-patch-stage-duel-0/video.266",
+          "sha256": "bccb77e91cb71d4b11374d45b25e38052d4029fcc36b5314a4c0423ddd4c3b05",
+          "bytes": 2404517
+        },
+        "rate_delta_pct": 0.114541
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-11-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-11-p4-R28-0/video.266",
+          "sha256": "f4f24e65ead58a71fdccb955cb8971367aff33b0c9338852eb302b4c45a171ab",
+          "bytes": 2400788
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2125900-0.0/live-11-p4-joint-residual-0/video.266",
+          "sha256": "8603e7a47edb08edc037067ad1e68da56965c3c3c674951fc66a30bf8ea9dd45",
+          "bytes": 2403055
+        },
+        "rate_delta_pct": 0.094427
+      }
+    },
+    {
+      "source": "11",
+      "max_parallel_frames": 8,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-11-p8/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-anchor-color/public-feedback/quality-11-p8-R28-0/video.266",
+          "sha256": "904ff6a9c4a70e2af25c4d3bcd7f04fed2e1e62ca2c0e77fbd353c0440650b1d",
+          "bytes": 2403012
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2125900-0.0/quality-11-p8-patch-stage-duel-0/video.266",
+          "sha256": "37d8a7559e8d350d3f2015e599359354138c39fe7f36c4fc42d27033f5261f1a",
+          "bytes": 2406304
+        },
+        "rate_delta_pct": 0.136995
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-11-p8/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-11-p8-R28-0/video.266",
+          "sha256": "7de2ad625406f7a93ff4de77a42e305ea49eb91eaec349ebde5f18183b21f259",
+          "bytes": 2401891
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2125900-0.0/live-11-p8-joint-residual-0/video.266",
+          "sha256": "9ca71c0c9fb2a3211984887fb8ecb9fcd10cfe2a19a827c388968d8f646987c1",
+          "bytes": 2405618
+        },
+        "rate_delta_pct": 0.155169
+      }
+    },
+    {
+      "source": "13",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-13-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-branch-both/public-feedback-rate-fit/quality-13-p4-R28-0-+0.3750/video.266",
+          "sha256": "8f6c6b96fd662fc7c0bf441acfb1263e02635c9132acda3855f69b5244448eab",
+          "bytes": 1675908
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2082500-0.5206/quality-13-p4-patch-stage-duel-0/video.266",
+          "sha256": "49ba2624af9e32548e946286b236c4ffde9b73843bdefbc7d4bda4f4c9886421",
+          "bytes": 1672810
+        },
+        "rate_delta_pct": -0.184855
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-13-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-13-p4-R28-0/video.266",
+          "sha256": "33dceb5632a26ad091fbe5f52cb12db072cdc01b12333bc96cef6f00fff2d868",
+          "bytes": 1687187
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1976930-0.125/live-13-p4-joint-residual-0/video.266",
+          "sha256": "05fbec77685b867e8780e908cac250590627de702b42f3447619f86f50cdd799",
+          "bytes": 1681229
+        },
+        "rate_delta_pct": -0.353132
+      }
+    },
+    {
+      "source": "13",
+      "max_parallel_frames": 8,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-13-p8/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-branch-both/public-feedback-rate-fit/quality-13-p8-R28-0-+0.3750/video.266",
+          "sha256": "8f6c6b96fd662fc7c0bf441acfb1263e02635c9132acda3855f69b5244448eab",
+          "bytes": 1675908
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2082500-0.5119/quality-13-p8-patch-stage-duel-0/video.266",
+          "sha256": "11114114c69efd87f01a7a9a232cdc6aa703d90cbce5e377a25b25483c84ef83",
+          "bytes": 1672926
+        },
+        "rate_delta_pct": -0.177933
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-13-p8/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-13-p8-R28-0/video.266",
+          "sha256": "33dceb5632a26ad091fbe5f52cb12db072cdc01b12333bc96cef6f00fff2d868",
+          "bytes": 1687187
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1976930-0.125/live-13-p8-joint-residual-0/video.266",
+          "sha256": "b9f45f469f6d8a8858a32f796540738c4b38dc5698076e4d9e6a38813ff2bec9",
+          "bytes": 1681880
+        },
+        "rate_delta_pct": -0.314547
+      }
+    },
+    {
+      "source": "900s-100",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-900s-100-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-balanced-anchor/public-feedback/quality-900s-100-p4-R28-0/video.266",
+          "sha256": "e306b56f0e81ddb42d99c94f73fbb624cad34d3c586cc84679884db565f979fb",
+          "bytes": 1374913
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1996400--0.1875/quality-900s-100-p4-patch-stage-duel-0/video.266",
+          "sha256": "edb9ce3b346348fe605923da585770fa341ca3a2f86d5f6cc268a70b122a9afb",
+          "bytes": 1373707
+        },
+        "rate_delta_pct": -0.087715
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-900s-100-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-900s-100-p4-R28-0/video.266",
+          "sha256": "691d542ddaeb02a39aece5d01fe919a80377f42d34c6826f8cb584d63615427d",
+          "bytes": 1305851
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-2014000-0.1763/live-900s-100-p4-joint-residual-0/video.266",
+          "sha256": "f5b85c7c804fbf8f43d952d8a875e230ae4189c8e288dec3e9249352349fbd3b",
+          "bytes": 1309015
+        },
+        "rate_delta_pct": 0.242294
+      }
+    },
+    {
+      "source": "S4-100",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/bi-panel/patch-stage-duel/rate-matches/quality-S4-100-p4/score.json",
+        "r28": {
+          "path": "vvenc-r34-inter-search-20261125-01/color-common-839124-0.21875/quality-S4-100-p4-R28-0/video.266",
+          "sha256": "92d29c8f8f3efa5e86411f6e15fc5e089bf36b7a1f8d367ba445d943ef601837",
+          "bytes": 336543
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-839124-0.1875/quality-S4-100-p4-patch-stage-duel-0/video.266",
+          "sha256": "2fb34addf072a4174a7cc0369abf37507a4ab7e7fd59a7da74b99b45fd978430",
+          "bytes": 337668
+        },
+        "rate_delta_pct": 0.334281
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-S4-100-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-S4-100-p4-R28-0/video.266",
+          "sha256": "4692466eadae4c40f57a5608ab1ecacd33dbbc27552c7569ed3408bd0b43a0ab",
+          "bytes": 354926
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-754300-0.125/live-S4-100-p4-joint-residual-0/video.266",
+          "sha256": "4037e10f0b29eeef14939de1bfba38b62d775c8c4e6f4b86e1043ab7569f0fce",
+          "bytes": 355688
+        },
+        "rate_delta_pct": 0.214693
+      }
+    },
+    {
+      "source": "ch01",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-ch01-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/round3-matched/quality-ch01-p4-R28-0/video.266",
+          "sha256": "40c9c4d6ef4ced7dcef1681639d75a372586c06260ed50433ca3a868a3a0b836",
+          "bytes": 406150
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1500000-0.0/quality-ch01-p4-patch-stage-duel-0/video.266",
+          "sha256": "b595dd9bdb95a7914825d1a9370bcb88281f90d07e7160e2a0ea87115afdc1a9",
+          "bytes": 407657
+        },
+        "rate_delta_pct": 0.371045
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-ch01-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-ch01-p4-R28-0/video.266",
+          "sha256": "3055ad01df9acf5be385ef4da6c33b9be94afa2ca5431f1534d9ce8db3984b0f",
+          "bytes": 443927
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1500000-0.0/live-ch01-p4-joint-residual-0/video.266",
+          "sha256": "049f723677b4c956593370fdb9a82b2e33640c660a2a6dc99a5372b22cbfa95f",
+          "bytes": 444817
+        },
+        "rate_delta_pct": 0.200483
+      }
+    },
+    {
+      "source": "ch09",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-ch09-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-anchor-color/public-feedback/quality-ch09-p4-R28-0/video.266",
+          "sha256": "74fa975da1da4f9f95ecff41dc8f70d7e56d2618d8d4edbfee7b626c10d7cc5b",
+          "bytes": 783945
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1500000-0.0/quality-ch09-p4-patch-stage-duel-0/video.266",
+          "sha256": "4ebe299d9b2bed00b01f9c51b627f361f1eef00031408ca846d5a92c01c25085",
+          "bytes": 785696
+        },
+        "rate_delta_pct": 0.223358
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-ch09-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-ch09-p4-R28-0/video.266",
+          "sha256": "1fd63d995415466a7e401947ebdc30b00dcbf1ff698f538f40c8c71210e47ee6",
+          "bytes": 783120
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1500000-0.0/live-ch09-p4-joint-residual-0/video.266",
+          "sha256": "d9c763deb1a632380a2e44e94f10af09534d875cf0ad7afd447c5b6f5b8db0b1",
+          "bytes": 785540
+        },
+        "rate_delta_pct": 0.30902
+      }
+    },
+    {
+      "source": "ch14",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-ch14-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-balanced-anchor/public-feedback-rate-fit/quality-ch14-p4-R28-0--0.0200/video.266",
+          "sha256": "8fbb5667d9fcc94e5d63f6e7b45e44ca7680f722344dc93c5ffcf2b4655aca2d",
+          "bytes": 132720
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1500000--0.296875/quality-ch14-p4-patch-stage-duel-0/video.266",
+          "sha256": "f089041ad4644c262810298de3a056ad6ac2ab69836a1c7d6b63f1ea3a0465f8",
+          "bytes": 133377
+        },
+        "rate_delta_pct": 0.495027
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/bi-panel/joint-residual/rate-matches/live-ch14-p4/score.json",
+        "r28": {
+          "path": "vvenc-r34-inter-search-20261125-01/common-rate-1320000-0.00390625/live-ch14-p4-R28-0/video.266",
+          "sha256": "c85aa120327f8e9af6f49589423764bbc21a61ea6dc9c00f4f746a1df118c737",
+          "bytes": 108145
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/common-rate-1320000-0.99902344/live-ch14-p4-joint-residual-0/video.266",
+          "sha256": "20bd7c6aa8cdbf33e85617aad7b0db0058779788d7750292b9637064cdb579fe",
+          "bytes": 108550
+        },
+        "rate_delta_pct": 0.374497
+      }
+    },
+    {
+      "source": "finger",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/bi-panel/patch-stage-duel/rate-matches/quality-finger-p4/score.json",
+        "r28": {
+          "path": "vvenc-r34-inter-search-20261125-01/bi-panel-rate-1500000--0.09375/quality-finger-p4-R28-0/video.266",
+          "sha256": "2065cb15c4445a254158a56a3774d46a687c2df0a5abb4a6996a0f637580918d",
+          "bytes": 316998
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1500000--0.890625/quality-finger-p4-patch-stage-duel-0/video.266",
+          "sha256": "baa6edc28f21276b426351a2d7e4c27a51f865789519e510107879cef9d3aea1",
+          "bytes": 316374
+        },
+        "rate_delta_pct": -0.196847
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-finger-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-finger-p4-R28-0/video.266",
+          "sha256": "4dd386ad4486cad0c50fc6dc03e49f5d3ad4810cf1c218fe33fa49c15a1838ac",
+          "bytes": 319576
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1500000-0.0/live-finger-p4-joint-residual-0/video.266",
+          "sha256": "38259978e6b978b08798b5e17b6b56155643de86bbb976ca5c2a49796d1911ab",
+          "bytes": 319171
+        },
+        "rate_delta_pct": -0.12673
+      }
+    },
+    {
+      "source": "game12-100",
+      "max_parallel_frames": 4,
+      "quality": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/patch-stage-duel/quality-game12-100-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-protected-credit/public-feedback/quality-game12-100-p4-R28-0/video.266",
+          "sha256": "93ff06c0a1131cd9f38b31fdbb7df9ec7e9f6dafe56fb793fd0590ce0c041cd0",
+          "bytes": 1349911
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1270000-0.0/quality-game12-100-p4-patch-stage-duel-0/video.266",
+          "sha256": "02b5e02a0d2d7430356097add37e60fca98b78c1d643ae5a68e78bcdb7791903",
+          "bytes": 1352717
+        },
+        "rate_delta_pct": 0.207866
+      },
+      "live": {
+        "score": "vvenc-r34-inter-search-20261125-01/pictures/joint-residual/live-game12-100-p4/score.json",
+        "r28": {
+          "path": "vvenc-r30-search-budget-20261125-01/release-tier-ordered-fine-budget/public-feedback/live-game12-100-p4-R28-0/video.266",
+          "sha256": "68a6109571f10d9309ecf0fc98e2288c608a001a5112c7a341521fc8560220ab",
+          "bytes": 1346461
+        },
+        "candidate": {
+          "path": "vvenc-r34-inter-search-20261125-01/closed-1270000-0.4375/live-game12-100-p4-joint-residual-0/video.266",
+          "sha256": "86314071007ae67a4df298e5485883932894cfe2cb3009fcf193fd2a98605421",
+          "bytes": 1353062
+        },
+        "rate_delta_pct": 0.490248
+      }
+    }
+  ]
+}

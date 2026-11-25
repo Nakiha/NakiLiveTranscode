@@ -28,6 +28,8 @@
 
 ## 当前验证与历史证据
 
+[VVenC 画质验收交接](vvenc-quality-handoff.md)列出 R28 对照、R34 Live / Quality 门禁片单、同码率判据、手指与偏色的复核方法，以及本机证据和解码缓存的位置。
+
 目录整理的原窗口见[目录整理验证](validation-organization.md)，当前所有权与生命周期证据见[收口验证](validation-architecture-completion-20261029.md)。功能入口见[测试说明](testing.md)，独立测量见[性能入口](benchmarking.md)。
 
 [RTMP CQF 1080p60→540p30实测](validation-rtmp-cqf-20261018.md)记录原生CQF、显式整数降帧与源I/3B核验，以及2/4线程完整素材性能和相关回归；本机两种线程配置均未达到实时30fps。
