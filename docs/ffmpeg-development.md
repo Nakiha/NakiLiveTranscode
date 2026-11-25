@@ -14,7 +14,7 @@ bash scripts/build-service.sh
 
 该入口默认调用 `build-ffmpeg.sh`，从本地子模块源码编译，再编译 C 服务；并不自动下载或使用 CI SDK。依赖源码内容改变时先清理对应组件的对象，避免旧 mtime 使 Make/CMake 复用旧代码；应用自身仍按通常方式增量构建。修改 configure 配方后会重新配置。原有异步/网络 API 均保留在 fork 中，可以继续修改。
 
-默认缓存是 `${XDG_CACHE_HOME:-$HOME/.cache}/naki-live-transcode-n9`，和原 7.0.3 的缓存分开，避免混用不同 ABI 的库。可设置 `NAKI_BUILD_ROOT` 选择独立前缀；Docker 内仍固定 `/opt/naki-build`。更改编译器、主版本或需要完全独立的实验时，选择新的构建根目录。输出程序在 `out/bin`，冻结媒体/历史报告不覆盖。
+默认缓存是 `${XDG_CACHE_HOME:-$HOME/.cache}/naki-live-transcode-n9`。切换架构、编译器或主版本时，使用新的 `NAKI_BUILD_ROOT`（如 `export NAKI_BUILD_ROOT="$HOME/.cache/naki-$(uname -m)"`）；Docker 内仍固定 `/opt/naki-build`。输出程序在 `out/bin`，冻结媒体/历史报告不覆盖。
 
 完整本地镜像构建仍为：
 
@@ -37,7 +37,7 @@ FFmpeg 仍保留独立 Git 历史，不能只提交父仓库：
 
 ## 本地 SDK 来源与复用检查
 
-默认构建先对依赖源码及构建配方取内容摘要，成功安装后记录 schema 2 的 `install/share/naki/ffmpeg-build.json`：源码摘要、配方、工具版本、成功构建的组件内容键及安装头文件/库的 SHA256。编译期间源码改变、组件构建凭据缺失或失配都会拒绝封存。这里不读取 VVenC 的 Git 元数据，也不声称不同工具链能生成逐字相同的库。
+默认构建先对依赖源码及配方取内容摘要，成功安装后记录 schema 3 的 `install/share/naki/ffmpeg-build.json`：目标架构、源码摘要、配方、工具版本、组件内容键及安装头文件/库的 SHA256。源码摘要可跨架构比较，配置键、组件键与发行依赖键则区分 amd64 / arm64。服务消费 SDK 前校验共享库实际 ELF 架构。旧 schema 2 缓存需重新构建。ARM64 的 VVenC 使用原生 Arm SIMD；复用 SSE 运算的内核（含 8-bit SAD）用库内的 SIMDe 编译为 ARM 指令。
 
 `NAKI_SKIP_FFMPEG=1` 现在必须有匹配清单；安装产物变动、源码/配方改变、来源清单缺失都会明确拒绝。旧缓存需要先运行一次默认构建；不会自动下载或替换 SDK。只有两份依赖源码都缺省的容器应用阶段才按导入 SDK 清单验证其字节，不能拿半份源码绕过核对。
 

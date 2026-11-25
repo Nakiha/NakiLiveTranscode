@@ -1,6 +1,6 @@
 # Linux 构建、镜像和符号归档
 
-目前只构建、测试 **Linux amd64**。Windows 可通过 WSL 使用构建和解析脚本；尚未验证 ARM64 镜像。
+发行、符号归档与全量镜像 CI 目前针对 **Linux amd64**。独立的 `arm64.yml` 在 `ubuntu-24.04-arm` 原生构建 FFmpeg、VVenC 和服务，跑 quick 与 service/vvenc 集成套件。若固定的子模块属于另一个私有仓库，需为该工作流配置可读主仓库及子模块的 `SUBMODULE_READ_TOKEN`。该检查不发布 ARM64 SDK 或镜像。
 
 本页描述仓库配置的流程，远程 Actions、镜像和发布是否通过须核对相应提交的检查和产物。五批本机窗口见[核心整理验证](validation-core-refactor.md)，最新源码复查见[合并前复查](validation-final-review.md)。sanitizer 清单也包含单/多输出的 86 场景生命周期矩阵，见[测试入口](testing.md)。
 
@@ -51,6 +51,7 @@ docker compose up -d --no-build transcode
 mkdir -p out
 gh release download <ffmpeg-sdk-release-tag> -p 'ffmpeg-sdk.tar.gz*' -D out
 sha256sum -c out/ffmpeg-sdk.tar.gz.sha256
+python3 scripts/sdk-expected.py generate --arch amd64 --output out/expected-sdk.json
 docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt -t naki-live-transcode:local .
 docker build --build-arg FFMPEG_STAGE=ffmpeg-prebuilt --target symbols \
   --output type=local,dest=out/symbols .

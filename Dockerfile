@@ -7,24 +7,29 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 ENV NAKI_BUILD_ROOT=/opt/naki-build
-FROM toolchain AS ffmpeg-local
-COPY scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/archive-symbols.py scripts/sdk-identity.py scripts/
-COPY Dockerfile.ffmpeg ./
+FROM toolchain AS consumer-ffmpeg-local
 COPY third_party/vvenc/ third_party/vvenc/
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/ experiments/decoder-20261016/ffmpeg-7.0.3/
+FROM consumer-ffmpeg-local AS ffmpeg-local
+COPY scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/archive-symbols.py scripts/sdk-identity.py scripts/
+COPY Dockerfile.ffmpeg ./
 RUN NAKI_VVENC_SYMBOLS=/opt/naki-build/vvenc-symbols bash scripts/build-ffmpeg.sh && python3 scripts/archive-symbols.py \
     --output /opt/naki-build/ffmpeg-symbols --label ffmpeg-local /opt/naki-build/ffmpeg/lib*/*.so.*
 FROM scratch AS ffmpeg-prebuilt
 # Extract inside Linux so Windows clients do not have to transmit Linux symlinks.
 ADD out/ffmpeg-sdk.tar.gz /opt/naki-build/
 FROM ${FFMPEG_STAGE} AS ffmpeg
-FROM toolchain AS build
+# A native source build verifies against both checkout trees. Only importing
+# an SDK without its sources requires the independent host-generated manifest.
+FROM toolchain AS consumer-ffmpeg-prebuilt
+COPY out/expected-sdk.json /src/expected-sdk.json
+ENV NAKI_EXPECTED_SDK_MANIFEST=/src/expected-sdk.json
+FROM consumer-${FFMPEG_STAGE} AS build
 COPY --from=ffmpeg /opt/naki-build/install/ /opt/naki-build/install/
 COPY --from=ffmpeg /opt/naki-build/ffmpeg-symbols/ /symbols/ffmpeg/
 COPY --from=ffmpeg /opt/naki-build/vvenc-symbols/ /symbols/vvenc/
 COPY scripts/build-service.sh scripts/archive-symbols.py scripts/sdk-identity.py scripts/sdk-expected.py scripts/build-ffmpeg.sh scripts/build-vvenc.sh scripts/
 COPY Dockerfile.ffmpeg ./
-COPY out/expected-sdk.json /src/expected-sdk.json
 COPY CMakeLists.txt ./
 COPY app/ app/
 COPY third_party/yyjson/src/ third_party/yyjson/src/
@@ -35,11 +40,13 @@ COPY tests/support/ tests/support/
 # third_party/vvenc tree into the source-less SDK consumer identity gate.
 COPY third_party/vvenc/source/Lib/CommonLib/Native8.h tests/vvenc-native8/Native8.h
 COPY third_party/vvenc/source/Lib/CommonLib/x86/Native8X86.h tests/vvenc-native8/x86/Native8X86.h
-ENV NAKI_VVENC_NATIVE8_SOURCE=/src/tests/vvenc-native8
+COPY third_party/vvenc/thirdparty/simde/ tests/vvenc-simde/simde/
+ENV NAKI_VVENC_NATIVE8_SOURCE=/src/tests/vvenc-native8 \
+    NAKI_VVENC_SIMDE_INCLUDE=/src/tests/vvenc-simde
 ARG NAKI_MEDIA_HOOK_SOURCE=
 ARG DEPENDENCY_KEY=
-RUN NAKI_SKIP_FFMPEG=1 NAKI_EXPECTED_SDK_MANIFEST=/src/expected-sdk.json \
-    NAKI_EXPECTED_DEPENDENCY_KEY="$DEPENDENCY_KEY" NAKI_MEDIA_HOOK_SOURCE="$NAKI_MEDIA_HOOK_SOURCE" bash scripts/build-service.sh
+RUN NAKI_SKIP_FFMPEG=1 NAKI_EXPECTED_DEPENDENCY_KEY="$DEPENDENCY_KEY" \
+    NAKI_MEDIA_HOOK_SOURCE="$NAKI_MEDIA_HOOK_SOURCE" bash scripts/build-service.sh
 ARG SOURCE_REVISION=unknown
 RUN python3 scripts/archive-symbols.py --output /symbols/app --label application \
     --source-revision "$SOURCE_REVISION" --dependency-key "$DEPENDENCY_KEY" out/bin \
@@ -57,8 +64,7 @@ COPY Dockerfile compose.yaml ./
 COPY .github/ .github/
 # Keep probe-only fixtures outside the native source directories. A partial
 # FFmpeg tree must not accidentally become a source-less SDK consumer input.
-ENV NAKI_DECODER_PROBE_SOURCE=/src/tests/decoder-probes \
-    NAKI_EXPECTED_SDK_MANIFEST=/src/expected-sdk.json
+ENV NAKI_DECODER_PROBE_SOURCE=/src/tests/decoder-probes
 COPY experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/async_probe.c \
      experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_probe.c \
      experiments/decoder-20261016/ffmpeg-7.0.3/tools/live-async/auto_lifetime_test.c \

@@ -1,6 +1,7 @@
 // Storage lifecycle, signed residual precision, and exact SIMD SAD at guard pages.
 #include "Native8.h"
-#if defined(__SSE2__)
+#if defined(__SSE2__) || defined(__aarch64__)
+#define NAKI_TEST_SAD_SIMD
 #include "x86/Native8X86.h"
 #endif
 #include <cassert>
@@ -41,7 +42,7 @@ int main() {
     }
     expected<<=shift;
     assert(sad8Scalar(x.data(),stride,y.data(),stride,width,height,shift)==expected);
-#if defined(__SSE2__)
+#ifdef NAKI_TEST_SAD_SIMD
     assert(sad8X86<false>(x.data(),stride,y.data(),stride,width,height,shift)==expected);
 #ifdef USE_AVX2
     assert(sad8X86<true>(x.data(),stride,y.data(),stride,width,height,shift)==expected);
@@ -50,7 +51,7 @@ int main() {
     for(uint64_t bound:{uint64_t(0),expected/2,expected}) {
       auto valid=[&](uint64_t cost){assert(cost<=expected);assert(expected<=bound?cost==expected:cost>bound);};
       valid(sad8Scalar(x.data(),stride,y.data(),stride,width,height,shift,bound));
-#if defined(__SSE2__)
+#ifdef NAKI_TEST_SAD_SIMD
       valid(sad8X86<false>(x.data(),stride,y.data(),stride,width,height,shift,bound));
 #ifdef USE_AVX2
       valid(sad8X86<true>(x.data(),stride,y.data(),stride,width,height,shift,bound));
@@ -59,7 +60,8 @@ int main() {
     }
     if(height==1&&!shift) {
       std::copy_n(x.data(),width,a+page-width);std::copy_n(y.data(),width,b+page-width);
-#if defined(__SSE2__)
+      assert(sad8Scalar(a+page-width,width,b+page-width,width,width,1,0)==expected);
+#ifdef NAKI_TEST_SAD_SIMD
       assert(sad8X86<false>(a+page-width,width,b+page-width,width,width,1,0)==expected);
 #ifdef USE_AVX2
       assert(sad8X86<true>(a+page-width,width,b+page-width,width,width,1,0)==expected);
@@ -68,5 +70,5 @@ int main() {
     }
   }
   assert(!munmap(a,page*2)&&!munmap(b,page*2));
-  puts("PASS byte reference lifecycle/margins, signed residuals, scalar/SIMD SAD and guard pages");
+  puts("PASS byte reference lifecycle/margins, signed residuals, byte SAD and guard pages");
 }

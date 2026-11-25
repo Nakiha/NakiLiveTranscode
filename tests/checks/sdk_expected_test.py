@@ -118,7 +118,9 @@ class ConsumerExpectationTest(unittest.TestCase):
             gate.verify(self.consumer, self.prefix, self.expected_path)
 
     def test_expected_platform_and_duplicate_keys_rejected(self):
-        value = dict(self.expected, target=dict(gate.TARGET, architecture='aarch64'))
+        other = 'arm64' if sdk.architecture() == 'x86_64' else 'amd64'
+        value = gate.expected(self.checkout, pins=self.expected['pins'], arch=other)
+        self.assertNotEqual(value['dependency_key'], self.expected['dependency_key'])
         sdk.atomic_json(self.expected_path, value)
         with self.assertRaisesRegex(ValueError, 'platform/schema'):
             gate.verify(self.consumer, self.prefix, self.expected_path)
@@ -127,8 +129,12 @@ class ConsumerExpectationTest(unittest.TestCase):
             gate.verify(self.consumer, self.prefix, self.expected_path)
 
     def test_wrong_elf_architecture_even_with_resealed_artifacts(self):
-        path = self.prefix / 'lib/libavformat.so'
-        data = bytearray(path.read_bytes()); data[18:20] = (183).to_bytes(2, 'little'); path.write_bytes(data)
+        # libavformat matches the consumer, but another installed DSO does not.
+        path = self.prefix / 'lib/libvvenc.so.1'
+        data = bytearray((self.prefix / 'lib/libavformat.so').read_bytes())
+        wrong_machine = 183 if sdk.architecture() == 'x86_64' else 62
+        data[18:20] = wrong_machine.to_bytes(2, 'little')
+        path.write_bytes(data)
         value = json.loads((self.prefix / sdk.MANIFEST).read_text())
         value['artifacts'] = sdk.artifacts(self.prefix)
         sdk.atomic_json(self.prefix / sdk.MANIFEST, value)

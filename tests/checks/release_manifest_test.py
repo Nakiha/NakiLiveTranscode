@@ -29,7 +29,8 @@ class Binding(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):cls.temporary.cleanup()
     def image(self):
-        return [{'Os':'linux','Architecture':'amd64','Id':'sha256:'+'c'*64,'RepoTags':['naki-live-transcode:'+'a'*40+'-123-2'],
+        arch=release.sdk.sdk.OCI_ARCH[release.sdk.sdk.architecture()]
+        return [{'Os':'linux','Architecture':arch,'Id':'sha256:'+'c'*64,'RepoTags':['naki-live-transcode:'+'a'*40+'-123-2'],
             'Config':{'Labels':{'org.opencontainers.image.revision':'a'*40,'io.naki.source-tree':self.source['tree_sha256'],'io.naki.build-run':'123','io.naki.build-attempt':'2'}}}]
     def inspect(self,value):
         path=self.directory/'image.json';path.write_text(json.dumps(value));return release.image_record(path,self.source,'123','2')
@@ -68,7 +69,7 @@ class Binding(unittest.TestCase):
             image=self.image();image[0]['Config']['Labels'][label]='wrong'
             with self.subTest(label=label),self.assertRaisesRegex(ValueError,'labels'):self.inspect(image)
     def test_wrong_platform_and_ambiguous_image_rejected(self):
-        image=self.image();image[0]['Architecture']='arm64'
+        image=self.image();image[0]['Architecture']='arm64' if image[0]['Architecture']=='amd64' else 'amd64'
         with self.assertRaisesRegex(ValueError,'target'):self.inspect(image)
         with self.assertRaisesRegex(ValueError,'one image'):self.inspect(self.image()*2)
     def test_image_sdk_label_must_match_selected_dependency(self):
@@ -78,7 +79,7 @@ class Binding(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'labels'):release.image_record(path,self.source,'123','2','sdk-B')
     def test_manifest_artifact_bytes_cannot_change(self):
         artifact=self.directory/'image.tar.gz';artifact.write_bytes(b'candidate image bytes')
-        manifest={'source':self.source,'modules':[],'sdk':{'identity':'test'},'image':None,'publication_eligible':False,'artifacts':[release.artifact(artifact)]}
+        manifest={'target':release.sdk.target(),'source':self.source,'modules':[],'sdk':{'identity':'test'},'image':None,'publication_eligible':False,'artifacts':[release.artifact(artifact)]}
         prefix=self.directory/'install';sdk_manifest=prefix/release.sdk.sdk.MANIFEST;sdk_manifest.parent.mkdir(parents=True,exist_ok=True);sdk_manifest.write_text('{"identity":"test"}')
         manifest_path=self.directory/'candidate.json';manifest_path.write_text(json.dumps(manifest))
         args=argparse.Namespace(manifest=manifest_path,runtime_bin=None,sdk_prefix=prefix,app_symbols=None,ffmpeg_symbols=None,vvenc_symbols=None,image_inspect=None,artifact_directory=self.directory)
@@ -86,7 +87,7 @@ class Binding(unittest.TestCase):
             release.verify(args);artifact.write_bytes(b'different bytes')
             with self.assertRaisesRegex(ValueError,'artifact bytes'):release.verify(args)
     def test_dirty_or_no_image_cannot_claim_publication(self):
-        manifest={'source':dict(self.source,dirty=True),'modules':[],'sdk':{'identity':'test'},'image':None,'publication_eligible':True,'artifacts':[]}
+        manifest={'target':release.sdk.target(),'source':dict(self.source,dirty=True),'modules':[],'sdk':{'identity':'test'},'image':None,'publication_eligible':True,'artifacts':[]}
         prefix=self.directory/'eligibility-install';path=prefix/release.sdk.sdk.MANIFEST;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('{"identity":"test"}')
         file=self.directory/'eligibility.json';file.write_text(json.dumps(manifest));args=argparse.Namespace(manifest=file,runtime_bin=None,sdk_prefix=prefix,app_symbols=None,ffmpeg_symbols=None,vvenc_symbols=None,image_inspect=None,artifact_directory=None)
         with patch.object(release,'bind_runtime',return_value=[]),self.assertRaisesRegex(ValueError,'eligibility'):release.verify(args)

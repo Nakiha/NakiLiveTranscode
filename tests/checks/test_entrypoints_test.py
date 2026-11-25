@@ -233,7 +233,7 @@ add_test(NAME missing COMMAND /nonexistent/naki-entrypoint-helper)
         # Check the partial build stage, before the later test stage copies all
         # tests. A complete local checkout otherwise masks missing COPY inputs.
         docker = (ROOT / 'Dockerfile').read_text()
-        stage = docker.split('FROM toolchain AS build\n', 1)[1].split('FROM build AS test\n', 1)[0]
+        stage = re.split(r'(?m)^FROM \S+ AS build\n', docker, maxsplit=1)[1].split('FROM build AS test\n', 1)[0]
         available = set()
         for line in stage.splitlines():
             if not line.startswith('COPY ') or line.startswith('COPY --from='):

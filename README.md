@@ -35,10 +35,14 @@ H.264 快出只在满足 HRD/CFR 等排序依据时自动生效，无声明、�
 
 本机证据未覆盖外部可信 HTTPS 水印成功样例（未配置 `NAKI_TEST_HTTPS_URL`）、实际 Docker 镜像/smoke、远程 Actions、真实 Filebeat 采集、目标机器 CPU/RSS/PID/FD 容量与 24/72 小时 soak、迁移回滚和生产验收。镜像和远程流程以对应 PR/提交的检查结果单独确认；最新源码复查见[合并前复查](docs/validation-final-review.md)。核心 native SDK/系统库未重新插桩，没有 TSan；旧版本的镜像/HTTPS 或 n7 性能报告不补齐这些门槛。
 
-## 运行服务（Linux / WSL）
+## 构建与运行（Linux amd64 / arm64）
+
+使用 Ubuntu 24.04（含 WSL）。Apple Silicon Mac 可在 ARM64 Linux 虚拟机内运行下面的命令，或使用原生 `linux/arm64` Docker 镜像。构建产物是 Linux ELF。
 
 ```sh
-sudo apt-get install build-essential cmake pkg-config nasm libx264-dev libsrt-openssl-dev libssl-dev libevent-dev libcurl4-openssl-dev libunwind-dev python3
+sudo apt-get install build-essential cmake pkg-config libx264-dev libsrt-openssl-dev libssl-dev zlib1g-dev libevent-dev libcurl4-openssl-dev libunwind-dev python3
+# FFmpeg 的 x86 汇编需要 NASM；ARM64 不需要。
+if [ "$(uname -m)" = x86_64 ]; then sudo apt-get install nasm; fi
 git submodule update --init --recursive
 bash scripts/build-service.sh
 ./out/bin/naki-live

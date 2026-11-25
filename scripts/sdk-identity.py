@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import pathlib
+import platform
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,20 @@ IGNORED = {".git", ".github", ".forgejo", "doc", "docs", "tools", "tests", "test
            "__pycache__"}
 MANIFEST = pathlib.Path("share/naki/ffmpeg-build.json")
 CACHE_RECEIPT = ".naki-object-keys.json"
+OCI_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
+
+
+def architecture(machine=None):
+    machine = (platform.machine() if machine is None else machine).lower()
+    for arch, oci in OCI_ARCH.items():
+        if machine in (arch, oci):
+            return arch
+    raise ValueError(f"Unsupported Linux SDK architecture: {machine}")
+
+
+def dependency_key(pins, recipes, arch=None):
+    version = f"ubuntu-24.04-linux-{OCI_ARCH[architecture(arch)]}-sdk-v3"
+    return identity({"recipe_version": version, "pins": pins, "recipes": recipes})[:24]
 
 
 def cache_key(build_root, prefix, component):
@@ -33,7 +48,8 @@ def cache_key(build_root, prefix, component):
     try:
         receipt = json.loads((build_root / CACHE_RECEIPT).read_text())
         manifest = json.loads((prefix / MANIFEST).read_text())
-        if receipt != {"identity": manifest["identity"], "object_keys": manifest["object_keys"]}:
+        if (manifest.get("architecture") != architecture() or
+                receipt != {"identity": manifest["identity"], "object_keys": manifest["object_keys"]}):
             return ""
         return receipt["object_keys"][component]
     except (OSError, ValueError, KeyError, TypeError):
@@ -76,15 +92,16 @@ def tree(path):
     return {"sha256": identity(files), "files": len(files)}
 
 
-def sources(root):
+def sources(root, arch=None):
     inputs = {name: tree(root / path) for name, path in DEPENDENCIES.items()}
     recipes = {name: digest(root / name) for name in RECIPES}
-    return {"schema_version": 2, "sources": inputs, "recipes": recipes,
+    return {"schema_version": 3, "architecture": architecture(arch), "sources": inputs, "recipes": recipes,
             "identity": identity({"sources": inputs, "recipes": recipes})}
 
 
 def object_key(snapshot, component):
-    inputs = {"source": snapshot["sources"][component], "recipes": snapshot["recipes"]}
+    inputs = {"architecture": snapshot["architecture"], "source": snapshot["sources"][component],
+              "recipes": snapshot["recipes"]}
     # libavcodec/libvvenc.c compiles against installed VVenC public headers.
     # Conservatively bind the entire upstream component, including ABI changes.
     if component == "ffmpeg":
@@ -125,7 +142,11 @@ def verify(root, prefix):
     if not manifest.is_file():
         raise ValueError(f"SDK provenance is missing: {manifest}; rebuild dependencies first")
     installed = json.loads(manifest.read_text())
-    if installed.get("schema_version") != 2 or installed.get("artifacts") != artifacts(prefix):
+    if installed.get("schema_version") != 3:
+        raise ValueError("Unsupported SDK manifest version; rebuild dependencies")
+    if installed.get("architecture") != architecture():
+        raise ValueError("Installed SDK architecture differs from the build target; rebuild dependencies")
+    if installed.get("artifacts") != artifacts(prefix):
         raise ValueError("Installed SDK bytes differ from their build manifest; rebuild dependencies")
     if installed.get("object_keys") != {name: object_key(installed, name) for name in DEPENDENCIES}:
         raise ValueError("SDK has no matching content-bound object receipts; rebuild dependencies")
@@ -145,7 +166,7 @@ def git(root, *args):
     return result.stdout.strip()
 
 
-def release_key(root):
+def release_key(root, arch=None):
     pins = {}
     for name, relative in DEPENDENCIES.items():
         pin = git(root, "rev-parse", f"HEAD:{relative}")
@@ -158,7 +179,7 @@ def release_key(root):
     if git(root, "status", "--porcelain", "--", *RECIPES, "scripts/ffmpeg-key.sh"):
         raise ValueError("Dependency recipes are uncommitted; a release key must describe committed inputs")
     recipes = {name: digest(root / name) for name in RECIPES}
-    return identity({"recipe_version": "ubuntu-24.04-linux-amd64-sdk-v3", "pins": pins, "recipes": recipes})[:24]
+    return dependency_key(pins, recipes, arch)
 
 
 def main():
@@ -189,6 +210,7 @@ def main():
     elif args.action == "configure-key":
         recipe = {path: digest(root / path) for path in RECIPES}
         recipe["configure"] = digest(root / DEPENDENCIES["ffmpeg"] / "configure")
+        recipe["architecture"] = architecture()
         recipe["source_directory"] = str(root)
         recipe["environment"] = {name: os.environ.get(name, "") for name in
                                  ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS")}

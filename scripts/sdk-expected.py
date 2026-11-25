@@ -17,23 +17,26 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('naki_sdk_identity', ROOT / 'scripts/sdk-identity.py')
 sdk = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sdk)
-TARGET = {'os': 'linux', 'architecture': 'x86_64', 'bits': 64, 'endianness': 'little'}
+ELF_MACHINE = {'x86_64': 62, 'aarch64': 183}
 
 
-def expected(root, *, pins=None):
+def target(arch=None):
+    return {'os': 'linux', 'architecture': sdk.architecture(arch), 'bits': 64, 'endianness': 'little'}
+
+
+def expected(root, *, pins=None, arch=None):
     """Read sources/recipes from a checkout, never from an installed SDK.
 
     Explicit pins are for isolated test fixtures. The CLI always verifies Git.
     """
-    inputs = sdk.sources(root)
+    inputs = sdk.sources(root, arch)
     if pins is None:
-        key = sdk.release_key(root)
+        key = sdk.release_key(root, arch)
         pins = {name: sdk.git(root, 'rev-parse', 'HEAD:' + path)
                 for name, path in sdk.DEPENDENCIES.items()}
     else:
-        key = sdk.identity({'recipe_version': 'ubuntu-24.04-linux-amd64-sdk-v3',
-                            'pins': pins, 'recipes': inputs['recipes']})[:24]
-    return {'schema_version': 1, 'target': TARGET.copy(), 'pins': pins,
+        key = sdk.dependency_key(pins, inputs['recipes'], arch)
+    return {'schema_version': 1, 'target': target(arch), 'pins': pins,
             'dependency_key': key, 'source_identity': inputs['identity'],
             'sources': inputs['sources'], 'recipes': inputs['recipes']}
 
@@ -51,28 +54,36 @@ def read_expected(path):
     if path.stat().st_size > 65536:
         raise ValueError('Expected SDK manifest exceeds 64 KiB')
     value = json.loads(path.read_text(), object_pairs_hook=unique_object)
-    if not isinstance(value, dict) or value.get('schema_version') != 1 or value.get('target') != TARGET:
-        raise ValueError('Expected SDK platform/schema is unsupported')
+    if not isinstance(value, dict) or value.get('schema_version') != 1 or value.get('target') != target():
+        raise ValueError(f'Expected SDK platform/schema does not match the Linux {sdk.architecture()} consumer')
     pins = value.get('pins', {})
     if not isinstance(pins, dict) or set(pins) != set(sdk.DEPENDENCIES) or any(
             not isinstance(pin, str) or not re.fullmatch('[0-9a-f]{40}', pin) for pin in pins.values()):
         raise ValueError('Expected SDK gitlinks are missing or invalid')
     if sdk.identity({'sources': value['sources'], 'recipes': value['recipes']}) != value.get('source_identity'):
         raise ValueError('Expected SDK source identity is inconsistent')
-    key = sdk.identity({'recipe_version': 'ubuntu-24.04-linux-amd64-sdk-v3',
-                        'pins': pins, 'recipes': value['recipes']})[:24]
+    key = sdk.dependency_key(pins, value['recipes'])
     if value.get('dependency_key') != key:
         raise ValueError('Expected SDK dependency key is inconsistent')
     return value
 
 
-def verify_target(prefix):
-    library = prefix / 'lib/libavformat.so'
-    with library.open('rb') as stream:
+def verify_elf(path):
+    arch = sdk.architecture()
+    with path.open('rb') as stream:
         header = stream.read(20)
     if (len(header) != 20 or header[:4] != b'\x7fELF' or header[4:6] != b'\x02\x01'
-            or header[7] not in (0, 3) or struct.unpack_from('<H', header, 18)[0] != 62):
-        raise ValueError('Installed SDK is not the required Linux x86_64 ELF target')
+            or header[7] not in (0, 3) or struct.unpack_from('<H', header, 18)[0] != ELF_MACHINE[arch]):
+        raise ValueError(f'{path} is not the required Linux {arch} ELF target')
+
+
+def verify_target(prefix):
+    libraries = prefix / 'lib'
+    # Include the required unversioned linker name and every versioned DSO,
+    # so a native libavformat cannot hide a foreign VVenC or codec library.
+    paths = {libraries / 'libavformat.so', *libraries.glob('*.so'), *libraries.glob('*.so.*')}
+    for path in sorted({p.resolve() for p in paths}):
+        verify_elf(path)
 
 
 def verify(root, prefix, expected_path=None, dependency_key=None):
@@ -108,6 +119,8 @@ def main():
     parser.add_argument('--root', type=pathlib.Path, default=ROOT)
     parser.add_argument('--prefix', type=pathlib.Path)
     parser.add_argument('--output', type=pathlib.Path)
+    parser.add_argument('--arch', choices=tuple(sdk.OCI_ARCH.values()),
+                        help='Linux target for generate (default: native architecture)')
     parser.add_argument('--expected', type=pathlib.Path,
                         default=os.environ.get('NAKI_EXPECTED_SDK_MANIFEST'))
     parser.add_argument('--dependency-key', default=os.environ.get('NAKI_EXPECTED_DEPENDENCY_KEY') or None)
@@ -115,10 +128,12 @@ def main():
     if args.action == 'generate':
         if args.output is None:
             parser.error('generate requires --output')
-        value = expected(args.root.resolve())
+        value = expected(args.root.resolve(), arch=args.arch)
         sdk.atomic_json(args.output, value)
         print('Generated independent SDK expectation ' + value['source_identity'])
     else:
+        if args.arch is not None:
+            parser.error('verify always checks the native consumer architecture')
         if args.prefix is None:
             parser.error('verify requires --prefix')
         value = verify(args.root.resolve(), args.prefix.resolve(), args.expected, args.dependency_key)

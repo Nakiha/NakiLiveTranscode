@@ -62,7 +62,7 @@ def index_symbols(directory):
     if not result:raise ValueError('Empty symbol archive')
     return result
 def bind_module(path,index,component):
-    path=pathlib.Path(path);identity=symbols.build_id(path);debug=index.get(identity)
+    path=pathlib.Path(path);sdk.verify_elf(path);identity=symbols.build_id(path);debug=index.get(identity)
     if debug is None or debug['name']!=path.name:raise ValueError('Missing matching debug module: '+path.name)
     return {'component':component,'name':path.name,'build_id':identity,'runtime_elf_sha256':digest(path),
         'debug_file':debug['file'],'debug_sha256':debug['debug_sha256']}
@@ -84,12 +84,13 @@ def image_record(path,source,run_id,attempt,dependency_key=None):
     expected={'org.opencontainers.image.revision':source['git_revision'],'io.naki.source-tree':source['tree_sha256'],
         'io.naki.build-run':run_id,'io.naki.build-attempt':attempt}
     if dependency_key is not None:expected['io.naki.ffmpeg-dependency']=dependency_key
-    if item.get('Os')!='linux' or item.get('Architecture')!='amd64':raise ValueError('Runtime image target is not Linux amd64')
+    arch=sdk.sdk.OCI_ARCH[sdk.sdk.architecture()]
+    if item.get('Os')!='linux' or item.get('Architecture')!=arch:raise ValueError('Runtime image target is not Linux '+arch)
     if any(labels.get(k)!=v for k,v in expected.items()):raise ValueError('Runtime image labels do not match source/run identity')
     if not re.fullmatch('sha256:[0-9a-f]{64}',item.get('Id','')):raise ValueError('Runtime image ID is missing')
     tag=f'naki-live-transcode:{source["git_revision"]}-{run_id}-{attempt}'
     if tag not in item.get('RepoTags',[]):raise ValueError('Unique source-run-attempt image tag is absent')
-    return {'tag':tag,'image_id':item['Id'],'repo_digests':item.get('RepoDigests') or [],'os':'linux','architecture':'amd64','labels':expected}
+    return {'tag':tag,'image_id':item['Id'],'repo_digests':item.get('RepoDigests') or [],'os':'linux','architecture':arch,'labels':expected}
 def artifact(path):
     path=pathlib.Path(path);return {'name':path.name,'bytes':path.stat().st_size,'sha256':digest(path)}
 def create(args):
@@ -104,7 +105,7 @@ def create(args):
         for name,path in sdk.sdk.DEPENDENCIES.items():
             if git(root/path,'rev-parse','HEAD').decode().strip()!=pins[name] or git(root/path,'status','--porcelain','--untracked-files=all').strip():raise ValueError('Local native checkout must match its clean pinned history')
         inputs=sdk.sdk.sources(root)
-        expectation={'source_identity':inputs['identity'],'dependency_key':'local-content-'+inputs['identity'][:24],'pins':pins}
+        expectation={'source_identity':inputs['identity'],'dependency_key':'local-content-'+inputs['architecture']+'-'+inputs['identity'][:24],'pins':pins}
     else:expectation=sdk.expected(root)
     if args.dependency_key and args.dependency_key!=expectation['dependency_key']:raise ValueError('Selected SDK key differs from trusted checkout')
     installed=sdk.verify(root,args.sdk_prefix.resolve())
@@ -114,7 +115,7 @@ def create(args):
     if image is None and not args.local:raise ValueError('A release candidate requires actual runtime image inspection')
     if image and (not args.image_archive or not args.symbols_archive):raise ValueError('Image/symbol bytes must accompany inspected runtime')
     artifacts=[artifact(path) for path in (args.image_archive,args.symbols_archive) if path]
-    manifest={'schema_version':1,'target':sdk.TARGET,'source':source,'sdk':{'identity':installed['identity'],'dependency_key':expectation['dependency_key'],'pins':expectation['pins']},
+    manifest={'schema_version':1,'target':sdk.target(),'source':source,'sdk':{'identity':installed['identity'],'dependency_key':expectation['dependency_key'],'pins':expectation['pins']},
         'build_run_id':args.run_id,'build_attempt':args.attempt,'image':image,'modules':modules,'artifacts':artifacts,
         'publication_eligible':bool(image and not source['dirty']),'scope':'local_review' if args.local else 'tested_image_candidate'}
     args.output.parent.mkdir(parents=True,exist_ok=True)
@@ -122,6 +123,7 @@ def create(args):
     return manifest
 def verify(args):
     manifest=json.loads(args.manifest.read_text());check_source(manifest['source'])
+    if manifest.get('target')!=sdk.target():raise ValueError('Candidate target differs from native Linux architecture')
     rows=bind_runtime(args.runtime_bin,args.sdk_prefix,(args.app_symbols,args.ffmpeg_symbols,args.vvenc_symbols))
     if rows!=manifest['modules']:raise ValueError('Runtime ELF/debug modules differ from candidate manifest')
     installed=json.loads((args.sdk_prefix/sdk.sdk.MANIFEST).read_text())

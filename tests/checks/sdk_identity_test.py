@@ -46,7 +46,23 @@ class ReuseTest(unittest.TestCase):
         sdk.atomic_json(self.prefix / sdk.MANIFEST, value)
 
     def test_unchanged_sdk(self):
-        self.assertEqual(sdk.verify(self.root, self.prefix)["schema_version"], 2)
+        self.assertEqual(sdk.verify(self.root, self.prefix)["architecture"], sdk.architecture())
+
+    def test_foreign_objects_cannot_authorize_cache_reuse(self):
+        native = sdk.sources(self.root)
+        other = "arm64" if native["architecture"] == "x86_64" else "amd64"
+        foreign = sdk.sources(self.root, other)
+        self.assertEqual(native["identity"], foreign["identity"])  # same source bytes
+        foreign["object_keys"] = {name: sdk.object_key(foreign, name) for name in sdk.DEPENDENCIES}
+        foreign["artifacts"] = sdk.artifacts(self.prefix)
+        sdk.atomic_json(self.prefix / sdk.MANIFEST, foreign)
+        sdk.atomic_json(self.root / sdk.CACHE_RECEIPT,
+                        {"identity": foreign["identity"], "object_keys": foreign["object_keys"]})
+        for name in sdk.DEPENDENCIES:
+            self.assertNotEqual(sdk.object_key(native, name), foreign["object_keys"][name])
+            self.assertEqual(sdk.cache_key(self.root, self.prefix, name), "")
+        with self.assertRaisesRegex(ValueError, "architecture differs"):
+            sdk.verify(self.root, self.prefix)
 
     def test_ffmpeg_object_key_includes_upstream_component(self):
         before=sdk.sources(self.root)
@@ -99,7 +115,7 @@ class ReuseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "provenance is missing"):
             sdk.verify(self.root, self.prefix)
         manifest.write_text(json.dumps({"schema_version": 2}))
-        with self.assertRaisesRegex(ValueError, "bytes differ"):
+        with self.assertRaisesRegex(ValueError, "manifest version"):
             sdk.verify(self.root, self.prefix)
 
     def test_missing_object_receipt(self):
@@ -184,6 +200,7 @@ class ReuseTest(unittest.TestCase):
         git(repository, "commit", "--quiet", "-m", "fixture dependency pins")
         first_key = sdk.release_key(repository)
         self.assertEqual(len(first_key), 24)
+        self.assertNotEqual(sdk.release_key(repository, "amd64"), sdk.release_key(repository, "arm64"))
         source = repository / sdk.DEPENDENCIES["ffmpeg"]
         (source / "source.c").write_text("changed dependency\n")
         with self.assertRaisesRegex(ValueError, "uncommitted sources"):
