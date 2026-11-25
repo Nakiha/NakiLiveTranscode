@@ -1,0 +1,1299 @@
+{
+  "schema": 3,
+  "baseline": "9b7bddb244b8e539164c52b68a8166e67ae9693a",
+  "vvenc": "1af831c25b587c213b8108437e8926a0efe8359a",
+  "ffmpeg": "1323a30133d8131520b32e61d3d8913a74efcf6c",
+  "target": "Linux x86-64-v3 / Clang 18 / ThinLTO / new profile-guided optimization",
+  "native_build_id": "88e6930d3d8a479ee8bfaa1f88bf84c1fce9d2e6",
+  "native_library_sha256": "1c7b5d9c41db9940d47727396645b67110efc0ea5971c296716afaf1f692c335",
+  "native_debug_sha256": "6e22d99b24e8c966de6597732aa2ebf850fb37bf842e8918b0df2573ac355eb2",
+  "native_driver_sha256": "1895e91f45a29115d9f1f49138c7d68979564b39ec129c3870facba14e269e93",
+  "pgo_sha256": "84441cdf81e623449d7f887803a1fc63448dd4b4c5c2b901f58ba11b18c9154c",
+  "compile_recipe_sha256": "9f3eee0f4aeeb23d3127c8653bcff778366b922086afb93b9d4f4f4b89619bef",
+  "native_recipe_sha256": "a32b6d282fcc7c387be1798b4cad85e904c896822d332b50908fa7932e7e7284",
+  "training_sources": {
+    "s3stress.yuv": "6148c31b59ab9821f416bfa6e6586032bdc1e46b60584cb5290f93a750bf7c0e",
+    "cam65.yuv": "51e0583c7b17677797fe0fd22ca3ec4340aec839805929562dcb31696bb57acf"
+  },
+  "test_profiles": {
+    "live4.cfg": "4acf3b94000a9e67c5bdae10b6e4ff20a9a093f297dee8f059f45efbdda849ee",
+    "live8.cfg": "5d2f03799c9618e1c3d5ade75c42a7652d65cf9a86045f619e3dc81a8cdb05ea",
+    "quality4.cfg": "d33832c81e1e23bfcf371fd7d35f3396d9a0425de60b638caa72c55b3706c9cc",
+    "quality8.cfg": "cb9ccd861a96dd777f88e119d6062ebd6fa22a296e503411f1a126235c8a8572"
+  },
+  "service_dependency_key": "562b587db53dc6b878e6c2a4",
+  "service_source_identity": "c5bd6885c400623636956e8089fc2d468fffc422ea8d5f60cb38076363b63659",
+  "service_recipes": {
+    "Dockerfile.ffmpeg": "481688d1f2260f1aeb7a3bc233c3ab2f4904a387f297eda461476c0bded940e1",
+    "scripts/archive-symbols.py": "a855bd3569d1f46157fde13aeb8a59eebb481d917938c90ed4d43f3f21ffcd87",
+    "scripts/build-ffmpeg.sh": "ce2c00e945253540f5b272db2f79c0bedbaade96e2cb14b811cf85ecf943ecbe",
+    "scripts/build-vvenc.sh": "2a54031b8260a3269fda1d18eb88c6247b0ff7e4ce29b8158b4ec89bb0cdfb12",
+    "scripts/sdk-identity.py": "013ea701cf930bd4325f340747473c1b4093fdf520f6117016bef441ffa142ae"
+  },
+  "component_keys": {
+    "vvenc": "6245ab9404c0f78ed66c2b15b6c0c43ec3328f16c2d0cd6dc160b49299ded0df",
+    "ffmpeg": "e97637db8e6e7fa46ed802f8ba0cb5fae8df6208e7bf6dbdc987d94b9ee561a7"
+  },
+  "reference_inputs_sha256": "4c29d97f62cb3e35c1fc1e57f6240b560018f87b3cbbb03afea2f0eea946d50d",
+  "verification": {
+    "input_hashes": {
+      "finger": "9a338b72324c21d4fea17f92d423874614e8994fa8615fb9624ea62d0331f4fd",
+      "ch14": "bbb4d3ca1073c253035d691bd2d98eb7c6f1648313194e9a279c9883731cdef1",
+      "ch09": "775d17d8e32c22be3fa775d84c5951b325dfed2c134f944fc8a3827a34763643",
+      "11": "91aabea8086f9917e2bba254aa6a3ec5bf368a415336ffe68c8860ad5eb0e8b2",
+      "13": "b2231ef8f28ad3ba995a09123838b4081aa56378ea0fa45e154e062c98ebdc06",
+      "ch01": "6f508c4dddee55e22b2cb7f286c5be2f9f518643e69885201e593182e0ba5020",
+      "game12-100": "f7f6ac9e44d6d21bc05da5b52a44a3475964ce59b67baf8210764d0312800f39",
+      "10": "a65167eeb5d25f1b5463945df69a147d5dbb5539d9dcf9f309f807deb9ed3998",
+      "05C": "5ea37227b9fe36e873592103516d9fef40d0d50c9b87b45dce828ebeb1b97bc2",
+      "S4-100": "a51bb4fbf5b98ef6580ac82a1a4911a14a9b50bfb83f1ce46c36866a2a7f83b1",
+      "900s-100": "f127a0b23c6ee1410eea1d0494ceba4a11d461e994c530c56b378325eb82f795"
+    },
+    "oracles": {
+      "proof_sha256": "44ca57c19ec027d18c44e81f338a1140d4635195ca389c75a52f569e470308ae",
+      "tool_proof_sha256": "0274dbb813af4cee6ff7913d72e72b88d1bbd84e95acc528bcdaa9ffe9d232bf",
+      "decoder_sha256": "a4584d9d5fc023ff829208498a26d6eb6df6dc0f1cf1212aa50611aaf771e60f",
+      "ffmpeg_sha256": "8074475f382870c727a95c24669e74082301980c4cf7dea76aa94b6a40ec0d56",
+      "checker_sha256": "4180c2d567798895bd4afc439c785075391c6f0ad2a6f5e3a27d5e1b8b293358",
+      "tools_sha256": "cc473e332ecb2d286634dc5fc145a46fcd1f7e67eafb4d2120f1ae54f680f5b4"
+    },
+    "covered": {
+      "picture": {
+        "unique_streams": 29,
+        "selected_cases": 32,
+        "frames": 5874
+      },
+      "perf": {
+        "unique_streams": 8,
+        "selected_cases": 8,
+        "frames": 2400
+      },
+      "service": {
+        "unique_streams": 4,
+        "selected_cases": 4,
+        "frames": 1200
+      },
+      "reserved channels": {
+        "unique_streams": 8,
+        "frames": 2400
+      },
+      "low-CRF five-second ceiling": {
+        "unique_streams": 9,
+        "frames": 2700
+      },
+      "actual performance and paced repetitions": {
+        "unique_streams": 37,
+        "frames": 11100
+      },
+      "dark clothing and hand edge repetitions": {
+        "unique_streams": 12,
+        "frames": 1620
+      },
+      "supplementary centered capacity": {
+        "unique_streams": 3,
+        "frames": 900
+      },
+      "additional nominal request paced runs": {
+        "unique_streams": 2,
+        "frames": 600
+      }
+    },
+    "distinct_streams": 95,
+    "distinct_frames": 23694,
+    "strict_ten_measured_max": 10,
+    "scope": "Original S1/S4/mini8 VTM same-role checks; single-tile WPP, reorder 2, 8-bit 4:2:0, 540x960 and 30 Hz.",
+    "uncovered": [
+      "Syntax and content roles outside the observed samples",
+      "Other input formats and sizes",
+      "Server topology and long-run service residence"
+    ],
+    "nearby_rate_pairs": {
+      "live-ch14-p4": {
+        "nominal_r28_kbps": 480.02222222222224,
+        "nominal_candidate_kbps": 487.84444444444443,
+        "nominal_mismatch_percent": 1.629554187306148,
+        "nominal_whole_y_db": -0.09022672350000249,
+        "measured_r28_kbps": 480.64444444444445,
+        "measured_candidate_kbps": 482.55999999999995,
+        "measured_mismatch_percent": 0.39853899856674424,
+        "operating_point_max_absolute_deviation_percent": 0.5286792278135222,
+        "shared_cap_bps": 1320000,
+        "nominal_cap_bps": 1500000,
+        "measured_whole_y_db": -0.11609736280000504,
+        "nominal_interpolated_deltas": {
+          "y": -0.1584031609682521,
+          "yuv": -0.12719025092946223
+        }
+      },
+      "quality-ch14-p4": {
+        "nominal_r28_kbps": 587.8666666666667,
+        "nominal_candidate_kbps": 583.7555555555556,
+        "nominal_mismatch_percent": -0.6993271338927909,
+        "nominal_whole_y_db": -0.11046059460000635,
+        "measured_r28_kbps": 586.2577777777777,
+        "measured_candidate_kbps": 583.7555555555556,
+        "measured_mismatch_percent": -0.4268126269824424,
+        "operating_point_max_absolute_deviation_percent": 0.6993271338927909,
+        "shared_cap_bps": null,
+        "nominal_cap_bps": null,
+        "measured_whole_y_db": -0.10049176340000088,
+        "nominal_interpolated_deltas": {
+          "y": -0.061258609321631435,
+          "yuv": -0.037705546694960734
+        }
+      }
+    },
+    "visual_summary_zh": "原始手部第12至16帧可见指尖轮廓，Live 稍软。CH09 平坦区域降至严重阈值以上的色度块，Live 从32个减到10个，Quality 从14个减到5个；两档仍分别新增2、3个离散单元，没有新增相连或连续两帧的严重块。暗衣边界另外完成8对 Live、4对 Quality 独立复编码。游戏草地在第205至207帧较软，第206帧 Live 亮度较 R28 低2.65 dB、Quality 低1.68 dB，个别袖口在连续帧中偏紫。CH11 喷雾和05C字幕边缘有轻微锐度差异。已检查窗口中未见新增的明显成片杂色。",
+    "visual_hashes_sha256": "25d66e6ba68610953099e3b7f1db7a8b040c0f20de253bc2c93183ab3571bab9",
+    "raw_measurements_sha256": {
+      "matched-actual.json": "a579b90373c1a4dc559cd178b6852e35bada3ebcb3a0549b7158b81c3abac2f4",
+      "matched-qualified.json": "a3ecf5f3c1fff8ba45ea22c630b296748a53070b710f1dddd9dd9954337c536f",
+      "frame-psnr-actual.json": "43cccdea753d3ab1f995f82f334380b8816400b52d2cd23a4a465d7950f6fb4c",
+      "color-regions-actual.json": "d6335498638be98190f24f802716d6375b69e8cadf6a18d26ec2c57661847e04",
+      "pixel-repeat-review.json": "4a8d8265ac13f416696b2b0c339ff7f7eff36ee46d2f8912e6e325be5b17ae3e",
+      "saturation.json": "afd7e07f784dbf4775cb8a84c277b277d03f8ec75d8584ac4b5f2ae1eba9462d",
+      "final-latency.json": "3e278b81bd5dcd4bcba321732e941a529079362073fb0b5abb550b50359223ba",
+      "final-service-runs.json": "f287eed860ff11c5db0a6c58b84f000bf069b2aeeb088cd7ddd142753002228e",
+      "service-bitrates.json": "fa7cb4dbac94bcbd9ecf8ef335b30d5d4468167c63517f773bc5b0e26738bb39",
+      "visual/worst-windows/cases.json": "206f90e874b3c4d62a605dd58b85657d4bcc3679dacd62dcc175414fecd5afad",
+      "visual/motion-verified.json": "c7b750c44f8af001f30577a6d6588e3fb1214494a508bd3113e09bb345945ff3",
+      "native-unit-checks.json": "4ed5b71652283fbc40691486d15c8961c1911ca43428421e9078b6df77400289",
+      "isolated-live/unseen/matched-actual.json": "51624661fed653e45e9841df530cabe54e2112d3abdaf34281552d7f30edf73a",
+      "isolated-live/unseen/frame-psnr-actual.json": "43e0afc22b320d12e177a9ec01ab73c9e026ddfbbd7db94da2615f2b895131d9",
+      "isolated-live/unseen/color-regions-actual.json": "3179ee248d74443acdcab650ea270832fd2725c553c606753358ae06997ca427",
+      "isolated-live/unseen/visual-inspection.json": "dcd72f650c1d6eea0bb2cb523b52b103aa7c643d88dac0d41367ceb3394cd105",
+      "isolated-live/unseen-moving-edge/matched-actual.json": "6baaf6d5fff27e1a86c1614e6a5632ad56a7f6321aa8d24a1df8b7c10bf0ad13",
+      "isolated-live/unseen-moving-edge/frame-psnr-actual.json": "b7fcbc7372108d1e5988a8cbe5e94474e1b4b620c3f93fff26bb41e90c878d62",
+      "isolated-live/unseen-moving-edge/color-regions-actual.json": "2cae785e229e9ca59bc204c689cb2d14faa17c816905b4424cf8812f1c752fa7",
+      "isolated-live/unseen-moving-edge/visual-inspection.json": "c62af3a6cc0ac24781e96a450aa1a0bf564ce98e87c4951a677bb7ab4c84891e",
+      "isolated-quality/unseen/matched-actual.json": "05bbe2e9f12ce05172cd48867c2b95e17d7107537b943eb96202e14cee4f7c16",
+      "isolated-quality/unseen/frame-psnr-actual.json": "41b8e7aa550e50a1d4b73747f64ff86baf2fcfc0872e65aca99a4d407b5a8d21",
+      "isolated-quality/unseen/color-regions-actual.json": "42a6b30facf1dc7a1ecd685fdd279b9d9f36bd05816d4a4347e99c44d3fe3b50",
+      "isolated-quality/unseen/visual-inspection.json": "2191c703834deea542104dd97c165454358481c54b1de2a5d89a15e1f6b4af36",
+      "isolated-quality/unseen-moving-edge/matched-actual.json": "745793528f452a1f1beabc0e58640dfead4aa037537ca3a96245b562ecbaa368",
+      "isolated-quality/unseen-moving-edge/frame-psnr-actual.json": "fab4e7db719b248f4bc7143a0d4d21bfbbbc8b94593dca8c86ef0d1882f832e8",
+      "isolated-quality/unseen-moving-edge/color-regions-actual.json": "44973417ee3f57c2e602a149f71ad30b8571a2e3362e0feb822eaaddc1718de7",
+      "isolated-quality/unseen-moving-edge/visual-inspection.json": "8cbf35c8eaf94171d6363ea1c3bb73efe7467a6e9dddb3f3563522038883fa63",
+      "pressure-stress/decoded.json": "6f2246e3677b813f5ae530f4f38e72f7e47334698acd3f4948d79ca4fcd6f776",
+      "pressure-stress/summary.json": "37d1de81d5307b5e426b960915ac96ebe92355bbd8d6b7d0b4e666b18888f063",
+      "pressure-stress/p8.json": "4bf144408d3bae29914db9e977ae0c250b6f50f24a82eb479f2981a452fa595a",
+      "r32-paced-pairs.json": "26173bec0c845ae2c3a002a15864e746bfe45e5185a0e7111663ba8f99158292",
+      "isolated-live/matched-service/11-p4/matched.json": "f68e68a13a8c7d70fc23603da2e82fcb8102d0e2e3f94a246ac340c03870664a",
+      "isolated-live/matched-service/11-p8/matched.json": "c6519a6f89654f1003d2f34562b6ed50ad64704e2c8c392b4dde7ab8add9c641",
+      "isolated-live/matched-service/13-p4/matched.json": "1b9997ff80e6d49d233d02b39b71a52a8d7f2d2fefce7f6cdaa8e1c819d971db",
+      "isolated-live/matched-service/13-p8/matched.json": "2b95c3c902ac6c06a6187beabb365c5d3561541341771d4bc42de937cc7dacb3",
+      "isolated-quality/matched-service/11-p4/matched.json": "185ceaf174a127a0d8c1d603f889388e9f5dcef6f3656d6be36a5fda41ba905c",
+      "isolated-quality/matched-service/11-p8/matched.json": "6d617d16394ebce963783e170b80c2158ae39545ddd87f5053cfa243a43d925c",
+      "isolated-quality/matched-service/13-p4/matched.json": "4827e3666c6fb098814ff1b58b441df37d2db263ff10f41b7f59abc3a002639e",
+      "isolated-quality/original-repeats-13-p8/summary.json": "168d99473727053115e56b1e2f0600fafee0f105ef3acd2cd7ff22d0b66c3d18",
+      "r32-repetition-audits.json": "59c1379da5c484f3d388dd7db4b3c33695988c6ec4848a54c2c21b9406ba96ec",
+      "visual/color-temporal/live-05C-p4/inspection.json": "ed9a37aaac5077aec651a891f17360f84d883eb6aaeb9608282abe2362fb7af6",
+      "visual/color-temporal/live-05C-p4/cases.json": "1ee77c61dc724a1477a75daf8a19c2ad2488876720587d34bb60b020721ede7f",
+      "visual/color-temporal/live-05C-p4/inspection-final-render.json": "e58194a2e8069a664a3fca2be46888361f18ccf4d2e87586049d57d449d50bec",
+      "visual/color-temporal/live-game12-100-p4/inspection.json": "f34470d7d3588b646b1a9c388c123449a53638a3aef92e611c82be0a212c1a75",
+      "visual/color-temporal/live-game12-100-p4/cases.json": "c191d9b407d5563f0f34ad8e6c8d62076468b2550b38b1f8a38eaa8a3bf7fe65",
+      "visual/color-temporal/live-game12-100-p4/inspection-final-render.json": "f2d4c66a8288cfd400da1a275af93121ae14143ef8d0fcb4ed43bc43330e2013",
+      "visual/color-temporal/live-S4-100-p4/inspection.json": "00546e82c0a0f27844318130c602f8f158e72a466f0a535e178604784a331fb5",
+      "visual/color-temporal/quality-05C-p4/inspection.json": "787cc2be2775f035de1ccbec86e10c09d81faf552994f2c9188a2aa286796dcf",
+      "visual/color-temporal/quality-game12-100-p4/inspection.json": "2f953c6b2a7de1e53ad2c9bc05f0c0becf25f40ee1dcfad23ca27af9ed8ee62b",
+      "visual/color-temporal/quality-game12-100-p4/cases.json": "72a29b07133b4e0f2866d7b5ff6af028a46dbd4f766c1e43e8e362e04bb50a78",
+      "visual/color-temporal/quality-game12-100-p4/inspection-final-render.json": "a58334c2ae6499298a10e2e5300a1ffd05f488cef474e1047bce8d61fe4530a6",
+      "visual/color-temporal/quality-S4-100-p4/inspection.json": "e0bf84320ce28da0a9ec5f087127c51a5e94a669a6e25e177f1bac6ea421734b",
+      "dark-edge-repeats/audits.json": "f04befa6df4d0eb184f0ee05b12a20e0bd61c09dbd8b5269f814e38cec262b89",
+      "dark-edge-repeats/live/inspection.json": "e27b489aca2e07f47766606000fb92990a3c5e5690d98a5e6086f12f06dc2f04",
+      "dark-edge-repeats/live/summary.json": "1e4d90ce719c00c780cc3fdd35545f77b371903fc3f724ed4b25206d3c1427ef",
+      "dark-edge-repeats/live.json": "225f639311fc506af486651330ebe47e77db767609c6c5fc53f19fd91edf3d2a",
+      "dark-edge-repeats/quality/inspection.json": "b43a7817c78bd654556e32ffab35f9eaddbd9894a1ebc7661b2d5e339d6a977e",
+      "dark-edge-repeats/quality/summary.json": "03b561a0c7dd0b4100c40dca5daa51002501aaf20f03e16ede45d99f5b6d451d",
+      "dark-edge-repeats/quality.json": "d6d52df6cbdcf55b51feee8f3a2064ca7aed5b1e76b305b14e71aa48a63a306c",
+      "visual/hand-inspection.json": "e2b074627981bae1295566e846adedaf429d22f3398acd4fa9945bab587d62f8",
+      "visual/native-inspection.json": "406bd4e2f51a186f1c2fae5228ced1b14b99ab0f62e1aac2b5298a548fae286d",
+      "review-crops/inspection.json": "146cb36af1b445cf196382f15ed8bc9802069eacf0b4d8f8018bbfe38fad50ae",
+      "visual/worst-windows/inspection.json": "445854031f3835fad9cdacd01e685499a97039a94544b5aff2c0dcde94e2273a",
+      "visual/game-transition/inspection.json": "d43a3ffc4007f093d75aa685e85a4a2ecc9974c54d766c8e7d59493bfd9dd668",
+      "isolated-live/visual/edge-detail/inspection.json": "4d51ecdec3452cd43dae7deb93163f0fb406ba981e7085e193d90b20d1efb266",
+      "on-cpu/cpu-samples.json": "7bbe3198a861fb6022c2dce2d6163137d05b76091c2d79e1b7cac47f5977ff87",
+      "source-delta-from-r31.json": "0a3eb1b7679bfd587e1728655b4714d98633a2446bd1290cc70c10a4bc88a19d",
+      "centered-capacity/saturation.json": "5a4daa318ee7648388bf1b2ea2738009d23df473091db8cdf85fb4986960c23f"
+    },
+    "reserved_channel_results": {
+      "live": [
+        {
+          "clip": "capture-02",
+          "source_sha256": "f78da3237a37ee41fa3bef531dc08307b2769d95281aca6c6621a7974a68cb24",
+          "candidate_stream_sha256": "2ad3a58fa2ff4940dbf37efe4bfc728931be8227035b73d6af0485654ab818e4",
+          "pixels_sha256": "b8ce4bfc3de8b63133267d57639a4307bf1f2948d4c3a9ef23fbefc728a7ae7c",
+          "frames": 300,
+          "actual_kbps": [
+            746.5672,
+            745.4952
+          ],
+          "rate_delta_pct": -0.1435905568848983,
+          "component_db": [
+            0.04104109040000026,
+            0.1826276667000002,
+            0.04908400169999538
+          ],
+          "pooled_db": 0.051912363887616664,
+          "display_mean_db": {
+            "y": 0.026646310533333165,
+            "cb": 0.1485873082666664,
+            "cr": 0.043706581799999755,
+            "combined": 0.034710587274181366
+          },
+          "severe_flat_cells": [
+            0,
+            0
+          ],
+          "new_connected_regions": 0,
+          "repeated_new_cells": 0
+        },
+        {
+          "clip": "capture-06",
+          "source_sha256": "103ee5d9bda04e43ce58f456f207e7cb05e811cff501eb9661a56694cdd4c575",
+          "candidate_stream_sha256": "04b5742ada7a5e5f0140ead498901df273d6ffe2f2d8aafccddaedb5f15e39b0",
+          "pixels_sha256": "e34e73a1419aa42d9e82bda33be3b55e045a210c6c37c54d218fcecd18fbb80d",
+          "frames": 300,
+          "actual_kbps": [
+            664.9704,
+            667.7239999999999
+          ],
+          "rate_delta_pct": 0.41409361980624393,
+          "component_db": [
+            0.06493404689999949,
+            -0.16027320090000075,
+            -0.15339809520000358
+          ],
+          "pooled_db": 0.05394933971363969,
+          "display_mean_db": {
+            "y": 0.07411334429999988,
+            "cb": -0.1299038959666665,
+            "cr": -0.12788654653333334,
+            "combined": 0.06390599884304655
+          },
+          "severe_flat_cells": [
+            0,
+            0
+          ],
+          "new_connected_regions": 0,
+          "repeated_new_cells": 0
+        },
+        {
+          "clip": "capture-15",
+          "source_sha256": "78d0c47af46c979fa574efaa9037b171908c31929dc15748143d5bb658885af6",
+          "candidate_stream_sha256": "f2f4d4229099be78e8b8436cbd2f87a62f63c209c7cd01cc0574a8612a2903b0",
+          "pixels_sha256": "5b1808931341eaed36ecf1b7c10457b817f5544e8985dc0bf40d9f4de6abdcf0",
+          "frames": 300,
+          "actual_kbps": [
+            1210.5904,
+            1208.3144
+          ],
+          "rate_delta_pct": -0.1880074383540431,
+          "component_db": [
+            0.02917746670000554,
+            -0.17762690569999506,
+            -0.1691298562999961
+          ],
+          "pooled_db": 0.019694837631412554,
+          "display_mean_db": {
+            "y": 0.04497785916666641,
+            "cb": -0.1811821070666667,
+            "cr": -0.1701731326333333,
+            "combined": 0.03419345759465574
+          },
+          "severe_flat_cells": [
+            0,
+            0
+          ],
+          "new_connected_regions": 0,
+          "repeated_new_cells": 0
+        },
+        {
+          "clip": "capture-07-edge",
+          "source_sha256": "fe73fa5a1bfda89052166cac38867e8831a57e5a4bf3e4144b6629120995ff7b",
+          "candidate_stream_sha256": "fe9b1c8e52171d04697c7ab1c2aa18e095deefdb0e2e9d17f50b651a29da4c0b",
+          "pixels_sha256": "c8812899b73d49178c6317e59bd465bc321808ff79044c0772cf88941d3c8c12",
+          "frames": 300,
+          "actual_kbps": [
+            1296.1296,
+            1300.7208
+          ],
+          "rate_delta_pct": 0.3542238368755779,
+          "component_db": [
+            0.024838872700001957,
+            0.06390101190000053,
+            0.054742011500003684
+          ],
+          "pooled_db": 0.030530866904072695,
+          "display_mean_db": {
+            "y": 0.05402383363333314,
+            "cb": 0.07561658253333363,
+            "cr": 0.06760587383333329,
+            "combined": 0.05612359228692441
+          },
+          "severe_flat_cells": [
+            4,
+            0
+          ],
+          "new_connected_regions": 0,
+          "repeated_new_cells": 0
+        }
+      ],
+      "quality": [
+        {
+          "clip": "capture-02",
+          "source_sha256": "f78da3237a37ee41fa3bef531dc08307b2769d95281aca6c6621a7974a68cb24",
+          "candidate_stream_sha256": "d64d617581527f7542ee6dbc36e005e1c55b2e1400384eb4ee83bb49aac5cc9d",
+          "pixels_sha256": "7e168769eb808d95fba44d83b804edf438f230e4927c9f0fa4e54d25e2ed4b53",
+          "frames": 300,
+          "actual_kbps": [
+            669.6856,
+            669.4336
+          ],
+          "rate_delta_pct": -0.037629598127841835,
+          "component_db": [
+            0.03569994129999543,
+            0.13868313359999718,
+            0.04183524959999829
+          ],
+          "pooled_db": 0.043412266447290904,
+          "display_mean_db": {
+            "y": 0.04028778549999982,
+            "cb": 0.12004203679999996,
+            "cr": 0.042542498866666466,
+            "combined": 0.044849524109315385
+          },
+          "severe_flat_cells": [
+            1,
+            0
+          ],
+          "new_connected_regions": 0,
+          "repeated_new_cells": 0
+        },
+        {
+          "clip": "capture-06",
+          "source_sha256": "103ee5d9bda04e43ce58f456f207e7cb05e811cff501eb9661a56694cdd4c575",
+          "candidate_stream_sha256": "5e02342ee85f7ec6bd6637a3a6ed00043708a6ca49fe735b4cbf51e5f08b8e24",
+          "pixels_sha256": "48c8e5ac735e09d0533b74998176a98e38f91365d3f6bdfe3500be5d75057c36",
+          "frames": 300,
+          "actual_kbps": [
+            688.1952,
+            690.0952
+          ],
+          "rate_delta_pct": 0.2760844597579304,
+          "component_db": [
+            0.005531779300000039,
+            -0.15706919219999804,
+            -0.2354951442000015
+          ],
+          "pooled_db": -0.005009603373935079,
+          "display_mean_db": {
+            "y": 0.017030351766666705,
+            "cb": -0.1359671234666665,
+            "cr": -0.2086778110333332,
+            "combined": 0.006050428532746466
+          },
+          "severe_flat_cells": [
+            0,
+            0
+          ],
+          "new_connected_regions": 0,
+          "repeated_new_cells": 0
+        },
+        {
+          "clip": "capture-15",
+          "source_sha256": "78d0c47af46c979fa574efaa9037b171908c31929dc15748143d5bb658885af6",
+          "candidate_stream_sha256": "7b4de14f61936e9dbbdfc4d1f094e01d391665b9df403942a334882ac92d7964",
+          "pixels_sha256": "6e2988cf2d8ef3c9998076b701cafa314c17c3e8c6b2881c9300dc3fb383973a",
+          "frames": 300,
+          "actual_kbps": [
+            1224.1671999999999,
+            1222.8504
+          ],
+          "rate_delta_pct": -0.10756700555283327,
+          "component_db": [
+            -0.011143390099995543,
+            -0.30213305560000236,
+            -0.28076486460000183
+          ],
+          "pooled_db": -0.024887632511422453,
+          "display_mean_db": {
+            "y": 0.007798788799999935,
+            "cb": -0.2997924471666664,
+            "cr": -0.2818000880666667,
+            "combined": -0.00732644464884558
+          },
+          "severe_flat_cells": [
+            0,
+            0
+          ],
+          "new_connected_regions": 0,
+          "repeated_new_cells": 0
+        },
+        {
+          "clip": "capture-07-edge",
+          "source_sha256": "fe73fa5a1bfda89052166cac38867e8831a57e5a4bf3e4144b6629120995ff7b",
+          "candidate_stream_sha256": "a8a5dafbbbaaaa7d5c0caf6709970593182299e82c72e3dbd79ce34754a70c49",
+          "pixels_sha256": "82b053e13c173e6f860c99781a65a25084e30b50a683156d0455515f0a394188",
+          "frames": 300,
+          "actual_kbps": [
+            1297.3983999999998,
+            1302.7752
+          ],
+          "rate_delta_pct": 0.4144293688045142,
+          "component_db": [
+            0.012805148200001781,
+            0.08938213600000466,
+            0.09234463680000005
+          ],
+          "pooled_db": 0.025282691409820757,
+          "display_mean_db": {
+            "y": 0.04292575106666715,
+            "cb": 0.1006338297666664,
+            "cr": 0.10438079816666698,
+            "combined": 0.05155592359183856
+          },
+          "severe_flat_cells": [
+            0,
+            0
+          ],
+          "new_connected_regions": 0,
+          "repeated_new_cells": 0
+        }
+      ]
+    },
+    "low_crf_ceiling": {
+      "runs": 9,
+      "unique": 9,
+      "frames": 2700,
+      "window_frames": 150,
+      "worst_fraction": 0.9853440457061238
+    },
+    "ch09_dark_edge_repetitions": {
+      "live": {
+        "repeats": 8,
+        "windows": [
+          "jacket-at-palm",
+          "jacket-at-collar",
+          "passing-wrist",
+          "prior-white-sleeve-gap"
+        ],
+        "inspection_sha256": "1e4d90ce719c00c780cc3fdd35545f77b371903fc3f724ed4b25206d3c1427ef",
+        "observations_zh": "八对相同配置的独立编码，实际码率差都小于0.5%。在手掌旁暗衣总体最不利的片段，肤色和头发交界有轻微色相移动，暗衣未出现清晰红边。另两处深色衣领和过手腕的暗衣可见压缩引起的色调和边缘软化；在后者第129帧，候选局部略偏暖。白袖之间的暗缝边缘均可辨。此组只检查选定的中性色暗块。"
+      },
+      "quality": {
+        "repeats": 4,
+        "windows": [
+          "jacket-at-palm",
+          "jacket-at-collar",
+          "passing-wrist",
+          "prior-white-sleeve-gap"
+        ],
+        "inspection_sha256": "03b561a0c7dd0b4100c40dca5daa51002501aaf20f03e16ede45d99f5b6d451d",
+        "observations_zh": "四对相同设置的独立编码。第118至120帧暗衣与手掌边界有细微色相变化；第125至127帧经过手腕的深色夹克、衣领和白袖暗缝三处未见清晰的新红边。"
+      }
+    },
+    "ch09_moving_edge": {
+      "stream": "7545229fcf3634f9ac998e7d58e726d8934fe85da465bb9af2bf1f3f471e4ec7",
+      "base": "48f169afa065e3e2a4154161f763721f03bafdc000a82c367581eedd3c7ad45f",
+      "source": "775d17d8e32c22be3fa775d84c5951b325dfed2c134f944fc8a3827a34763643",
+      "native_sdk": "88e6930d3d8a479ee8bfaa1f88bf84c1fce9d2e6",
+      "rate": 0.019144105338519957,
+      "view": "c433f69e16f94bde39b459c0bbfe358e0065036f04fe923cc4a5f9ea835f28b7",
+      "largest_new_each": [
+        0,
+        0,
+        1,
+        1,
+        2,
+        1,
+        1,
+        1,
+        0,
+        1
+      ],
+      "note": "CH09 display frames 126–134, native and 3x crops. Candidate leaves a soft fingertip. The persistent red border visible on earlier candidate dark jacket pixels is no longer visible in these crops."
+    },
+    "additional_clock_checks": [
+      {
+        "tier": "live",
+        "clock": "burst",
+        "max_peak_bps": 1226595.2,
+        "cap_bps": 1270000
+      },
+      {
+        "tier": "quality",
+        "clock": "burst",
+        "max_peak_bps": 1223816.0,
+        "cap_bps": 1270000
+      },
+      {
+        "tier": "live",
+        "clock": "shallow",
+        "max_peak_bps": 1219758.4,
+        "cap_bps": 1270000
+      },
+      {
+        "tier": "quality",
+        "clock": "shallow",
+        "max_peak_bps": 1221784.0,
+        "cap_bps": 1270000
+      },
+      {
+        "tier": "live",
+        "clock": "fast",
+        "max_peak_bps": 1227444.8,
+        "cap_bps": 1270000
+      },
+      {
+        "tier": "quality",
+        "clock": "fast",
+        "max_peak_bps": 1240612.8,
+        "cap_bps": 1270000
+      }
+    ]
+  },
+  "picture": {
+    "live": {
+      "cases": 13,
+      "mean_delta_psnr_y_db": -0.0805,
+      "lowest_delta_y_db": -0.183,
+      "mean_delta_pooled_psnr_yuv_db": -0.0834,
+      "lowest_delta_pooled_yuv_db": -0.1819,
+      "worst_frame_delta_y_db": -2.6466,
+      "max_absolute_matched_rate_percent": 0.4936,
+      "severe_flat_chroma_cells": [
+        35,
+        10
+      ],
+      "new_severe_connected_regions": 0,
+      "persistent_new_cells": 0,
+      "display_frame_mean_deltas_db": {
+        "y": {
+          "average_across_cases": -0.0678,
+          "lowest_case": -0.1707,
+          "worst_5_frame_window": -1.6592
+        },
+        "cb": {
+          "average_across_cases": -0.1039,
+          "lowest_case": -0.1883,
+          "worst_5_frame_window": -0.819
+        },
+        "cr": {
+          "average_across_cases": -0.0936,
+          "lowest_case": -0.1808,
+          "worst_5_frame_window": -0.6811
+        },
+        "combined": {
+          "average_across_cases": -0.071,
+          "lowest_case": -0.17,
+          "worst_5_frame_window": -1.5437
+        }
+      },
+      "newly_marked_sources_flat_cells": 2,
+      "whole_component_delta_db": {
+        "y": {
+          "mean": -0.0805,
+          "worst": -0.183
+        },
+        "cb": {
+          "mean": -0.1163,
+          "worst": -0.3027
+        },
+        "cr": {
+          "mean": -0.0995,
+          "worst": -0.1764
+        }
+      }
+    },
+    "quality": {
+      "cases": 13,
+      "mean_delta_psnr_y_db": -0.0864,
+      "lowest_delta_y_db": -0.1367,
+      "mean_delta_pooled_psnr_yuv_db": -0.0859,
+      "lowest_delta_pooled_yuv_db": -0.1513,
+      "worst_frame_delta_y_db": -1.6761,
+      "max_absolute_matched_rate_percent": 0.4995,
+      "severe_flat_chroma_cells": [
+        14,
+        5
+      ],
+      "new_severe_connected_regions": 0,
+      "persistent_new_cells": 0,
+      "display_frame_mean_deltas_db": {
+        "y": {
+          "average_across_cases": -0.0731,
+          "lowest_case": -0.1353,
+          "worst_5_frame_window": -0.9711
+        },
+        "cb": {
+          "average_across_cases": -0.1046,
+          "lowest_case": -0.2164,
+          "worst_5_frame_window": -0.8875
+        },
+        "cr": {
+          "average_across_cases": -0.0753,
+          "lowest_case": -0.2068,
+          "worst_5_frame_window": -0.5085
+        },
+        "combined": {
+          "average_across_cases": -0.0741,
+          "lowest_case": -0.138,
+          "worst_5_frame_window": -0.909
+        }
+      },
+      "newly_marked_sources_flat_cells": 3,
+      "whole_component_delta_db": {
+        "y": {
+          "mean": -0.0864,
+          "worst": -0.1367
+        },
+        "cb": {
+          "mean": -0.1132,
+          "worst": -0.3457
+        },
+        "cr": {
+          "mean": -0.0776,
+          "worst": -0.2069
+        }
+      }
+    }
+  },
+  "performance": {
+    "host": "WSL2 Linux AMD Ryzen 7 9700X, 8 workers pinned to separate physical cores, 4 or 8 in-flight pictures",
+    "capacity": "Actual last native AU write under saturated input, three alternating pairs of 300 frames per case.",
+    "latency": "Paced H.264 MPEG-TS to VVC MP4, service packet ingress through actual mux write/flush, two cold runs of 300 frames per arm per case.",
+    "results": {
+      "live-11-p4": {
+        "fps": {
+          "R28": 51.5521,
+          "R32": 81.5643
+        },
+        "paired_throughput_ratio": 1.5947,
+        "trial_ratios": [
+          1.5148,
+          1.5958,
+          1.5947
+        ],
+        "cpu_saving_percent": 36.7355,
+        "actual_native_rate_percent": [
+          0.0019,
+          -0.13,
+          0.0357
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 170.498,
+            "p95": 214.363,
+            "p99": 277.726,
+            "max": 344.13
+          },
+          "R32": {
+            "p50": 137.357,
+            "p95": 171.612,
+            "p99": 204.884,
+            "max": 276.028
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R32": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1953.978,
+          "R32": 1949.504
+        },
+        "service_rate_delta_percent": -0.229,
+        "paced_actual_rate_pairs": {
+          "original": true,
+          "repetitions": [
+            {
+              "actual_kbps": [
+                1953.972,
+                1949.6336
+              ],
+              "rate_delta_pct": -0.22202979367156317,
+              "crf": "identical original request",
+              "cap_bps": 2125900,
+              "p95_ms": [
+                237.243,
+                171.444
+              ]
+            },
+            {
+              "actual_kbps": [
+                1953.984,
+                1949.3744
+              ],
+              "rate_delta_pct": -0.23590776587730788,
+              "crf": "identical original request",
+              "cap_bps": 2125900,
+              "p95_ms": [
+                211.89,
+                171.666
+              ]
+            }
+          ]
+        }
+      },
+      "quality-13-p8": {
+        "fps": {
+          "R28": 34.3937,
+          "R32": 59.4303
+        },
+        "paired_throughput_ratio": 1.7525,
+        "trial_ratios": [
+          1.7745,
+          1.6946,
+          1.7525
+        ],
+        "cpu_saving_percent": 41.8657,
+        "actual_native_rate_percent": [
+          0.0353,
+          0.0353,
+          0.0353
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 310.337,
+            "p95": 585.786,
+            "p99": 713.678,
+            "max": 793.496
+          },
+          "R32": {
+            "p50": 170.264,
+            "p95": 287.507,
+            "p99": 356.982,
+            "max": 401.381
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R32": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1479.9096,
+          "R32": 1485.074
+        },
+        "service_rate_delta_percent": 0.349,
+        "paced_actual_rate_pairs": {
+          "original": true,
+          "repetitions": [
+            {
+              "actual_kbps": [
+                1482.3983999999998,
+                1485.6992
+              ],
+              "rate_delta_pct": 0.2226661874432878,
+              "crf": "identical original request",
+              "cap_bps": 2082500,
+              "p95_ms": [
+                563.876,
+                274.768
+              ]
+            },
+            {
+              "actual_kbps": [
+                1482.3983999999998,
+                1485.7087999999999
+              ],
+              "rate_delta_pct": 0.22331378663118517,
+              "crf": "identical original request",
+              "cap_bps": 2082500,
+              "p95_ms": [
+                589.543,
+                289.109
+              ]
+            }
+          ]
+        },
+        "additional_nominal_paced_pairs": {
+          "both_within_half_percent": true,
+          "pairs": [
+            {
+              "rate_percent": 0.2226661874432878,
+              "p95_ms": [
+                563.876,
+                274.768
+              ]
+            },
+            {
+              "rate_percent": 0.22331378663118517,
+              "p95_ms": [
+                589.543,
+                289.109
+              ]
+            }
+          ]
+        }
+      },
+      "live-13-p8": {
+        "fps": {
+          "R28": 69.2591,
+          "R32": 102.9144
+        },
+        "paired_throughput_ratio": 1.4826,
+        "trial_ratios": [
+          1.4826,
+          1.53,
+          1.4511
+        ],
+        "cpu_saving_percent": 32.2404,
+        "actual_native_rate_percent": [
+          -0.4676,
+          -0.4775,
+          -0.5061
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 138.101,
+            "p95": 238.04,
+            "p99": 303.803,
+            "max": 337.717
+          },
+          "R32": {
+            "p50": 136.532,
+            "p95": 173.444,
+            "p99": 239.295,
+            "max": 305.686
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R32": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1452.0288,
+          "R32": 1455.0716
+        },
+        "service_rate_delta_percent": 0.2096,
+        "paced_actual_rate_pairs": {
+          "original": true,
+          "repetitions": [
+            {
+              "actual_kbps": [
+                1451.8768,
+                1454.1183999999998
+              ],
+              "rate_delta_pct": 0.1543932653238711,
+              "crf": "identical original request",
+              "cap_bps": 1976930,
+              "p95_ms": [
+                238.04,
+                171.649
+              ]
+            },
+            {
+              "actual_kbps": [
+                1452.1807999999999,
+                1456.0248
+              ],
+              "rate_delta_pct": 0.26470533145734887,
+              "crf": "identical original request",
+              "cap_bps": 1976930,
+              "p95_ms": [
+                237.871,
+                178.568
+              ]
+            }
+          ]
+        },
+        "centered_native_pairs": [
+          {
+            "ratio": 1.5256420594977662,
+            "rate_percent": 0.07351045004402312
+          },
+          {
+            "ratio": 1.584636628956606,
+            "rate_percent": 0.0872864060755596
+          }
+        ]
+      },
+      "quality-11-p4": {
+        "fps": {
+          "R28": 23.8843,
+          "R32": 41.8295
+        },
+        "paired_throughput_ratio": 1.7756,
+        "trial_ratios": [
+          1.718,
+          1.8151,
+          1.7756
+        ],
+        "cpu_saving_percent": 41.6508,
+        "actual_native_rate_percent": [
+          -0.0951,
+          -0.1026,
+          -0.0268
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 784.035,
+            "p95": 959.543,
+            "p99": 1003.1,
+            "max": 1082.913
+          },
+          "R32": {
+            "p50": 171.266,
+            "p95": 242.64,
+            "p99": 304.951,
+            "max": 371.354
+          }
+        },
+        "over_1000_ms": {
+          "R28": 9,
+          "R32": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1923.1872,
+          "R32": 1947.068
+        },
+        "service_rate_delta_percent": 1.2417,
+        "paced_actual_rate_pairs": {
+          "original": false,
+          "repetitions": [
+            {
+              "actual_kbps": [
+                1930.3063999999997,
+                1922.94
+              ],
+              "rate_delta_pct": -0.38161817212022386,
+              "crf": [
+                28,
+                30
+              ],
+              "cap_bps": 2125900,
+              "p95_ms": [
+                996.574,
+                240.805
+              ]
+            },
+            {
+              "actual_kbps": [
+                1927.7376000000002,
+                1923.6263999999996
+              ],
+              "rate_delta_pct": -0.21326553987432995,
+              "crf": [
+                28,
+                30
+              ],
+              "cap_bps": 2125900,
+              "p95_ms": [
+                973.718,
+                246.878
+              ]
+            }
+          ]
+        }
+      },
+      "quality-11-p8": {
+        "fps": {
+          "R28": 25.2223,
+          "R32": 43.5634
+        },
+        "paired_throughput_ratio": 1.7183,
+        "trial_ratios": [
+          1.6386,
+          1.7597,
+          1.7183
+        ],
+        "cpu_saving_percent": 42.0114,
+        "actual_native_rate_percent": [
+          -0.0351,
+          -0.0867,
+          -0.1009
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 789.84,
+            "p95": 1005.087,
+            "p99": 1075.328,
+            "max": 1136.493
+          },
+          "R32": {
+            "p50": 171.4,
+            "p95": 245.587,
+            "p99": 348.107,
+            "max": 418.409
+          }
+        },
+        "over_1000_ms": {
+          "R28": 32,
+          "R32": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1922.846,
+          "R32": 1945.3224
+        },
+        "service_rate_delta_percent": 1.1689,
+        "paced_actual_rate_pairs": {
+          "original": false,
+          "repetitions": [
+            {
+              "actual_kbps": [
+                1925.7767999999996,
+                1923.8824
+              ],
+              "rate_delta_pct": -0.09837069384155406,
+              "crf": [
+                28,
+                30
+              ],
+              "cap_bps": 2125900,
+              "p95_ms": [
+                1010.855,
+                240.589
+              ]
+            },
+            {
+              "actual_kbps": [
+                1927.3824,
+                1923.264
+              ],
+              "rate_delta_pct": -0.21367840652690706,
+              "crf": [
+                28,
+                30
+              ],
+              "cap_bps": 2125900,
+              "p95_ms": [
+                1044.942,
+                271.84
+              ]
+            }
+          ]
+        }
+      },
+      "live-13-p4": {
+        "fps": {
+          "R28": 58.7479,
+          "R32": 92.3604
+        },
+        "paired_throughput_ratio": 1.5777,
+        "trial_ratios": [
+          1.5141,
+          1.5777,
+          1.6016
+        ],
+        "cpu_saving_percent": 34.4291,
+        "actual_native_rate_percent": [
+          -0.4936,
+          -0.5004,
+          -0.5069
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 137.978,
+            "p95": 237.984,
+            "p99": 282.968,
+            "max": 309.657
+          },
+          "R32": {
+            "p50": 107.404,
+            "p95": 171.447,
+            "p99": 205.193,
+            "max": 237.309
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R32": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1452.9172,
+          "R32": 1454.1184
+        },
+        "service_rate_delta_percent": 0.0827,
+        "paced_actual_rate_pairs": {
+          "original": true,
+          "repetitions": [
+            {
+              "actual_kbps": [
+                1453.0928,
+                1454.1183999999998
+              ],
+              "rate_delta_pct": 0.0705804887340955,
+              "crf": "identical original request",
+              "cap_bps": 1976930,
+              "p95_ms": [
+                237.984,
+                171.423
+              ]
+            },
+            {
+              "actual_kbps": [
+                1452.7415999999998,
+                1454.1183999999998
+              ],
+              "rate_delta_pct": 0.09477253215575132,
+              "crf": "identical original request",
+              "cap_bps": 1976930,
+              "p95_ms": [
+                237.897,
+                171.476
+              ]
+            }
+          ]
+        },
+        "centered_native_pairs": [
+          {
+            "ratio": 1.5628041690950887,
+            "rate_percent": 0.08712727160651301
+          },
+          {
+            "ratio": 1.5857607844499655,
+            "rate_percent": 0.08060228874942066
+          }
+        ]
+      },
+      "quality-13-p4": {
+        "fps": {
+          "R28": 29.7597,
+          "R32": 53.5747
+        },
+        "paired_throughput_ratio": 1.8002,
+        "trial_ratios": [
+          1.765,
+          1.8002,
+          1.8207
+        ],
+        "cpu_saving_percent": 41.724,
+        "actual_native_rate_percent": [
+          0.0251,
+          0.0186,
+          0.0251
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 536.041,
+            "p95": 837.372,
+            "p99": 916.117,
+            "max": 989.542
+          },
+          "R32": {
+            "p50": 169.843,
+            "p95": 272.874,
+            "p99": 339.476,
+            "max": 368.317
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R32": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1482.3984,
+          "R32": 1484.6088
+        },
+        "service_rate_delta_percent": 0.1491,
+        "paced_actual_rate_pairs": {
+          "original": true,
+          "repetitions": [
+            {
+              "actual_kbps": [
+                1482.3983999999998,
+                1484.4583999999998
+              ],
+              "rate_delta_pct": 0.13896399240582724,
+              "crf": "identical original request",
+              "cap_bps": 2082500,
+              "p95_ms": [
+                768.006,
+                272.61
+              ]
+            },
+            {
+              "actual_kbps": [
+                1482.3983999999998,
+                1484.7592
+              ],
+              "rate_delta_pct": 0.15925543362702577,
+              "crf": "identical original request",
+              "cap_bps": 2082500,
+              "p95_ms": [
+                879.247,
+                273.058
+              ]
+            }
+          ]
+        }
+      },
+      "live-11-p8": {
+        "fps": {
+          "R28": 55.0694,
+          "R32": 86.9149
+        },
+        "paired_throughput_ratio": 1.5783,
+        "trial_ratios": [
+          1.5609,
+          1.5832,
+          1.5783
+        ],
+        "cpu_saving_percent": 36.9826,
+        "actual_native_rate_percent": [
+          0.1468,
+          -0.032,
+          -0.036
+        ],
+        "ingress_to_mux_flush_ms": {
+          "R28": {
+            "p50": 170.387,
+            "p95": 211.751,
+            "p99": 321.321,
+            "max": 392.171
+          },
+          "R32": {
+            "p50": 137.397,
+            "p95": 171.706,
+            "p99": 238.397,
+            "max": 342.945
+          }
+        },
+        "over_1000_ms": {
+          "R28": 0,
+          "R32": 0
+        },
+        "service_actual_kbps": {
+          "R28": 1952.2032,
+          "R32": 1949.228
+        },
+        "service_rate_delta_percent": -0.1524,
+        "paced_actual_rate_pairs": {
+          "original": true,
+          "repetitions": [
+            {
+              "actual_kbps": [
+                1953.7967999999998,
+                1949.2135999999998
+              ],
+              "rate_delta_pct": -0.23457915377894656,
+              "crf": "identical original request",
+              "cap_bps": 2125900,
+              "p95_ms": [
+                209.327,
+                171.627
+              ]
+            },
+            {
+              "actual_kbps": [
+                1950.6096,
+                1949.2423999999999
+              ],
+              "rate_delta_pct": -0.07009090901635151,
+              "crf": "identical original request",
+              "cap_bps": 2125900,
+              "p95_ms": [
+                211.751,
+                171.744
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  "release": "R32",
+  "previous_vvenc": "70e24a215016c0ca401a3a8a9619cc2d48816ea5",
+  "search_policy": "Budget optional CU trials using reference geometry and the quality of the incumbent reconstruction. Revisit concentrated chroma errors in coarse blocks, retain the complete anchor motion search at high QP, and use a separate search and picture-rate policy for each tier."
+}
