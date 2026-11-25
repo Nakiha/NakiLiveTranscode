@@ -88,6 +88,36 @@ class ToolGateTests(unittest.TestCase):
         self.assertNotEqual(outcome.returncode, 0)
         self.assertIn("early IDR", outcome.stderr)
 
+    def test_explicit_idr_intervals_assign_original_positions(self):
+        short = tools.idr_schedule(7, [0, 3, 4])
+        self.assertEqual([row[0] for row in short], [0, 4, 2, 0, 0, 4, 2])
+        self.assertEqual(tools.idr_schedule(59, [0])[-2:], [(59, 57, 59), (57, 58, 57)])
+        self.assertEqual(tools.idr_schedule(61, [0])[-4:],
+                         [(60, 53, 56), (58, 54, 54), (57, 55, 53), (59, 56, 55)])
+        for invalid in ([], [1], [0, 1, 1], [0, 3, 2], [0, 7]):
+            with self.assertRaises(ValueError):
+                tools.idr_schedule(7, invalid)
+
+    def test_requested_schedule_matches_actual_idr_and_closed_references(self):
+        def idr(order, poc):
+            return (picture(order, poc, True, 7, ["0 0 8 8 1"]) +
+                    "".join(f"V T {order} 0 {c} {size} {size} 0 0\n" for c, size in enumerate((8, 4, 4))))
+        with tempfile.TemporaryDirectory() as tmp:
+            schedule = Path(tmp) / "schedule"
+            schedule.write_text("0\t0\t0\n0\t0\t0\n")
+            def check(trace):
+                with tempfile.TemporaryFile() as stream:
+                    stream.write(trace.encode())
+                    stream.seek(0)
+                    return tools.reduce_trace(stream, "structure", schedule)
+            trace = idr(0, 0) + idr(1, 1)
+            self.assertEqual(check(trace)["pictures"]["IDR"], 2)
+            schedule.write_text("0\t0\t0\n4\t1\t4\n")
+            with self.assertRaisesRegex(ValueError, "requested schedule"):
+                check(trace)
+            with self.assertRaisesRegex(ValueError, "reference outside"):
+                check(idr(0, 0) + "V H 1 4 0 0 0 0 8 8 1 1 -1 0\n")
+
     def test_header_references_checked_even_if_no_pu_uses_them(self):
         observed = self.proof["ordered_rpl"]
         self.assertTrue(tools.reference_admitted("steady+2/-2/2", observed))
