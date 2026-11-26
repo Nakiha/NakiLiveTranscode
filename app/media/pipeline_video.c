@@ -310,6 +310,18 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     json_int(doc,"output_rate_num",p->output_rate.value.num);json_int(doc,"output_rate_den",p->output_rate.value.den);
     json_int(doc,"rate_decimation_divisor",p->rate_divisor);
     if (vvc) {
+        AVVvencOpenStats open;
+        if (av_vvenc_get_open_stats(p->v->encoder, &open) == 0) {
+            json_int(doc,"vvenc_open_setup_us",open.setup_us);
+            json_int(doc,"vvenc_open_library_us",open.library_us);
+            json_int(doc,"vvenc_open_post_us",open.post_us);
+            json_int(doc,"vvenc_open_thread_pool_us",open.thread_pool_us);
+            json_int(doc,"vvenc_open_preprocess_us",open.preprocess_us);
+            json_int(doc,"vvenc_open_mctf_us",open.mctf_us);
+            json_int(doc,"vvenc_open_gop_us",open.gop_us);
+            json_int(doc,"vvenc_open_picture_slots_us",open.picture_slots_us);
+            json_int(doc,"vvenc_open_thread_resources_us",open.thread_resources_us);
+        }
         if(cfg->encoder_parallel_frames) {
             json_int(doc,"encoder_parallel_frames",cfg->encoder_parallel_frames);
             json_int(doc,"rate_burst_ms",cfg->rate_burst_ms);

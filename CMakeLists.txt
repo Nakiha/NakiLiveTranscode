@@ -196,7 +196,7 @@ target_compile_options(naki-vvenc-input8-test PRIVATE -UNDEBUG -Wall -Wextra -We
 set_target_properties(naki-vvenc-input8-test PROPERTIES BUILD_RPATH "${NAKI_FFMPEG_PREFIX}/lib")
 add_executable(naki-vvenc-force-idr-test tests/fixtures/vvenc_force_idr_test.c)
 naki_sdk_native_test(naki-vvenc-force-idr-test)
-target_link_libraries(naki-vvenc-force-idr-test PRIVATE PkgConfig::FFMPEG)
+target_link_libraries(naki-vvenc-force-idr-test PRIVATE PkgConfig::FFMPEG Threads::Threads)
 add_executable(naki-live-rate-test tests/unit/live_rate_test.c)
 naki_native_test(naki-live-rate-test)
 target_link_libraries(naki-live-rate-test PRIVATE m)

@@ -1,6 +1,7 @@
 /* Exercise the public libavcodec send/receive path and the live write ledger. */
 #include <assert.h>
 #include <stdatomic.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <string.h>
 #include <libavcodec/avcodec.h>
@@ -120,7 +121,19 @@ static void encode(int tier, int slots, int external) {
     assert(atomic_load(&wakes) == final_wakes);
 }
 
+static void *repeat_open(void *arg) {
+    int tier = *(const int *)arg;
+    for (int i = 0; i < 3; ++i) encode(tier, 8, 1);
+    return NULL;
+}
+
 int main(void) {
+    int tiers[] = {1, 2};
+    pthread_t threads[2];
+    for (int i = 0; i < 2; ++i)
+        assert(!pthread_create(&threads[i], NULL, repeat_open, &tiers[i]));
+    for (int i = 0; i < 2; ++i)
+        assert(!pthread_join(threads[i], NULL));
     encode(1, 4, 0);
     encode(2, 8, 1);
     return 0;

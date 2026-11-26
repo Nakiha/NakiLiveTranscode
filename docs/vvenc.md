@@ -94,6 +94,8 @@ live profiles 显式启用 FFmpeg `live-pts-gop=1`，使用 1/90000 时间基保
 
 新增 `encode_submit_ms`（送帧开始到 FFmpeg 接受）与 `encode_wait_ms`（接受到取出对应包），二者之和等于 encode_ms；接受并不表示 VVenC 已经完成计算，receive_packet 也可能执行编码。这两个区间均不是 CPU 用时。累计/窗口和输入 I 阶段统计同时包含 encode_submit / encode_wait。`startup` 新增 input_open_started/done、input_probe_done、decoder_ready、first_packet、first_decoded、encoder_open_started/done、output_header_done、first_encoder_submit 的 `_ms`，均从完整请求 handler 开始计时，未发生时为 null。first_frame 还带 `encoder_submitted_frames_at_output` 与 `encoder_api_wall_to_output_ms`，后者是送帧/取包 API 调用累计墙钟时间，不包含 API 调用之间等待输入的时间，也不是 CPU 核时。
 
+匹配的 SDK 在每次成功打开 VVenC 后，把单调时钟测得的微秒数一次性写入 `pipeline_ready`。FFmpeg 的 `vvenc_open_setup_us`、`vvenc_open_library_us` 和 `vvenc_open_post_us` 分别覆盖 wrapper 进入到调用库、`vvenc_encoder_open`、以及返回到 wrapper 准备完成。库内另记录 `vvenc_open_thread_pool_us`、`vvenc_open_preprocess_us`、`vvenc_open_mctf_us`、`vvenc_open_gop_us`。GOP 时间包含 `vvenc_open_picture_slots_us`，后者包含 `vvenc_open_thread_resources_us`。启用预分析时累计两个 GOP。整个服务打开阶段仍取 `startup.encoder_open_done_ms - startup.encoder_open_started_ms`，还覆盖应用设置和返回后的唤醒回调注册。
+
 ## 修改、CI 与符号
 
 `bash scripts/build-service.sh` 先在 Linux cache 编译 VVenC，再启用 FFmpeg `--enable-libvvenc`；可独立运行 `bash scripts/build-vvenc.sh`。修改子模块后先在 fork 提交并 push，再更新主项目 gitlink。不要使用 `submodule update --remote` 意外换 pin。`NAKI_SKIP_FFMPEG=1` 仅适用于依赖已构建的应用开发，不会重编 VVenC。
