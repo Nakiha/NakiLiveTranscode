@@ -29,6 +29,6 @@ struct NakiVideo {
     Ledger ledger[LEDGER_CAPACITY];
     NakiLiveRate rate;
     int64_t last_pts,last_output_display_pts,encoder_api_us;
-    int have_output_display_pts,encoder_draining,encoder_poll_pending,encoder_polled_packet;
+    int have_output_display_pts,encoder_draining,encoder_poll_pending,encoder_polled_packet,encoder_wake_registered;
 };
 #endif

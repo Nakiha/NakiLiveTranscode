@@ -1,5 +1,6 @@
 /* Exercise the public libavcodec send/receive path and the live write ledger. */
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <string.h>
 #include <libavcodec/avcodec.h>
@@ -14,6 +15,10 @@ typedef struct {
     int64_t pts[FRAMES], last_dts;
     unsigned char seen[FRAMES];
 } Run;
+
+static void on_wake(void *opaque) {
+    atomic_fetch_add((atomic_int *)opaque, 1);
+}
 
 static int requested(int i) {
     return i == 3 || i == 7 || i == 8 || i == 80 || i == 81 || i == 90;
@@ -51,6 +56,7 @@ static int receive(AVCodecContext *ctx, AVPacket *packet, Run *run) {
 
 static void encode(int tier, int slots, int external) {
     Run run = {.external = external};
+    atomic_int wakes = 0;
     const AVCodec *codec = avcodec_find_encoder_by_name("libvvenc");
     assert(codec);
     AVCodecContext *ctx = avcodec_alloc_context3(codec);
@@ -75,6 +81,7 @@ static void encode(int tier, int slots, int external) {
     assert(!av_dict_set_int(&options, "live-r28-pictures", slots, 0));
     assert(!av_dict_set_int(&options, "live-frame-intra", external, 0));
     assert(!avcodec_open2(ctx, codec, &options) && !av_dict_count(options));
+    assert(!av_vvenc_live_set_wake(ctx, on_wake, &wakes));
     av_dict_free(&options);
 
     frame->width = WIDTH;
@@ -105,7 +112,12 @@ static void encode(int tier, int slots, int external) {
     assert(run.written == FRAMES && !av_vvenc_live_pending(ctx));
     av_frame_free(&frame);
     av_packet_free(&packet);
+    /* EOF may precede the last worker returning from its callback. */
+    assert(!av_vvenc_live_set_wake(ctx, NULL, NULL));
+    int final_wakes = atomic_load(&wakes);
+    assert(final_wakes >= FRAMES);
     avcodec_free_context(&ctx);
+    assert(atomic_load(&wakes) == final_wakes);
 }
 
 int main(void) {

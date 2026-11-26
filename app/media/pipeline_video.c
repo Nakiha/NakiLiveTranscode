@@ -6,7 +6,9 @@ static int video_init(Pipeline *p) {
     p->v->last_pts=AV_NOPTS_VALUE;return 0;
 }
 int pipeline_video_poll(Pipeline *p,int *progress) {
-    if(!p->v||!p->v->encoder_poll_pending)return 0;
+    if(!p->v)return 0;
+    if(!p->v->encoder_poll_pending &&
+       (!p->v->encoder_wake_registered || p->v->encoder_draining || !pipeline_ledger_pending(p)))return 0;
     p->stage="encoder pending packet";int ret=pipeline_receive_encoded(p);
     if(ret>=0)*progress=p->v->encoder_polled_packet;
     return ret;
@@ -26,6 +28,10 @@ int pipeline_video_written(Pipeline *p,int64_t media_us,int64_t written_us,int64
 int64_t pipeline_video_api_us(const Pipeline *p){return p->v?p->v->encoder_api_us:0;}
 void pipeline_video_close(Pipeline *p) {
     if(!p->v)return;
+    if(p->v->encoder&&p->v->encoder_wake_registered) {
+        av_vvenc_live_set_wake(p->v->encoder,NULL,NULL);
+        p->v->encoder_wake_registered=0;
+    }
     avcodec_free_context(&p->v->encoder);avfilter_graph_free(&p->v->graph);
     naki_watermark_compositor_free(&p->v->watermark_compositor);
 }
@@ -284,6 +290,11 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
     if (ret>=0 && av_dict_count(options)) ret=AVERROR_OPTION_NOT_FOUND;
     av_dict_free(&options);
     if (ret<0) return ret;
+    if(cfg->encoder_parallel_frames) {
+        ret=av_vvenc_live_set_wake(p->v->encoder,wake_job,p->job);
+        if(ret<0)return ret;
+        p->v->encoder_wake_registered=1;
+    }
     naki_job_checkpoint(p->job,NAKI_CP_ENCODER_OPEN_DONE,0);
     p->encoded=naki_encoded_seal(p->v->encoder);if(!p->encoded)return AVERROR(ENOMEM);
     ret=pipeline_open_mux(p);if(ret<0)return ret;
