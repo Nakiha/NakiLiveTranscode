@@ -1,0 +1,70 @@
+{
+  "release": "R36 RC1",
+  "ffmpeg": "6a9c43c5a2080b61e640f4334bcc24dc992423ec",
+  "service_binary_source": "a940eb29e815ee056e9ee798fc9f02e58d119c5c",
+  "vvenc_gitlink": "e6841ea0dae8a273eb63e03fa7f1cbc892d21f9b",
+  "baseline": "bf721a8e7c8148625713720cf6c56c146bf3f5f1",
+  "runtime_dependency_key": "03503cc65af378711e348210838f2f8183753c67789a1ed401becfa198a5fb52",
+  "build_inputs": {
+    "vvenc_gitlink": "e6841ea0dae8a273eb63e03fa7f1cbc892d21f9b",
+    "recipes": {
+      "tools/live-gpb-r12/build.sh": "9f3eee0f4aeeb23d3127c8653bcff778366b922086afb93b9d4f4f4b89619bef",
+      "tools/live-gpb-r26/build-native.sh": "a32b6d282fcc7c387be1798b4cad85e904c896822d332b50908fa7932e7e7284",
+      "tools/live-gpb-r26/profiles/live.cfg": "59e2549414ab74d69c9d98870ef04b6ea421d18efd7ac501f7c2dd2d7217e4ef",
+      "tools/live-gpb-r26/profiles/quality.cfg": "8ec4d2d33f65d7fbc6bed7c15bb23b8d798e076d531d4c4139deafb711e9d615"
+    },
+    "build_variant": "-march=x86-64-v3 -mtune=generic -ffp-contract=off",
+    "compiler": "Ubuntu clang version 18.1.3 (1ubuntu1)",
+    "thin_lto": true,
+    "training": "ddc8d45e57cf1fd325289f08ddd33c875af49dde8c2fa6b771495cee55a29971",
+    "encoder_recipe_sha": "466413e0dec324f6f5c17218c8d5e4d457fb324c7ad4b24397fe9668fab8953b",
+    "source_qualification_sha256": "8a298d8e8d5b610077bf620d425bd7dc6d8b63dcd0aedf45570f0309c8a43190"
+  },
+  "sdk_sha256": "fe7d756daae0a40cf209ed1e10ee650b0d45dc2de3244aee5c060d27d35bce3a",
+  "build_id": "96eadaa4a04b53e5bbdb78b0a11dd8d47413f584",
+  "debug_sha256": "223b754821b87419dfd39319b1c7ffa248b89418a5ab1e354f1f576bf8a90c3e",
+  "native_rebuild": "ELF and separate Build ID DWARF reproduced byte-for-byte from the encoder commit and merged LLVM profile at the recorded build paths",
+  "tencent_originals": {
+    "S1": "10bc364bc9d8fdc16ff5fb34c99f54d39c36ebecae0037304ccbbbe91ecb7d7b",
+    "S4": "d4eac60facdbe3c89f86ca77ae0c1fc5fe1c460cd8b34c7f88625690b170b93d",
+    "mini8": "f3f1eeda9a12bb428398d5b07ee13ac53b2ccca10820aa550282ccaeaaa3b195"
+  },
+  "service_evidence": {
+    "streams": 6,
+    "frames": 1382,
+    "forced_boundaries": [
+      0,
+      3,
+      12,
+      80,
+      81,
+      90
+    ],
+    "independent_decoder": "63432c870992224224a358323ea957578bb822ba741eaff8cfb6db742a0a2fdf",
+    "vtm_structure": "a4584d9d5fc023ff829208498a26d6eb6df6dc0f1cf1212aa50611aaf771e60f",
+    "vtm_prediction": "fba7300efccc1a082568f1452c58faebe736235de571c62c919cb434b6d91a0f"
+  },
+  "frozen_qp": [
+    {
+      "case": "live-11-p4",
+      "stream": "fedd65e33f4f0aea168c27d17c59f1fa1bdc80fcef6535e546a56b2af213d45b"
+    },
+    {
+      "case": "live-13-p8",
+      "stream": "93f30657ea1e7c90537118afc10c3de1e41c22848b75186e309a53a36d2aa18e"
+    },
+    {
+      "case": "quality-11-p4",
+      "stream": "53e9af8dc1abbbd064af196fc0bb59ec0645dad70107b81a4a2248b6eb955e17"
+    },
+    {
+      "case": "quality-13-p8",
+      "stream": "e89d55d16447f2f23e48a9dbe6f8cdd3ba4d4b15b57250903b38a63600140f58"
+    },
+    {
+      "case": "live-ch09-p4",
+      "stream": "41a543ef4706e6f3b6b0c923788881ca7c69cd3f71440659ccd1d9ad83cea07c"
+    }
+  ],
+  "offline_research": "ad9591fd8b0e1acf6038532cca91a1b7211af85e"
+}

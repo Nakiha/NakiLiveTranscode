@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Recreate the distributed R36 RC1 encoder and DWARF from the source and PGO archive.
+set -euo pipefail
+if (( $# != 1 )); then
+  echo 'Usage: rebuild-encoder /path/to/r36-rc1-build-inputs' >&2
+  exit 2
+fi
+inputs=$(realpath -e -- "$1")
+root=/var/tmp/vvenc-r36-cabac-search-20261126-2148
+src="$root/entropy-source"
+profile="$root/entropy-profile"
+test -f "$inputs/libvvenc-r36-rc1.tar"
+(cd "$inputs" && echo 'ddc8d45e57cf1fd325289f08ddd33c875af49dde8c2fa6b771495cee55a29971  service.profdata' | sha256sum --check)
+# Debug records and TU-local profile names include build paths. Preserve existing runs.
+mkdir -- "$root"
+mkdir -- "$src" "$profile"
+tar -xf "$inputs/libvvenc-r36-rc1.tar" -C "$src" --strip-components=1
+cp -- "$inputs/service.profdata" "$profile/train.profdata"
+export CC=clang-18 CXX=clang++-18 JOBS=${JOBS:-8}
+export CFLAGS='-march=x86-64-v3 -mtune=generic -ffp-contract=off'
+export CXXFLAGS="$CFLAGS -fprofile-use=$profile/train.profdata -Wno-error=profile-instr-unprofiled"
+bash "$src/tools/live-gpb-r12/build.sh" "$profile/use" --no-pgo
+(
+  cd "$profile/use"
+  echo 'fe7d756daae0a40cf209ed1e10ee650b0d45dc2de3244aee5c060d27d35bce3a  use/install/lib/libvvenc.so.1.14.0' | sha256sum --check
+  echo '223b754821b87419dfd39319b1c7ffa248b89418a5ab1e354f1f576bf8a90c3e  symbols/.build-id/96/eadaa4a04b53e5bbdb78b0a11dd8d47413f584.debug' | sha256sum --check
+)
