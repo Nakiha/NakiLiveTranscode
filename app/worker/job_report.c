@@ -207,6 +207,7 @@ static yyjson_mut_doc *snapshot(Job *job, int report, int final) {
         json_int(doc,"encoder_threads",job->config.encoder_threads);
         json_int(doc,"encoder_parallel_frames",job->config.encoder_parallel_frames);
         json_int(doc,"rate_burst_ms",job->config.rate_burst_ms);
+        json_int(doc,"rate_static_gop_credit_pct",job->config.rate_static_gop_credit_pct);
     }
     if(job->config.cqf) {json_int(doc,"qp",job->config.qp);json_int(doc,"qpa",1);json_int(doc,"maxrate",job->config.maxrate);}
     json_int(doc,"intra_requested",job->stats.intra_requested); json_int(doc,"intra_confirmed",job->stats.intra_confirmed);

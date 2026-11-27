@@ -37,9 +37,12 @@ def run():
                                encoder="libvvenc", encoder_profile="r28_" + tier,
                                rate_control="constrained_crf", crf=29, maxrate=900000,
                                encoder_parallel_frames=slots, frame_log=True, pace=True)
+                if tier == "quality":
+                    request["rate_static_gop_credit_pct"] = 50
                 service.start(request)
                 state = service.finished(timeout=45)
                 assert state["rate_window_ms"] == 5000 and state["encoder_parallel_frames"] == slots
+                assert state["rate_static_gop_credit_pct"] == request.get("rate_static_gop_credit_pct", 0)
                 frames = service.check_trace(state, 65, reordered=True)
                 assert all(0 <= f["encoder_future_frames"] <= 10 and
                            0 <= f["rc_actual_slice_qp"] <= 63 and

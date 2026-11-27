@@ -11,7 +11,8 @@ static int r28_defaults(yyjson_val *root, Config *c, char *error, size_t cap) {
     const int live=!strcmp(c->encoder_profile,"r28_live");
     if(!live && strcmp(c->encoder_profile,"r28_quality")) {
         if(c->encoder_threads>16 || c->encoder_max_future_frames>4 ||
-           yyjson_obj_get(root,"encoder_parallel_frames") || yyjson_obj_get(root,"rate_burst_ms"))
+           yyjson_obj_get(root,"encoder_parallel_frames") || yyjson_obj_get(root,"rate_burst_ms") ||
+           yyjson_obj_get(root,"rate_static_gop_credit_pct"))
             return bad(error,cap,"R28 options require r28_live or r28_quality");
         return 0;
     }
@@ -125,6 +126,7 @@ int config_parse(const char *body, size_t size, Config *out, char *error, size_t
         else if (!strcmp(name,"encoder_max_future_frames")) {field=&c.encoder_max_future_frames; max=10;}
         else if (!strcmp(name,"encoder_parallel_frames")) {field=&c.encoder_parallel_frames; min=4; max=8;}
         else if (!strcmp(name,"rate_burst_ms")) {field=&c.rate_burst_ms; max=1000;}
+        else if (!strcmp(name,"rate_static_gop_credit_pct")) {field=&c.rate_static_gop_credit_pct; max=100;}
         else if (!strcmp(name,"frame_log_every")) {field=&c.frame_log_every; min=1; max=1000000;}
         else if (!strcmp(name,"slow_frame_ms")) {field=&c.slow_frame_ms; min=1; max=600000;}
         else if (!strcmp(name,"mux_wait_ms")) {field=&c.mux_wait_ms; min=1; max=1000;}

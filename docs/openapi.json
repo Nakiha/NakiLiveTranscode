@@ -1332,9 +1332,11 @@
               "live_3b_2s_qt8",
               "live_3b_2s_qt16",
               "live_3b_2s_speed",
-              "live_3b_2s_rdoq0"
+              "live_3b_2s_rdoq0",
+              "r28_live",
+              "r28_quality"
             ],
-            "description": "x264 only default. VVenC defaults to live_3b_2s, also accepts reference/live_3b_2s_no_mctf. Live profiles use a PTS-anchored 2s CRA grid, full 3B groups and shorter boundary/tail groups."
+            "description": "x264 accepts default. VVenC defaults to live_3b_2s. r28_live and r28_quality use a closed GOP with an IDR every two seconds by default."
           },
           "width": {
             "type": "integer",
@@ -1365,7 +1367,7 @@
               "constrained_crf"
             ],
             "default": "bitrate",
-            "description": "bitrate is the default. cqf uses native capped QP/QPA with required maxrate. constrained_crf is an experimental direct-output quality anchor plus causal dual-budget feedback; requires follow_source, output_fps and future guard, excludes qp/bitrate; see vvenc.md."
+            "description": "bitrate is the default. cqf uses capped QP/QPA. constrained_crf uses a quality anchor and actual AU feedback on direct VVenC outputs. R28 uses a five-second budget."
           },
           "qp": {
             "type": "integer",
@@ -1378,7 +1380,7 @@
             "type": "integer",
             "minimum": 10000,
             "maximum": 100000000,
-            "description": "Required only for cqf. Native approximate bitrate cap in bits/s, not a strict wire-rate bound."
+            "description": "Video rate cap in bits/s. R28 constrained_crf requires an explicit value."
           },
           "output_fps": {
             "type": "integer",
@@ -1415,8 +1417,9 @@
           "encoder_threads": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 16,
-            "default": 2
+            "maximum": 64,
+            "default": 2,
+            "description": "R28 accepts 2 to 64 threads and defaults to 8. Other profiles accept 1 to 16 and default to 2."
           },
           "fps": {
             "type": "integer",
@@ -1447,9 +1450,9 @@
           "encoder_max_future_frames": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 4,
+            "maximum": 10,
             "default": 0,
-            "description": "Single direct live VVenC CQF output only. 0 disables; 1..4 enables bounded pending-AU progress and rejects an AU released with more than this number of submitted newer encoding pictures. Not an encoder CPU deadline."
+            "description": "R28 uses a bound of 10 newer submitted pictures per released AU. Other live VVenC profiles accept 0 through 4."
           },
           "frame_log_every": {
             "type": "integer",
@@ -1608,6 +1611,29 @@
             "minimum": 100,
             "maximum": 60000,
             "default": 1000
+          },
+          "encoder_parallel_frames": {
+            "type": "integer",
+            "enum": [
+              4,
+              8
+            ],
+            "default": 4,
+            "description": "Parallel picture slots in an R28 direct output."
+          },
+          "rate_burst_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000,
+            "default": 300,
+            "description": "Short-term rate tolerance in milliseconds for R28."
+          },
+          "rate_static_gop_credit_pct": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "default": 0,
+            "description": "Percentage of already written bits that will leave the five-second window before the next known refresh, credited when planning a quiet GOP. Each AU uses its current budget. Set per job."
           }
         },
         "allOf": [
@@ -1683,6 +1709,62 @@
                 }
               }
             }
+          },
+          {
+            "if": {
+              "required": [
+                "encoder_profile"
+              ],
+              "properties": {
+                "encoder_profile": {
+                  "enum": [
+                    "r28_live",
+                    "r28_quality"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "encoder",
+                "rate_control",
+                "maxrate",
+                "output"
+              ],
+              "properties": {
+                "encoder": {
+                  "const": "libvvenc"
+                },
+                "rate_control": {
+                  "const": "constrained_crf"
+                },
+                "encoder_threads": {
+                  "minimum": 2
+                },
+                "encoder_max_future_frames": {
+                  "const": 10
+                },
+                "output_fps": {
+                  "const": 30
+                },
+                "source_rate_limit": {
+                  "const": false
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "rate_static_gop_credit_pct": false,
+                "encoder_parallel_frames": false,
+                "rate_burst_ms": false,
+                "encoder_threads": {
+                  "maximum": 16
+                },
+                "encoder_max_future_frames": {
+                  "maximum": 4
+                }
+              }
+            }
           }
         ]
       },
@@ -1713,7 +1795,13 @@
             "$ref": "#/components/schemas/JobConfig/properties/encoder_preset"
           },
           "encoder_profile": {
-            "$ref": "#/components/schemas/JobConfig/properties/encoder_profile"
+            "$ref": "#/components/schemas/JobConfig/properties/encoder_profile",
+            "not": {
+              "enum": [
+                "r28_live",
+                "r28_quality"
+              ]
+            }
           },
           "width": {
             "$ref": "#/components/schemas/JobConfig/properties/width"
@@ -1742,7 +1830,8 @@
             "$ref": "#/components/schemas/JobConfig/properties/output_fps"
           },
           "encoder_threads": {
-            "$ref": "#/components/schemas/JobConfig/properties/encoder_threads"
+            "$ref": "#/components/schemas/JobConfig/properties/encoder_threads",
+            "maximum": 16
           },
           "audio_copy": {
             "$ref": "#/components/schemas/JobConfig/properties/audio_copy"

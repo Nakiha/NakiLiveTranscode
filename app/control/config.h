@@ -26,7 +26,7 @@ typedef struct Config {
     int queue_capacity, encoder_threads, fps, pace;
     int frame_log, frame_log_every, slow_frame_ms;
     int network_trace,encoder_max_future_frames,rtmp_tcp_nodelay;
-    int encoder_parallel_frames, rate_burst_ms; /* R28 direct-output profiles */
+    int encoder_parallel_frames, rate_burst_ms, rate_static_gop_credit_pct; /* R28 direct-output profiles */
     int reader_queue_capacity,constrained_crf,source_rate_limit,decoder_pump,codec_trace;
     int decoder_early_output; /* -1=omitted legacy defaults; boolean override is independent of async/pump */
     int decoder_async,decoder_auto_threads; /* defaults true; auto applies only to async */

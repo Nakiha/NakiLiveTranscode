@@ -46,6 +46,7 @@ int naki_config_fingerprint(const Config *c,char out[65],char *error,size_t cap)
     if(c->network_trace) {I(network_trace);}
     if(c->rtmp_tcp_nodelay) {I(rtmp_tcp_nodelay);}
     if(c->encoder_parallel_frames) {I(encoder_parallel_frames);I(rate_burst_ms);}
+    if(c->rate_static_gop_credit_pct) {I(rate_static_gop_credit_pct);}
     if(c->encoder_max_future_frames) {I(encoder_max_future_frames);}
 #undef I
     yyjson_mut_val *policy=yyjson_mut_obj(d),*levels=yyjson_mut_arr(d);

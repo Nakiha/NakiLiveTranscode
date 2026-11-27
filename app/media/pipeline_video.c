@@ -240,6 +240,10 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
         av_dict_set_int(&options,"live-r28-tier",!strcmp(cfg->encoder_profile,"r28_live")?1:2,0);
         av_dict_set_int(&options,"live-r28-pictures",cfg->encoder_parallel_frames,0);
         av_dict_set_int(&options,"live-r28-burst-ms",cfg->rate_burst_ms,0);
+        if(cfg->rate_static_gop_credit_pct) {
+            ret=av_dict_set_int(&options,"live-r28-static-gop-credit-pct",cfg->rate_static_gop_credit_pct,0);
+            if(ret<0) {av_dict_free(&options);return ret;}
+        }
     } else if (vvc && strcmp(cfg->encoder_profile,"reference")) {
         int temporal_filter=strcmp(cfg->encoder_profile,"live_3b_2s_no_mctf")!=0;
         intra_frames=p->output_rate.nominal_gop_frames;
@@ -325,6 +329,7 @@ int pipeline_open_output(Pipeline *p, AVFrame *frame) {
         if(cfg->encoder_parallel_frames) {
             json_int(doc,"encoder_parallel_frames",cfg->encoder_parallel_frames);
             json_int(doc,"rate_burst_ms",cfg->rate_burst_ms);
+            json_int(doc,"rate_static_gop_credit_pct",cfg->rate_static_gop_credit_pct);
         } else json_str(doc,"vvenc_params",vvenc_params);
         json_int(doc,"rate_control_intra_period_frames",intra_frames);
         json_str(doc,"keyframe_schedule",cfg->policy.intra?"frame_policy":pts_gop?"pts_grid":"reference_frames");
